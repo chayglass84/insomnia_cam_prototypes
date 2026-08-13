@@ -7,6 +7,7 @@ import { projectLock } from '~/common/project';
 import { invariant } from '~/common/utils/invariant';
 import { AnalyticsEvent } from '~/ui/analytics';
 import { showToast } from '~/ui/components/toast-notification';
+import { promptAndFixOldFormatDocumentsInProject } from '~/ui/old-format-collection-migration';
 import { createFetcherSubmitHook } from '~/ui/utils/router';
 
 import type { Route } from './+types/organization.$organizationId.project.new';
@@ -95,6 +96,12 @@ const createProjectImpl = async (organizationId: string, newProjectData: CreateP
       }
       reportGitProjectCount(organizationId, sessionId);
 
+      // INS-3528: check for/prompt to fix old-format documents in the newly-opened repo
+      // directory. Not awaited — the prompt waits on the user, shouldn't block this return.
+      if (projectId) {
+        promptAndFixOldFormatDocumentsInProject(projectId);
+      }
+
       return projectId;
     }
 
@@ -113,6 +120,12 @@ const createProjectImpl = async (organizationId: string, newProjectData: CreateP
       throw new Error(errors.join(', '));
     }
     reportGitProjectCount(organizationId, sessionId);
+
+    // INS-3528: check for/prompt to fix old-format documents in the freshly-cloned project.
+    // Not awaited — the prompt waits on the user, shouldn't block this return.
+    if (projectId) {
+      promptAndFixOldFormatDocumentsInProject(projectId);
+    }
 
     return projectId;
   }

@@ -16,6 +16,10 @@ export interface BaseWorkspace {
   certificates?: any; // deprecated
   scope: 'design' | 'collection' | 'mock-server' | 'environment' | 'mcp';
   konnectServiceId?: string | null;
+  // INS-3528: on a 'design' workspace, the id of the standalone 'collection' workspace generated from it (if any).
+  linkedCollectionId?: string | null;
+  // INS-3528: on a 'collection' workspace, the id of the 'design' workspace it was generated from (if any).
+  linkedDocumentId?: string | null;
 }
 
 export type WorkspaceScope = BaseWorkspace['scope'];
@@ -32,7 +36,7 @@ export type Workspace = BaseModel & BaseWorkspace;
 
 export const isWorkspace = (model: Pick<BaseModel, 'type'>): model is Workspace => model.type === type;
 
-export const optionalKeys = ['konnectServiceId'];
+export const optionalKeys = ['konnectServiceId', 'linkedCollectionId', 'linkedDocumentId'];
 export const isWorkspaceId = (id?: string | null) => id?.startsWith(prefix + '_');
 
 export const isDesign = (workspace: Pick<Workspace, 'scope'>) => workspace.scope === WorkspaceScopeKeys.design;

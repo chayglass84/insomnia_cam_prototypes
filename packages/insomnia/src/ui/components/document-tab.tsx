@@ -13,7 +13,7 @@ export const DocumentTab = ({ organizationId, projectId, workspaceId, className 
     <nav className={`flex h-[40px] w-full items-center ${className} justify-around px-1`}>
       {[
         { id: 'spec', name: 'Spec' },
-        { id: 'debug', name: 'Collection' },
+        // INS-3528: Collection is no longer nested under the Document — hidden here.
         { id: 'test', name: 'Tests' },
       ].map(item => (
         <NavLink

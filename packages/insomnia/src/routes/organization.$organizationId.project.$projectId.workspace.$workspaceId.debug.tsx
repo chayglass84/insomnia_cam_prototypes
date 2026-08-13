@@ -38,7 +38,7 @@ import {
   useDragAndDrop,
 } from 'react-aria-components';
 import { type ImperativePanelGroupHandle, Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
-import { href, redirect, useFetchers, useMatch, useParams, useSearchParams } from 'react-router';
+import { href, redirect, useFetchers, useMatch, useNavigate, useParams, useSearchParams } from 'react-router';
 import * as reactUse from 'react-use';
 
 import { DEFAULT_SIDEBAR_SIZE, getProductName, SORT_ORDERS, type SortOrder, sortOrderName } from '~/common/constants';
@@ -237,6 +237,7 @@ const Debug = () => {
     requestGroupId?: string;
     panel?: string;
   };
+  const navigate = useNavigate();
 
   const isRunner = Boolean(
     useMatch('/organization/:organizationId/project/:projectId/workspace/:workspaceId/debug/runner'),
@@ -783,6 +784,28 @@ const Debug = () => {
         {/* Hide tabs when it's on the tutorial panel */}
         {!panel && <OrganizationTabList currentPage="debug" />}
         {!panel && <WorkspacePaneHeader hasSettings />}
+        {/* INS-3528: link back to the document this collection was generated from, if any */}
+        {!panel && models.workspace.isCollection(activeWorkspace) && activeWorkspace.linkedDocumentId && (
+          <div className="flex h-[40px] shrink-0 items-center gap-2 overflow-hidden border-b border-solid border-(--hl-md) px-(--padding-sm)">
+            <span className="flex-1" />
+            <Button
+              aria-label="View source document"
+              onPress={() =>
+                navigate(
+                  href('/organization/:organizationId/project/:projectId/workspace/:workspaceId/spec', {
+                    organizationId,
+                    projectId,
+                    workspaceId: activeWorkspace.linkedDocumentId!,
+                  }),
+                )
+              }
+              className="flex shrink-0 items-center justify-center gap-2 rounded-md border border-solid border-(--hl-md) px-2.5 py-1 text-sm text-(--color-font) ring-1 ring-transparent transition-all hover:bg-(--hl-xs) focus:ring-(--hl-md) focus:ring-inset aria-pressed:bg-(--hl-sm)"
+            >
+              <Icon icon="file" className="w-2.5 text-(--hl)" />
+              <span>View source document</span>
+            </Button>
+          </div>
+        )}
       </div>
       <PanelGroup
         ref={sidebarPanelRef}

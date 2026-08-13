@@ -8,6 +8,7 @@ import { invariant } from '~/common/utils/invariant';
 import { reportGitProjectCount } from '~/routes/organization.$organizationId.project.new';
 import { AnalyticsEvent } from '~/ui/analytics';
 import { showToast } from '~/ui/components/toast-notification';
+import { promptAndFixOldFormatDocumentsInProject } from '~/ui/old-format-collection-migration';
 import { createFetcherSubmitHook } from '~/ui/utils/router';
 
 import type { Route } from './+types/organization.$organizationId.project.$projectId.update';
@@ -298,6 +299,10 @@ export async function clientAction({ request, params }: Route.ClientActionArgs) 
             error: errors.join(', '),
           };
         }
+
+        // INS-3528: check for/prompt to fix old-format documents in the freshly-cloned project.
+        // Not awaited — the prompt waits on the user, shouldn't block this return.
+        promptAndFixOldFormatDocumentsInProject(project._id);
       }
 
       reportGitProjectCount(organizationId, sessionId);

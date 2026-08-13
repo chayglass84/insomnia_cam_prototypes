@@ -1,6 +1,7 @@
 import { href, redirect } from 'react-router';
 
 import { invariant } from '~/common/utils/invariant';
+import { promptAndFixOldFormatDocumentsInProject } from '~/ui/old-format-collection-migration';
 import { createFetcherSubmitHook } from '~/ui/utils/router';
 
 import type { Route } from './+types/git.clone';
@@ -28,6 +29,10 @@ export async function clientAction({ request }: Route.ClientActionArgs) {
   }
 
   invariant(projectId, 'Project ID is required');
+
+  // INS-3528: check for/prompt to fix old-format documents in the freshly-cloned project.
+  // Not awaited — the prompt is a modal that waits on the user, and shouldn't block this redirect.
+  promptAndFixOldFormatDocumentsInProject(projectId);
 
   return redirect(
     href(`/organization/:organizationId/project/:projectId`, {

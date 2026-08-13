@@ -28,7 +28,7 @@ import {
   PanelGroup,
   PanelResizeHandle,
 } from 'react-resizable-panels';
-import { href, redirect, useLoaderData } from 'react-router';
+import { href, redirect, useLoaderData, useNavigate } from 'react-router';
 import * as reactUse from 'react-use';
 import { SwaggerUIBundle } from 'swagger-ui-dist';
 import YAML from 'yaml';
@@ -202,7 +202,8 @@ const lintOptions = {
 
 const Component = ({ params }: Route.ComponentProps) => {
   const { organizationId, projectId, workspaceId } = params;
-  const { activeProject, vcsVersion } = useWorkspaceLoaderData()!;
+  const { activeProject, activeWorkspace, vcsVersion } = useWorkspaceLoaderData()!;
+  const navigate = useNavigate();
   const { settings } = useRootLoaderData()!;
 
   const [isCookieModalOpen, setIsCookieModalOpen] = useState(false);
@@ -688,6 +689,25 @@ const Component = ({ params }: Route.ComponentProps) => {
         {parsedSpec?.openapi ? `OpenAPI ${parsedSpec.openapi}` : ''}
       </span>
       <span className="flex-1" />
+      {/* INS-3528: link to the standalone collection generated from this document, if any */}
+      {activeWorkspace.linkedCollectionId && (
+        <Button
+          aria-label="View linked collection"
+          onPress={() =>
+            navigate(
+              href('/organization/:organizationId/project/:projectId/workspace/:workspaceId/debug', {
+                organizationId,
+                projectId,
+                workspaceId: activeWorkspace.linkedCollectionId!,
+              }),
+            )
+          }
+          className="flex shrink-0 items-center justify-center gap-2 rounded-md border border-solid border-(--hl-md) px-2.5 py-1 text-sm text-(--color-font) ring-1 ring-transparent transition-all hover:bg-(--hl-xs) focus:ring-(--hl-md) focus:ring-inset aria-pressed:bg-(--hl-sm)"
+        >
+          <Icon icon="bars" className="w-2.5 text-(--hl)" />
+          <span>View linked collection</span>
+        </Button>
+      )}
       <MenuTrigger>
         <Button
           aria-label="Generate"

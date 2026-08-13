@@ -50,6 +50,7 @@ import { AppHooks } from '~/ui/containers/app-hooks';
 import { ServerDataCacheProvider } from '~/ui/context/app/server-data-context';
 import cssHref from '~/ui/css/styles.css?url';
 import Modals from '~/ui/modals';
+import { promptAndFixOldFormatDocuments } from '~/ui/old-format-collection-migration';
 import { createPlugin } from '~/ui/plugins/create';
 import { setTheme } from '~/ui/plugins/misc';
 import { plugins } from '~/ui/plugins/renderer-bridge';
@@ -734,6 +735,14 @@ const Root = () => {
         }
       });
     });
+  }, []);
+
+  // INS-3528: on startup, detect Documents still using the old embedded-collection format
+  // (in git-backed projects) and prompt to fix + commit them. This isn't skippable — there's
+  // no "Later" option, since old-format documents aren't something the user is meant to opt
+  // out of — but it's never silent either; see ui/old-format-collection-migration.ts.
+  useEffect(() => {
+    promptAndFixOldFormatDocuments();
   }, []);
 
   return (

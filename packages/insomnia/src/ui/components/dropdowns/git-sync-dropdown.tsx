@@ -22,6 +22,7 @@ import { useGitProjectRepoFetcher } from '~/routes/git.repo';
 import { useGitProjectResetActionFetcher } from '~/routes/git.reset';
 import { useGitProjectStatusActionFetcher } from '~/routes/git.status';
 import { getOauth2FormatName } from '~/sync/git/get-oauth2-format-name';
+import { promptAndFixOldFormatDocumentsInProject } from '~/ui/old-format-collection-migration';
 
 import type { MergeConflict } from '../../../sync/types';
 import { ConfigLink } from '../github-app-config-link';
@@ -73,6 +74,15 @@ export const GitSyncDropdown: FC<Props> = ({ gitRepository, isInsomniaSyncEnable
       });
     }
   }, [gitRepoDataFetcher, gitRepository?.uri, gitRepository?._id, organizationId, projectId, workspaceId]);
+
+  useEffect(() => {
+    // INS-3528: the repo's files are only actually cloned/imported the first time this data
+    // loads (e.g. right after connecting a repo) — check for/prompt to fix old-format
+    // documents once that's happened.
+    if (gitRepoDataFetcher.data && !('errors' in gitRepoDataFetcher.data)) {
+      promptAndFixOldFormatDocumentsInProject(projectId);
+    }
+  }, [gitRepoDataFetcher.data, projectId]);
 
   // Only fetch the repo status if we have a repo uri and we don't have the status already
   const shouldFetchGitRepoStatus = Boolean(
@@ -194,6 +204,11 @@ export const GitSyncDropdown: FC<Props> = ({ gitRepository, isInsomniaSyncEnable
               await window.main.git
                 .pullFromGitRemote({ projectId, workspaceId })
                 .then(result => {
+                  if (!('errors' in result && result.errors) && !('conflicts' in result)) {
+                    // INS-3528: check for/prompt to fix old-format documents that may have just landed on disk
+                    promptAndFixOldFormatDocumentsInProject(projectId);
+                  }
+
                   if ('errors' in result && result.errors) {
                     showModal(AlertModal, {
                       title: 'Pull Failed',

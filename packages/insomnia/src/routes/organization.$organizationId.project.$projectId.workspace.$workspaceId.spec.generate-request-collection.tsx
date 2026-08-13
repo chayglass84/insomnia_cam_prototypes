@@ -2,6 +2,7 @@ import type { IRuleResult } from '@stoplight/spectral-core';
 import { services } from 'insomnia-data';
 import { href, redirect } from 'react-router';
 
+import { createLinkedCollectionWorkspace } from '~/common/generate-linked-collection';
 import { importResourcesToWorkspace, scanResources } from '~/common/import';
 import { invariant } from '~/common/utils/invariant';
 import { AnalyticsEvent } from '~/ui/analytics';
@@ -46,8 +47,12 @@ export async function clientAction({ params }: Route.ClientActionArgs) {
     },
   ]);
 
+  // INS-3528: generate into a new, real standalone collection workspace instead of importing
+  // requests onto the Document's own workspace (the old, incorrect behavior).
+  const collectionWorkspace = await createLinkedCollectionWorkspace(workspace, project);
+
   await importResourcesToWorkspace({
-    workspaceId,
+    workspaceId: collectionWorkspace._id,
   });
 
   window.main.trackAnalyticsEvent({
@@ -61,7 +66,7 @@ export async function clientAction({ params }: Route.ClientActionArgs) {
     href('/organization/:organizationId/project/:projectId/workspace/:workspaceId/debug', {
       organizationId,
       projectId,
-      workspaceId,
+      workspaceId: collectionWorkspace._id,
     }),
   );
 }

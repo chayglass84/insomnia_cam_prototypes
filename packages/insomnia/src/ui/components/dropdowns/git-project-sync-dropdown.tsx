@@ -29,6 +29,7 @@ import { ProjectModal } from '~/ui/components/modals/project-modal';
 import { showSettingsModal } from '~/ui/components/modals/settings-modal';
 import { useGitCredentials } from '~/ui/hooks/use-git-credentials';
 import { useLoaderDeferData } from '~/ui/hooks/use-loader-defer-data';
+import { promptAndFixOldFormatDocumentsInProject } from '~/ui/old-format-collection-migration';
 import { DEFAULT_STORAGE_RULES } from '~/ui/organization-utils';
 import { resolveGitRepoBaseDir } from '~/ui/utils/git-repo-path';
 
@@ -147,6 +148,15 @@ export const GitProjectSyncDropdown: FC<Props> = ({ gitRepository, activeProject
       setIsMigrationModalOpen(true);
     }
   }, [gitRepoDataFetcher.data]);
+
+  useEffect(() => {
+    // INS-3528: the repo's files are only actually cloned/imported the first time this data
+    // loads (e.g. right after connecting a repo to this project) — check for/prompt to fix
+    // old-format documents once that's happened.
+    if (gitRepoDataFetcher.data && !('errors' in gitRepoDataFetcher.data)) {
+      promptAndFixOldFormatDocumentsInProject(projectId);
+    }
+  }, [gitRepoDataFetcher.data, projectId]);
 
   useEffect(() => {
     if (shouldFetchGitRepoStatus) {
@@ -437,6 +447,9 @@ export const GitProjectSyncDropdown: FC<Props> = ({ gitRepository, activeProject
                 commitParent: pullResult.commitParent,
               })
               .then(() => {
+                // INS-3528: check for/prompt to fix old-format documents that may have just landed on disk
+                promptAndFixOldFormatDocumentsInProject(projectId);
+
                 showToast({
                   icon,
                   title: 'Resolved merge conflicts, pull completed',
@@ -478,6 +491,9 @@ export const GitProjectSyncDropdown: FC<Props> = ({ gitRepository, activeProject
           success: false,
         };
       } else {
+        // INS-3528: check for/prompt to fix old-format documents that may have just landed on disk
+        promptAndFixOldFormatDocumentsInProject(projectId);
+
         setIsPulling(false);
         showToast({
           icon,
