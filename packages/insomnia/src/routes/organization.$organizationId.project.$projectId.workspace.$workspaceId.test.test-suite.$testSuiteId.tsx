@@ -516,12 +516,12 @@ const Component = () => {
         </div>
       )}
       <div className="mb-4 w-full items-center gap-4 rounded-lg border border-solid border-[rgba(var(--color-warning-rgb),1)] bg-(--color-bg) px-3 py-2 text-sm text-wrap text-[rgba(var(--color-warning-rgb),1)] shadow-lg outline-hidden">
-        Some time in 2026, unit tests will be deprecated in favour of{' '}
+        Unit tests are a legacy feature. Best practice is to migrate away from these tests in favour of testing in{' '}
         <Link className="cursor-pointer text-(--color-surprise)" href="https://developer.konghq.com/insomnia/scripts/">
-          pre-request and after-response scripts.
+          post-response scripts,
         </Link>{' '}
-        Exact timelines and how to migrate will be communicated well in advance. For now, we advise switching to scripts
-        where possible.
+        but we have no plans to remove these legacy tests from the product and will provide 90 days notice if we ever
+        change our mind.
       </div>
       {unitTests.length > 0 && (
         <GridList

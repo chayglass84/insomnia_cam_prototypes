@@ -44,6 +44,7 @@ export function init(): BaseSettings {
     editorLineWrapping: true,
     enableAnalytics: true,
     showVariableSourceAndValue: false,
+    enableLegacyUnitTests: false,
     filterResponsesByEnv: false,
     followRedirects: true,
     fontInterface: null,

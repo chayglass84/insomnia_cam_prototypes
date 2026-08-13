@@ -151,6 +151,8 @@ export interface Settings {
   /** How far the configured proxy reaches — see `ProxyScope`. */
   proxyScope: ProxyScope;
   showVariableSourceAndValue: boolean;
+  /** INS-3528: shows the legacy unit-testing UI (Tests tab, Spec/Tests switcher). Defaults off; auto-enabled at startup if legacy UnitTestSuites are found, and stays on until manually disabled. */
+  enableLegacyUnitTests: boolean;
   lightTheme: string;
   lineWrapping?: boolean;
   maxHistoryResponses: number;

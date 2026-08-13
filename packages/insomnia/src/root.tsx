@@ -49,6 +49,7 @@ import { showToast, Toaster } from '~/ui/components/toast-notification';
 import { AppHooks } from '~/ui/containers/app-hooks';
 import { ServerDataCacheProvider } from '~/ui/context/app/server-data-context';
 import cssHref from '~/ui/css/styles.css?url';
+import { enableLegacyUnitTestsIfPresent } from '~/ui/legacy-unit-tests-check';
 import Modals from '~/ui/modals';
 import { promptAndFixOldFormatDocuments } from '~/ui/old-format-collection-migration';
 import { createPlugin } from '~/ui/plugins/create';
@@ -743,6 +744,12 @@ const Root = () => {
   // out of — but it's never silent either; see ui/old-format-collection-migration.ts.
   useEffect(() => {
     promptAndFixOldFormatDocuments();
+  }, []);
+
+  // INS-3528: unit tests are legacy and hidden by default; auto-enable the setting on startup
+  // if the user already has UnitTestSuites, so their existing tests stay visible.
+  useEffect(() => {
+    enableLegacyUnitTestsIfPresent();
   }, []);
 
   return (
