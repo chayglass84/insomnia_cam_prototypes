@@ -54,8 +54,7 @@ test.describe('Focus and keyboard navigation', () => {
 
     await page.getByRole('button', { name: 'Manage Environments' }).click();
     await page.getByRole('button', { name: 'Manage collection environments' }).click();
-    await page.getByTestId('CreateEnvironmentDropdown').click();
-    await page.getByRole('menuitemradio', { name: 'Shared Environment' }).press('Enter');
+    await page.getByTestId('AddSubEnvironment').click();
 
     // New environments default to KV mode, so selecting the new (empty) environment renders the KV
     // editor whose trailing blank row's Name should be focused.

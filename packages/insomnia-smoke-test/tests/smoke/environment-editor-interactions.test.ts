@@ -18,8 +18,7 @@ test.describe('Environment Editor', () => {
     // create a new shared environment (becomes active on creation)
     await page.getByRole('button', { name: 'Manage Environments' }).click();
     await page.getByRole('button', { name: 'Manage collection environments' }).click();
-    await page.getByTestId('CreateEnvironmentDropdown').click();
-    await page.getByRole('menuitemradio', { name: 'Shared Environment' }).press('Enter');
+    await page.getByTestId('AddSubEnvironment').click();
 
     // wait for the new row to appear before clicking it
     await page.getByRole('row', { name: 'New Environment' }).waitFor({ state: 'visible' });

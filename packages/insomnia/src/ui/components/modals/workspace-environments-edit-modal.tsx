@@ -16,7 +16,6 @@ import {
   Modal,
   ModalOverlay,
   Popover,
-  Text,
   ToggleButton,
   useDragAndDrop,
 } from 'react-aria-components';
@@ -29,6 +28,7 @@ import { useEnvironmentCreateActionFetcher } from '~/routes/organization.$organi
 import { useEnvironmentDeleteActionFetcher } from '~/routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.environment.delete';
 import { useEnvironmentDuplicateActionFetcher } from '~/routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.environment.duplicate';
 import { useEnvironmentUpdateActionFetcher } from '~/routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.environment.update';
+import { Tooltip } from '~/ui/components/tooltip';
 import { useToggleEnvironmentType } from '~/ui/hooks/use-toggle-environment-type';
 
 import { docsAfterResponseScript, docsTemplateTags } from '../../../common/documentation';
@@ -135,7 +135,7 @@ export const WorkspaceEnvironmentsEditModal = ({ onClose }: { onClose: () => voi
   }[] = [
     {
       id: 'shared',
-      name: 'Shared environment',
+      name: 'Add Sub Environment',
       description: `${isUsingGitSync ? 'Synced with Git Sync and exportable' : isUsingInsomniaCloudSync ? 'Synced with Insomnia Sync and exportable' : 'Exportable'}`,
       icon: isUsingGitSync ? ['fab', 'git-alt'] : isUsingInsomniaCloudSync ? 'globe-americas' : 'file-arrow-down',
       action: async () => {
@@ -152,7 +152,7 @@ export const WorkspaceEnvironmentsEditModal = ({ onClose }: { onClose: () => voi
     },
     {
       id: 'private',
-      name: 'Private environment',
+      name: 'Add Private Sub Environment',
       description: 'Local and not exportable',
       icon: 'lock',
       action: async () => {
@@ -276,11 +276,27 @@ export const WorkspaceEnvironmentsEditModal = ({ onClose }: { onClose: () => voi
                 </Button>
               </div>
               <div className="flex w-full flex-1 basis-96 divide-x divide-solid divide-(--hl-md) overflow-hidden overflow-y-auto rounded-sm border border-solid border-(--hl-sm) select-none">
-                <GridList
-                  aria-label="Environments"
-                  items={[baseEnvironment, ...subEnvironments]}
-                  className="w-full max-w-xs shrink-0 overflow-y-auto py-(--padding-xs) data-empty:py-0"
-                  disallowEmptySelection
+                <div className="flex w-full max-w-xs shrink-0 flex-col overflow-hidden">
+                  <div className="flex shrink-0 items-center gap-1 border-b border-solid border-(--hl-sm) p-1">
+                    {createEnvironmentActionsList.map(action => (
+                      <Tooltip key={action.id} position="bottom" message={action.description}>
+                        <Button
+                          aria-label={action.name}
+                          data-testid={action.id === 'private' ? 'AddPrivateSubEnvironment' : 'AddSubEnvironment'}
+                          onPress={() => action.action(baseEnvironment)}
+                          className="flex flex-1 items-center justify-center gap-1 rounded-xs px-2 py-1 text-xs whitespace-nowrap text-(--color-font) ring-1 ring-transparent transition-all hover:bg-(--hl-xs) focus:ring-(--hl-md) focus:ring-inset"
+                        >
+                          <Icon className="w-3.5" icon={action.icon} />
+                          <span className="truncate">{action.name}</span>
+                        </Button>
+                      </Tooltip>
+                    ))}
+                  </div>
+                  <GridList
+                    aria-label="Environments"
+                    items={[baseEnvironment, ...subEnvironments]}
+                    className="w-full flex-1 overflow-y-auto py-(--padding-xs) data-empty:py-0"
+                    disallowEmptySelection
                   selectionMode="single"
                   selectionBehavior="replace"
                   selectedKeys={[selectedEnvironmentId]}
@@ -370,50 +386,12 @@ export const WorkspaceEnvironmentsEditModal = ({ onClose }: { onClose: () => voi
                               </Popover>
                             </MenuTrigger>
                           )}
-                          {item.parentId === workspaceId && (
-                            <MenuTrigger>
-                              <Button
-                                aria-label="Create Environment"
-                                data-testid="CreateEnvironmentDropdown"
-                                className="flex aspect-square h-6 items-center justify-center rounded-xs text-sm text-(--color-font) ring-1 ring-transparent transition-all hover:bg-(--hl-xs) focus:ring-(--hl-md) focus:ring-inset data-pressed:bg-(--hl-sm)"
-                              >
-                                <Icon icon="plus-circle" />
-                              </Button>
-                              <Popover className="flex min-w-max flex-col overflow-y-hidden">
-                                <Menu
-                                  aria-label="Create Environment menu"
-                                  selectionMode="single"
-                                  onAction={key => {
-                                    createEnvironmentActionsList.find(({ id }) => key === id)?.action(item);
-                                  }}
-                                  items={createEnvironmentActionsList}
-                                  className="min-w-max overflow-y-auto rounded-md border border-solid border-(--hl-sm) bg-(--color-bg) py-2 text-sm shadow-lg select-none focus:outline-hidden"
-                                >
-                                  {item => (
-                                    <MenuItem
-                                      key={item.id}
-                                      id={item.id}
-                                      className="flex w-full flex-col gap-1 bg-transparent px-(--padding-md) py-2 whitespace-nowrap text-(--color-font) transition-colors hover:bg-(--hl-sm) focus:bg-(--hl-xs) focus:outline-hidden disabled:cursor-not-allowed aria-selected:font-bold"
-                                      aria-label={item.name}
-                                    >
-                                      <div className="flex items-center gap-2">
-                                        <Icon className="w-5" icon={item.icon} />
-                                        <span>{item.name}</span>
-                                      </div>
-                                      <Text slot="description" className="text-xs text-(--hl)">
-                                        {item.description}
-                                      </Text>
-                                    </MenuItem>
-                                  )}
-                                </Menu>
-                              </Popover>
-                            </MenuTrigger>
-                          )}
                         </div>
                       </GridListItem>
                     );
                   }}
-                </GridList>
+                  </GridList>
+                </div>
                 <div className="flex flex-1 flex-col divide-y divide-solid divide-(--hl-md) overflow-hidden">
                   <div className="flex w-full items-center justify-between gap-2 overflow-hidden px-(--padding-sm)">
                     <Heading className="flex grow items-center gap-2 overflow-hidden px-4 py-2 text-lg">
