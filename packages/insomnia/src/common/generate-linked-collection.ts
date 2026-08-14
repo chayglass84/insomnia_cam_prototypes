@@ -128,17 +128,3 @@ export async function migrateDocumentToLinkedCollection(documentWorkspace: Works
 
   return collectionWorkspace;
 }
-
-// INS-3528 PROTOTYPE SHORTCUT: real implementation should stage the specific changed files
-// (via window.main.stageChanges) and commit (via window.main.commitToGitRepo) per project.
-// Computing the right file set for a prototype is disproportionate effort, so this would just
-// log/toast as if the commit happened. See INS-3528.md "known shortcuts".
-//
-// INS-3528 TESTING: intentionally disabled (commented out below) for now, so the same test
-// fixture/repo can be reopened and re-run repeatedly without git state changing underneath it.
-// Uncomment before this goes to a real implementation.
-export async function commitMigratedChangesForProject(_project: Project) {
-  // console.warn(
-  //   `[INS-3528 prototype] Would stage and commit collection-format migration changes for project ${_project._id} here.`,
-  // );
-}

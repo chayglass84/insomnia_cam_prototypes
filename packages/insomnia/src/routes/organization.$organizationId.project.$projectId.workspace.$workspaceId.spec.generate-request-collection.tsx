@@ -6,6 +6,7 @@ import { createLinkedCollectionWorkspace } from '~/common/generate-linked-collec
 import { importResourcesToWorkspace, scanResources } from '~/common/import';
 import { invariant } from '~/common/utils/invariant';
 import { AnalyticsEvent } from '~/ui/analytics';
+import { commitMigratedChangesForProject } from '~/ui/commit-linked-collection-changes';
 import { createFetcherSubmitHook } from '~/ui/utils/router';
 
 import type { Route } from './+types/organization.$organizationId.project.$projectId.workspace.$workspaceId.spec.generate-request-collection';
@@ -54,6 +55,10 @@ export async function clientAction({ params }: Route.ClientActionArgs) {
   await importResourcesToWorkspace({
     workspaceId: collectionWorkspace._id,
   });
+
+  // INS-3528: commit the new collection's files so linkedCollectionId/linkedDocumentId
+  // survive the next git repo reimport instead of being reparsed away.
+  await commitMigratedChangesForProject(project);
 
   window.main.trackAnalyticsEvent({
     event: AnalyticsEvent.generateCollection,

@@ -26,7 +26,7 @@ import {
   RadioGroup,
   SubmenuTrigger,
 } from 'react-aria-components';
-import { href } from 'react-router';
+import { href, useNavigate } from 'react-router';
 
 import { database as db } from '~/common/database';
 import type { SerializableActionMeta } from '~/common/plugins/bridge-types';
@@ -106,6 +106,7 @@ export const SidebarWorkspaceDropdown = ({
   const newRequestGroupFetcher = useRequestGroupNewActionFetcher();
 
   const tabNavigate = useTabNavigate();
+  const navigate = useNavigate();
 
   const workspaceName = workspace.name;
   const projectName = project.name || getProductName();
@@ -217,6 +218,42 @@ export const SidebarWorkspaceDropdown = ({
         icon: 'circle-play',
         action: () => openInNewTab(true),
       },
+      // INS-3528: jump to the standalone collection generated from this document, if any
+      ...(isDesign && workspace.linkedCollectionId
+        ? [
+            {
+              id: 'ViewLinkedCollection',
+              name: 'View Collection',
+              icon: 'bars' as IconName,
+              action: () =>
+                navigate(
+                  href('/organization/:organizationId/project/:projectId/workspace/:workspaceId/debug', {
+                    organizationId,
+                    projectId,
+                    workspaceId: workspace.linkedCollectionId!,
+                  }),
+                ),
+            },
+          ]
+        : []),
+      // INS-3528: jump back to the document this collection was generated from, if any
+      ...(isCollection && workspace.linkedDocumentId
+        ? [
+            {
+              id: 'ViewSourceDocument',
+              name: 'View Document',
+              icon: 'file' as IconName,
+              action: () =>
+                navigate(
+                  href('/organization/:organizationId/project/:projectId/workspace/:workspaceId/spec', {
+                    organizationId,
+                    projectId,
+                    workspaceId: workspace.linkedDocumentId!,
+                  }),
+                ),
+            },
+          ]
+        : []),
     ],
   };
 

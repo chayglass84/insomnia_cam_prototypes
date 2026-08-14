@@ -1,12 +1,12 @@
 import { services } from 'insomnia-data';
 
 import {
-  commitMigratedChangesForProject,
   findOldFormatDocumentWorkspaces,
   findOldFormatDocumentWorkspacesInProject,
   migrateDocumentToLinkedCollection,
   type OldFormatDocument,
 } from '~/common/generate-linked-collection';
+import { commitMigratedChangesForProject } from '~/ui/commit-linked-collection-changes';
 import { showModal } from '~/ui/components/modals';
 import { AlertModal } from '~/ui/components/modals/alert-modal';
 import { showToast } from '~/ui/components/toast-notification';
