@@ -22,6 +22,8 @@ import uiEventBus from '../event-bus';
 import { useOrganizationPermissions } from '../hooks/use-organization-features';
 import { Icon } from './icon';
 
+const triggerButtonClassName = 'flex max-w-48 shrink-0 items-center gap-1.5 truncate rounded-xs px-2 py-1 text-sm text-(--color-font) ring-1 ring-transparent transition-all hover:bg-(--hl-xs) focus:ring-(--hl-md) focus:ring-inset aria-pressed:bg-(--hl-sm) data-open:bg-(--hl-sm)';
+
 export const EnvironmentPicker = ({
   isOpen,
   onOpenChange,
@@ -73,6 +75,7 @@ export const EnvironmentPicker = ({
   const activeGlobalBaseEnvironment = selectedGlobalBaseEnvironment;
   const activeBaseEnvironment = baseEnvironment;
   const activeSubEnvironment = subEnvironments.find(e => e._id === activeEnvironment._id);
+  const activeCollectionEnvironmentName = activeSubEnvironment ? activeSubEnvironment.name : activeBaseEnvironment.name;
 
   const navigate = useNavigate();
 
@@ -112,53 +115,26 @@ export const EnvironmentPicker = ({
   ];
 
   return (
-    <DialogTrigger isOpen={isOpen} onOpenChange={onOpenChange}>
-      <Button
-        aria-label="Manage Environments"
-        className="flex max-w-full items-start gap-2 truncate rounded-xs px-2 py-1 text-sm text-(--color-font) ring-1 ring-transparent transition-all hover:bg-(--hl-xs) focus:ring-(--hl-md) focus:ring-inset aria-pressed:bg-(--hl-sm)"
-      >
-        {activeGlobalEnvironment && activeGlobalBaseEnvironment && (
-          <div className="flex w-full">
-            <div className="flex w-full items-center gap-2">
-              <Icon
-                icon={
-                  activeGlobalEnvironment.isPrivate
-                    ? 'lock'
-                    : isUsingGitSync
-                      ? ['fab', 'git-alt']
-                      : isUsingInsomniaCloudSync
-                        ? 'globe-americas'
-                        : 'file-arrow-down'
-                }
-                style={{ color: activeGlobalEnvironment.color || '' }}
-                className="w-5 shrink-0"
-              />
-              <Tooltip position="top" message="active global environment">
-                <span className="truncate">{activeGlobalEnvironment.name}</span>
-              </Tooltip>
-              <Icon icon="plus" className="w-3 shrink-0 text-(--hl)" />
-            </div>
-          </div>
-        )}
-        <div className="flex w-full flex-1 items-center gap-2">
+    <div className="flex items-center gap-1">
+      <DialogTrigger>
+        <Button aria-label="Select a Project Environment" className={triggerButtonClassName}>
           <Icon
-            icon={activeEnvironment.isPrivate ? 'lock' : 'code'}
-            style={{ color: activeEnvironment.color || '' }}
-            className="w-5 shrink-0"
+            icon={activeGlobalEnvironment ? (activeGlobalEnvironment.isPrivate ? 'lock' : getEnvironmentIcon(false)) : 'cancel'}
+            style={{ color: activeGlobalEnvironment?.color || '' }}
+            className="w-4 shrink-0"
           />
-          <Tooltip position="top" message="active collection environment">
+          <Tooltip position="top" message="Project environment, available to every collection in this project.">
             <span className="truncate">
-              {activeSubEnvironment ? activeSubEnvironment.name : activeBaseEnvironment.name}
+              {activeGlobalEnvironment && activeGlobalBaseEnvironment ? activeGlobalEnvironment.name : 'No Project Environment'}
             </span>
           </Tooltip>
-        </div>
-      </Button>
-      <Popover className="z-10! flex max-h-[90vh] min-w-max flex-col" placement="bottom start" offset={8}>
-        <Dialog className="grid h-full w-full auto-cols-[min(260px,calc(40vw))_min(260px,calc(40vw))] grid-flow-col divide-x divide-solid divide-(--hl-md) overflow-hidden rounded-md border border-solid border-(--hl-sm) bg-(--color-bg) text-sm shadow-lg select-none focus:outline-hidden">
-          <div className="relative flex h-full w-full flex-1 flex-col overflow-hidden">
+          <Icon icon="caret-down" className="w-2.5 shrink-0 text-(--hl)" />
+        </Button>
+        <Popover className="z-10! flex max-h-[90vh] min-w-64 flex-col" placement="bottom start" offset={8}>
+          <Dialog className="flex h-full w-full flex-col overflow-hidden rounded-md border border-solid border-(--hl-sm) bg-(--color-bg) text-sm shadow-lg select-none focus:outline-hidden">
             <Heading className="flex h-(--line-height-sm) shrink-0 items-center gap-2 px-3 py-1 text-sm font-bold text-(--hl)">
               <Tooltip position="top" message="Available to every collection in this project. Click the edit icon on a project environment to configure it.">
-                <span>Project Environments</span>
+                <span>Project Environment</span>
               </Tooltip>
             </Heading>
             <ListBox
@@ -219,82 +195,97 @@ export const EnvironmentPicker = ({
                 </ListBoxItem>
               )}
             </ListBox>
-            <div className="relative contents w-full overflow-hidden">
-              <Heading className="flex h-7 shrink-0 items-center justify-between gap-2 px-3 py-1 text-sm font-bold text-(--hl)">
-                <Tooltip position="top" message="Scoped to this collection only. Overrides project environment values.">
-                  <span>Collection Environments</span>
-                </Tooltip>
-                <Button
-                  onPress={onOpenEnvironmentSettingsModal}
-                  aria-label="Manage collection environments"
-                  className="flex aspect-square h-6 shrink-0 items-center justify-center rounded-xs text-sm text-(--color-font) ring-1 ring-transparent outline-hidden transition-all hover:bg-(--hl-xs) focus:ring-(--hl-md) focus:ring-inset aria-pressed:bg-(--hl-sm)"
-                >
-                  <Icon icon="edit" />
-                </Button>
-              </Heading>
-              <ListBox
-                aria-label="Select a Collection Environment"
-                selectionMode="single"
-                key={activeEnvironment._id}
-                items={collectionEnvironmentList}
-                selectedKeys={[activeEnvironment._id || baseEnvironment._id || '']}
-                disallowEmptySelection
-                onSelectionChange={keys => {
-                  if (keys === 'all' || !keys) {
-                    return;
-                  }
-                  const [environmentId] = keys.values();
-                  setActiveEnvironmentFetcher.submit({
-                    organizationId,
-                    projectId,
-                    workspaceId,
-                    environmentId: environmentId.toString(),
-                  });
-                  uiEventBus.emit('CHANGE_ACTIVE_ENV', workspaceId);
-                }}
-                className="max-h-fit flex-1 overflow-y-auto p-2 text-sm select-none focus:outline-hidden"
+          </Dialog>
+        </Popover>
+      </DialogTrigger>
+      <DialogTrigger isOpen={isOpen} onOpenChange={onOpenChange}>
+        <Button aria-label="Select a Collection Environment" className={triggerButtonClassName}>
+          <Icon
+            icon={activeEnvironment.isPrivate ? 'lock' : 'code'}
+            style={{ color: activeEnvironment.color || '' }}
+            className="w-4 shrink-0"
+          />
+          <Tooltip position="top" message="Collection environment, scoped to this collection only.">
+            <span className="truncate">{activeCollectionEnvironmentName}</span>
+          </Tooltip>
+          <Icon icon="caret-down" className="w-2.5 shrink-0 text-(--hl)" />
+        </Button>
+        <Popover className="z-10! flex max-h-[90vh] min-w-64 flex-col" placement="bottom start" offset={8}>
+          <Dialog className="flex h-full w-full flex-col overflow-hidden rounded-md border border-solid border-(--hl-sm) bg-(--color-bg) text-sm shadow-lg select-none focus:outline-hidden">
+            <Heading className="flex h-7 shrink-0 items-center justify-between gap-2 px-3 py-1 text-sm font-bold text-(--hl)">
+              <Tooltip position="top" message="Scoped to this collection only. Overrides project environment values.">
+                <span>Collection Environment</span>
+              </Tooltip>
+              <Button
+                onPress={onOpenEnvironmentSettingsModal}
+                aria-label="Manage collection environments"
+                className="flex aspect-square h-6 shrink-0 items-center justify-center rounded-xs text-sm text-(--color-font) ring-1 ring-transparent outline-hidden transition-all hover:bg-(--hl-xs) focus:ring-(--hl-md) focus:ring-inset aria-pressed:bg-(--hl-sm)"
               >
-                {item => (
-                  <ListBoxItem
-                    textValue={item.name}
-                    className={`flex h-(--line-height-xs) w-full items-center gap-2 truncate rounded-sm bg-transparent pr-1 whitespace-nowrap text-(--color-font) transition-colors hover:bg-(--hl-sm) focus:bg-(--hl-xs) focus:outline-hidden ${item.isBase ? 'pl-(--padding-md)' : 'pl-8'}`}
-                  >
-                    {({ isSelected }) => (
-                      <Fragment>
-                        <span
+                <Icon icon="edit" />
+              </Button>
+            </Heading>
+            <ListBox
+              aria-label="Select a Collection Environment"
+              selectionMode="single"
+              key={activeEnvironment._id}
+              items={collectionEnvironmentList}
+              selectedKeys={[activeEnvironment._id || baseEnvironment._id || '']}
+              disallowEmptySelection
+              onSelectionChange={keys => {
+                if (keys === 'all' || !keys) {
+                  return;
+                }
+                const [environmentId] = keys.values();
+                setActiveEnvironmentFetcher.submit({
+                  organizationId,
+                  projectId,
+                  workspaceId,
+                  environmentId: environmentId.toString(),
+                });
+                uiEventBus.emit('CHANGE_ACTIVE_ENV', workspaceId);
+              }}
+              className="max-h-fit flex-1 overflow-y-auto p-2 text-sm select-none focus:outline-hidden"
+            >
+              {item => (
+                <ListBoxItem
+                  textValue={item.name}
+                  className={`flex h-(--line-height-xs) w-full items-center gap-2 truncate rounded-sm bg-transparent pr-1 whitespace-nowrap text-(--color-font) transition-colors hover:bg-(--hl-sm) focus:bg-(--hl-xs) focus:outline-hidden ${item.isBase ? 'pl-(--padding-md)' : 'pl-8'}`}
+                >
+                  {({ isSelected }) => (
+                    <Fragment>
+                      <span
+                        style={{
+                          borderColor: item.color ?? 'var(--color-font)',
+                        }}
+                      >
+                        <Icon
+                          icon={
+                            item.isPrivate
+                              ? 'lock'
+                              : isUsingGitSync
+                                ? ['fab', 'git-alt']
+                                : isUsingInsomniaCloudSync
+                                  ? 'globe-americas'
+                                  : 'file-arrow-down'
+                          }
+                          className="w-5 text-xs"
                           style={{
-                            borderColor: item.color ?? 'var(--color-font)',
+                            color: item.color ?? 'var(--color-font)',
                           }}
-                        >
-                          <Icon
-                            icon={
-                              item.isPrivate
-                                ? 'lock'
-                                : isUsingGitSync
-                                  ? ['fab', 'git-alt']
-                                  : isUsingInsomniaCloudSync
-                                    ? 'globe-americas'
-                                    : 'file-arrow-down'
-                            }
-                            className="w-5 text-xs"
-                            style={{
-                              color: item.color ?? 'var(--color-font)',
-                            }}
-                          />
-                        </span>
-                        <Text slot="label" className="flex-1 truncate">
-                          {item.name}
-                        </Text>
-                        {isSelected && <Icon icon="check" className="justify-self-end px-2 text-(--color-success)" />}
-                      </Fragment>
-                    )}
-                  </ListBoxItem>
-                )}
-              </ListBox>
-            </div>
-          </div>
-        </Dialog>
-      </Popover>
-    </DialogTrigger>
+                        />
+                      </span>
+                      <Text slot="label" className="flex-1 truncate">
+                        {item.name}
+                      </Text>
+                      {isSelected && <Icon icon="check" className="justify-self-end px-2 text-(--color-success)" />}
+                    </Fragment>
+                  )}
+                </ListBoxItem>
+              )}
+            </ListBox>
+          </Dialog>
+        </Popover>
+      </DialogTrigger>
+    </div>
   );
 };
