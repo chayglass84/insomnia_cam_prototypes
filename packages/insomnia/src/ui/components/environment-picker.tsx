@@ -1,6 +1,6 @@
 import type { IconProp } from '@fortawesome/fontawesome-svg-core';
 import { models } from 'insomnia-data';
-import { Fragment } from 'react';
+import { Fragment, useState } from 'react';
 import {
   Button,
   Dialog,
@@ -15,7 +15,9 @@ import { useNavigate, useParams } from 'react-router';
 
 import { useSetActiveEnvironmentFetcher } from '~/routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.environment.set-active';
 import { useEnvironmentSetActiveGlobalActionFetcher } from '~/routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.environment.set-active-global';
+import { NewWorkspaceModal } from '~/ui/components/modals/new-workspace-modal';
 import { Tooltip } from '~/ui/components/tooltip';
+import { DEFAULT_STORAGE_RULES } from '~/ui/organization-utils';
 
 import { useWorkspaceLoaderData } from '../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId';
 import uiEventBus from '../event-bus';
@@ -23,6 +25,14 @@ import { useOrganizationPermissions } from '../hooks/use-organization-features';
 import { Icon } from './icon';
 
 const triggerButtonClassName = 'flex max-w-48 shrink-0 items-center gap-1.5 truncate rounded-xs px-2 py-1 text-sm text-(--color-font) ring-1 ring-transparent transition-all hover:bg-(--hl-xs) focus:ring-(--hl-md) focus:ring-inset aria-pressed:bg-(--hl-sm) data-open:bg-(--hl-sm)';
+
+const inheritanceTooltipMessage = 'Values inherit down and can be overridden: collection environment values override folder values, which override project environment values.';
+
+const InheritanceTooltip = () => (
+  <Tooltip position="top" message={inheritanceTooltipMessage}>
+    <Icon icon="circle-info" className="shrink-0 text-(--hl)" />
+  </Tooltip>
+);
 
 export const EnvironmentPicker = ({
   isOpen,
@@ -79,6 +89,8 @@ export const EnvironmentPicker = ({
 
   const navigate = useNavigate();
 
+  const [isNewProjectEnvironmentModalOpen, setIsNewProjectEnvironmentModalOpen] = useState(false);
+
   const getEnvironmentIcon = (isPrivate?: boolean): IconProp =>
     isPrivate ? 'lock' : isUsingGitSync ? ['fab', 'git-alt'] : isUsingInsomniaCloudSync ? 'globe-americas' : 'file-arrow-down';
 
@@ -132,10 +144,22 @@ export const EnvironmentPicker = ({
         </Button>
         <Popover className="z-10! flex max-h-[90vh] min-w-64 flex-col" placement="bottom start" offset={8}>
           <Dialog className="flex h-full w-full flex-col overflow-hidden rounded-md border border-solid border-(--hl-sm) bg-(--color-bg) text-sm shadow-lg select-none focus:outline-hidden">
-            <Heading className="flex h-(--line-height-sm) shrink-0 items-center gap-2 px-3 py-1 text-sm font-bold text-(--hl)">
+            <Heading className="flex h-(--line-height-sm) shrink-0 items-center justify-between gap-2 px-3 py-1 text-sm font-bold text-(--hl)">
               <Tooltip position="top" message="Available to every collection in this project. Click the edit icon on a project environment to configure it.">
-                <span>Project Environment</span>
+                <span>Project Environments</span>
               </Tooltip>
+              <div className="flex shrink-0 items-center gap-2">
+                <Tooltip position="top" message="Add a new project environment">
+                  <Button
+                    aria-label="Add Project Environment"
+                    onPress={() => setIsNewProjectEnvironmentModalOpen(true)}
+                    className="flex aspect-square h-6 shrink-0 items-center justify-center rounded-xs text-sm text-(--color-font) ring-1 ring-transparent transition-all hover:bg-(--hl-xs) focus:ring-(--hl-md) focus:ring-inset aria-pressed:bg-(--hl-sm)"
+                  >
+                    <Icon icon="plus" />
+                  </Button>
+                </Tooltip>
+                <InheritanceTooltip />
+              </div>
             </Heading>
             <ListBox
               aria-label="Select a Project Environment"
@@ -216,13 +240,16 @@ export const EnvironmentPicker = ({
               <Tooltip position="top" message="Scoped to this collection only. Overrides project environment values.">
                 <span>Collection Environment</span>
               </Tooltip>
-              <Button
-                onPress={onOpenEnvironmentSettingsModal}
-                aria-label="Manage collection environments"
-                className="flex aspect-square h-6 shrink-0 items-center justify-center rounded-xs text-sm text-(--color-font) ring-1 ring-transparent outline-hidden transition-all hover:bg-(--hl-xs) focus:ring-(--hl-md) focus:ring-inset aria-pressed:bg-(--hl-sm)"
-              >
-                <Icon icon="edit" />
-              </Button>
+              <div className="flex shrink-0 items-center gap-2">
+                <Button
+                  onPress={onOpenEnvironmentSettingsModal}
+                  aria-label="Manage collection environments"
+                  className="flex aspect-square h-6 shrink-0 items-center justify-center rounded-xs text-sm text-(--color-font) ring-1 ring-transparent outline-hidden transition-all hover:bg-(--hl-xs) focus:ring-(--hl-md) focus:ring-inset aria-pressed:bg-(--hl-sm)"
+                >
+                  <Icon icon="edit" />
+                </Button>
+                <InheritanceTooltip />
+              </div>
             </Heading>
             <ListBox
               aria-label="Select a Collection Environment"
@@ -286,6 +313,16 @@ export const EnvironmentPicker = ({
           </Dialog>
         </Popover>
       </DialogTrigger>
+      {isNewProjectEnvironmentModalOpen && (
+        <NewWorkspaceModal
+          isOpen
+          project={activeProject}
+          storageRules={DEFAULT_STORAGE_RULES}
+          scope="environment"
+          source="environment-picker"
+          onOpenChange={setIsNewProjectEnvironmentModalOpen}
+        />
+      )}
     </div>
   );
 };
