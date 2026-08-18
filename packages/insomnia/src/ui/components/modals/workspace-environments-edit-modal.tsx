@@ -136,7 +136,7 @@ export const WorkspaceEnvironmentsEditModal = ({ onClose }: { onClose: () => voi
     {
       id: 'shared',
       name: 'Add Sub Environment',
-      description: `${isUsingGitSync ? 'Synced with Git Sync and exportable' : isUsingInsomniaCloudSync ? 'Synced with Insomnia Sync and exportable' : 'Exportable'}`,
+      description: `Sub environments are additional nested environments that ${isUsingGitSync ? 'sync with Git Sync' : isUsingInsomniaCloudSync ? 'sync with Insomnia Sync' : 'can be exported'} and are shared with your team.`,
       icon: isUsingGitSync ? ['fab', 'git-alt'] : isUsingInsomniaCloudSync ? 'globe-americas' : 'file-arrow-down',
       action: async () => {
         createEnvironmentFetcher.submit({
@@ -153,7 +153,7 @@ export const WorkspaceEnvironmentsEditModal = ({ onClose }: { onClose: () => voi
     {
       id: 'private',
       name: 'Add Private Sub Environment',
-      description: 'Local and not exportable',
+      description: 'Private sub environments stay local to your machine and are never exported, synced, or committed.',
       icon: 'lock',
       action: async () => {
         createEnvironmentFetcher.submit({
@@ -277,14 +277,14 @@ export const WorkspaceEnvironmentsEditModal = ({ onClose }: { onClose: () => voi
               </div>
               <div className="flex w-full flex-1 basis-96 divide-x divide-solid divide-(--hl-md) overflow-hidden overflow-y-auto rounded-sm border border-solid border-(--hl-sm) select-none">
                 <div className="flex w-full max-w-xs shrink-0 flex-col overflow-hidden">
-                  <div className="flex shrink-0 items-center gap-1 border-b border-solid border-(--hl-sm) p-1">
+                  <div className="flex shrink-0 flex-col gap-1 border-b border-solid border-(--hl-sm) p-1">
                     {createEnvironmentActionsList.map(action => (
                       <Tooltip key={action.id} position="bottom" message={action.description}>
                         <Button
                           aria-label={action.name}
                           data-testid={action.id === 'private' ? 'AddPrivateSubEnvironment' : 'AddSubEnvironment'}
                           onPress={() => action.action(baseEnvironment)}
-                          className="flex flex-1 items-center justify-center gap-1 rounded-xs px-2 py-1 text-xs whitespace-nowrap text-(--color-font) ring-1 ring-transparent transition-all hover:bg-(--hl-xs) focus:ring-(--hl-md) focus:ring-inset"
+                          className="flex w-full items-center justify-center gap-2 rounded-xs border border-solid border-(--hl-sm) px-4 py-2 text-sm whitespace-nowrap text-(--color-font) ring-1 ring-transparent transition-all hover:bg-(--hl-xs) focus:ring-(--hl-md) focus:ring-inset"
                         >
                           <Icon className="w-3.5" icon={action.icon} />
                           <span className="truncate">{action.name}</span>
