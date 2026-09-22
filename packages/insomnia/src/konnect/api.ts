@@ -236,6 +236,65 @@ export async function fetchRoutesForService(
   return routes.map(normalizeRoute);
 }
 
+export interface KonnectPlugin {
+  id: string;
+  name: string;
+  enabled: boolean;
+  config: Record<string, unknown>;
+  protocols: string[] | null;
+  tags: string[] | null;
+  route: { id: string } | null;
+  service: { id: string } | null;
+  consumer: { id: string } | null;
+  ordering?: {
+    before?: Record<string, string[]>;
+    after?: Record<string, string[]>;
+  } | null;
+}
+
+export async function fetchPluginsForRoute(
+  pat: string,
+  cpId: string,
+  routeId: string,
+  region: string,
+  signal?: AbortSignal,
+): Promise<KonnectPlugin[]> {
+  const plugins = await fetchAllOffsetPaginated<KonnectPlugin>(
+    `${regionalApiBase(region)}/v2/control-planes/${cpId}/core-entities/routes/${routeId}/plugins`,
+    pat,
+    `fetching plugins for route ${routeId}`,
+    signal,
+  );
+  return plugins.map(normalizePlugin);
+}
+
+export async function fetchAllPlugins(
+  pat: string,
+  cpId: string,
+  region: string,
+  signal?: AbortSignal,
+): Promise<KonnectPlugin[]> {
+  const plugins = await fetchAllOffsetPaginated<KonnectPlugin>(
+    `${regionalApiBase(region)}/v2/control-planes/${cpId}/core-entities/plugins`,
+    pat,
+    `fetching plugins for CP ${cpId}`,
+    signal,
+  );
+  return plugins.map(normalizePlugin);
+}
+
+function normalizePlugin(p: KonnectPlugin): KonnectPlugin {
+  return {
+    ...p,
+    protocols: p.protocols ?? null,
+    tags: p.tags ?? null,
+    route: p.route ?? null,
+    service: p.service ?? null,
+    consumer: p.consumer ?? null,
+    ordering: p.ordering ?? null,
+  };
+}
+
 function regionalApiBase(region: string): string {
   const url = getKonnectApiUrl();
   // If KONNECT_API_URL is already a full URL (e.g. http://localhost:4010 in tests),

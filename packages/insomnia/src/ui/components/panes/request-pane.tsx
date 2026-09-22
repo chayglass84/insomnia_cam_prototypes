@@ -17,6 +17,7 @@ import {
   useRequestLoaderData,
 } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request.$requestId';
 import { AnalyticsEvent } from '../../../ui/analytics';
+import { resolveKonnectRouteLink } from '../../hooks/use-konnect-plugins';
 import { useRequestPatcher, useSettingsPatcher } from '../../hooks/use-request';
 import { useGitVCSVersion } from '../../hooks/use-vcs-version';
 import { AuthWrapper } from '../editors/auth/auth-wrapper';
@@ -32,6 +33,7 @@ import { RenderedQueryString } from '../rendered-query-string';
 import { RequestUrlBar, type RequestUrlBarHandle } from '../request-url-bar';
 import { Pane, PaneHeader } from './pane';
 import { PlaceholderRequestPane } from './placeholder-request-pane';
+import { RequestPluginsTab } from './request-plugins-tab';
 
 const { getCombinedPathParametersFromUrl } = models.request;
 
@@ -77,7 +79,7 @@ export const RequestPane: FC<Props> = ({ environmentId, settings, onPaste }) => 
   };
   const gitVersion = useGitVCSVersion();
 
-  const { activeEnvironment, vcsVersion } = useWorkspaceLoaderData()!;
+  const { activeEnvironment, vcsVersion, activeWorkspace, activeProject } = useWorkspaceLoaderData()!;
   // Force re-render when we switch requests, the environment gets modified, or the (Git|Sync)VCS version changes
   const uniqueKey = `${activeEnvironment?.modified}::${requestId}::${gitVersion}::${vcsVersion}::${activeRequestMeta?.activeResponseId}`;
 
@@ -97,6 +99,7 @@ export const RequestPane: FC<Props> = ({ environmentId, settings, onPaste }) => 
   const isBodyEmpty = Boolean(typeof activeRequest.body.mimeType !== 'string' && !activeRequest.body.text);
   const requestAuth = getAuthObjectOrNull(activeRequest.authentication);
   const isNoneOrInherited = requestAuth?.type === 'none' || requestAuth === null;
+  const isKonnectLinked = Boolean(resolveKonnectRouteLink(activeRequest, activeWorkspace, activeProject));
 
   return (
     <Pane type="request">
@@ -182,6 +185,17 @@ export const RequestPane: FC<Props> = ({ environmentId, settings, onPaste }) => 
           >
             <span>Docs</span>
             {activeRequest.description && (
+              <span className="flex h-6 min-w-6 items-center justify-center rounded-lg border border-solid border-(--hl) p-1 text-xs">
+                <span className="h-2 w-2 rounded-full bg-green-500" />
+              </span>
+            )}
+          </Tab>
+          <Tab
+            className="flex h-full shrink-0 cursor-pointer items-center justify-between gap-2 px-3 py-1 text-(--hl) outline-hidden transition-colors duration-300 select-none hover:bg-(--hl-sm) hover:text-(--color-font) focus:bg-(--hl-sm) aria-selected:bg-(--hl-xs) aria-selected:text-(--color-font) aria-selected:hover:bg-(--hl-sm) aria-selected:focus:bg-(--hl-sm) data-focus-visible:ring-2 data-focus-visible:ring-(--hl-md) data-focus-visible:ring-inset"
+            id="plugins"
+          >
+            <span>Konnect Plugins</span>
+            {isKonnectLinked && (
               <span className="flex h-6 min-w-6 items-center justify-center rounded-lg border border-solid border-(--hl) p-1 text-xs">
                 <span className="h-2 w-2 rounded-full bg-green-500" />
               </span>
@@ -417,6 +431,15 @@ export const RequestPane: FC<Props> = ({ environmentId, settings, onPaste }) => 
             defaultValue={activeRequest.description}
             onChange={(description: string) => patchRequest(requestId, { description })}
           />
+        </TabPanel>
+        <TabPanel className="w-full flex-1 overflow-hidden" id="plugins">
+          <ErrorBoundary key={uniqueKey} errorClassName="font-error pad text-center">
+            <RequestPluginsTab
+              activeRequest={activeRequest}
+              activeWorkspace={activeWorkspace}
+              activeProject={activeProject}
+            />
+          </ErrorBoundary>
         </TabPanel>
       </Tabs>
       {isRequestSettingsModalOpen && (
