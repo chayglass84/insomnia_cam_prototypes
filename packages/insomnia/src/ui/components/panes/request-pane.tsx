@@ -95,6 +95,12 @@ export const RequestPane: FC<Props> = ({ environmentId, settings, onPaste }) => 
   // Force re-render when we switch requests, the environment gets modified, or the (Git|Sync)VCS version changes
   const uniqueKey = `${activeEnvironment?._id}::${activeEnvironment?.modified}::${activeGlobalEnvironment?._id}::${activeGlobalEnvironment?.modified}::${requestId}::${gitVersion}::${vcsVersion}::${activeRequestMeta?.activeResponseId}`;
 
+  // Computed above the `!activeRequest` early return so this stays
+  // consistent across renders. Only used to gate the "Konnect Plugins" tab's
+  // visibility badge now — the Debugger tab moved to the Response pane (see
+  // response-pane.tsx) and is control-plane-wide, not per-request.
+  const konnectLink = activeRequest ? resolveKonnectRouteLink(activeRequest, activeWorkspace, activeProject) : null;
+
   if (!activeRequest) {
     return <PlaceholderRequestPane />;
   }
