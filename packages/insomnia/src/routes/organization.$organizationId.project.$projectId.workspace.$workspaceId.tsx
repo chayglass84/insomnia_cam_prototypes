@@ -31,8 +31,10 @@ import { database } from '~/common/database';
 import { sortMethodMap } from '~/common/sorting';
 import { pushSnapshotOnInitialize } from '~/sync/vcs/initialize-backend-project';
 import { Icon } from '~/ui/components/icon';
+import { KonnectDebuggerBanner } from '~/ui/components/panes/konnect-debugger-banner';
 import { showResourceNotFoundToast } from '~/ui/components/toast-notification';
 import { useGitFileIssues } from '~/ui/hooks/use-git-file-issues';
+import { KonnectDebuggerContext, resolveKonnectControlPlaneLink, useKonnectDebugger } from '~/ui/hooks/use-konnect-debugger';
 import { createFetcherLoadHook } from '~/ui/utils/router';
 
 import type { Route } from './+types/organization.$organizationId.project.$projectId.workspace.$workspaceId';
@@ -402,6 +404,17 @@ const Component = () => {
   const currentIssue = issuesByWorkspaceId[workspaceId];
   const [modalParent, setModalParent] = useState<HTMLElement | null>(null);
 
+  // Konnect Debugger session: instantiated HERE (not in request-pane.tsx)
+  // specifically so it survives navigating between requests within this
+  // workspace — per user request, this is now control-plane-wide rather
+  // than scoped to whichever single request happens to be open. Provided
+  // via context so request-pane.tsx's "Konnect Debugger" tab
+  // (request-debugger-tab.tsx) can read/act on the same session without
+  // this component needing to know that tab exists.
+  const { activeProject } = useWorkspaceLoaderData()!;
+  const konnectLink = resolveKonnectControlPlaneLink(activeProject);
+  const konnectDebugger = useKonnectDebugger(konnectLink);
+
   const handleBackToList = () => {
     navigate(
       href('/organization/:organizationId/project/:projectId', {
@@ -426,38 +439,41 @@ const Component = () => {
   }, [isIssueModalOpen, workspaceId]);
 
   return (
-    <div className="h-full w-full overflow-hidden" data-testid="workspace-page">
-      <Outlet />
-      <Modal
-        parent={modalParent}
-        isOpen={isIssueModalOpen}
-        onClose={handleBackToList}
-        className="relative w-[min(44rem,calc(100vw-2rem))] max-w-3xl"
-      >
-        {modalText ? (
-          <div className="flex flex-col items-center gap-6 px-4 pt-4 pb-2 text-center">
-            <Icon icon="lock" className="text-6xl text-(--hl)" />
-            <div className="flex flex-col gap-3">
-              <h2 className="text-2xl font-semibold text-(--color-font)">{modalText.modalTitle}</h2>
-              <p className="max-w-2xl text-lg text-(--hl)">{modalText.summary}</p>
-              {currentIssue.relPath && (
-                <ul className="list-disc pl-5 text-left text-sm text-(--hl)">
-                  <li>
-                    <span className="font-mono">{currentIssue.relPath}</span>
-                  </li>
-                </ul>
-              )}
+    <KonnectDebuggerContext.Provider value={{ link: konnectLink, debuggerState: konnectDebugger }}>
+      <div className="h-full w-full overflow-hidden" data-testid="workspace-page">
+        <Outlet />
+        <KonnectDebuggerBanner link={konnectLink} debuggerState={konnectDebugger} />
+        <Modal
+          parent={modalParent}
+          isOpen={isIssueModalOpen}
+          onClose={handleBackToList}
+          className="relative w-[min(44rem,calc(100vw-2rem))] max-w-3xl"
+        >
+          {modalText ? (
+            <div className="flex flex-col items-center gap-6 px-4 pt-4 pb-2 text-center">
+              <Icon icon="lock" className="text-6xl text-(--hl)" />
+              <div className="flex flex-col gap-3">
+                <h2 className="text-2xl font-semibold text-(--color-font)">{modalText.modalTitle}</h2>
+                <p className="max-w-2xl text-lg text-(--hl)">{modalText.summary}</p>
+                {currentIssue.relPath && (
+                  <ul className="list-disc pl-5 text-left text-sm text-(--hl)">
+                    <li>
+                      <span className="font-mono">{currentIssue.relPath}</span>
+                    </li>
+                  </ul>
+                )}
+              </div>
+              <Button
+                onPress={handleBackToList}
+                className="rounded-xs border border-solid border-(--hl-md) px-4 py-2 text-sm font-medium text-(--color-font) ring-1 ring-transparent transition-all hover:bg-(--hl-xs) focus:ring-(--hl-md) focus:ring-inset"
+              >
+                Back to Project
+              </Button>
             </div>
-            <Button
-              onPress={handleBackToList}
-              className="rounded-xs border border-solid border-(--hl-md) px-4 py-2 text-sm font-medium text-(--color-font) ring-1 ring-transparent transition-all hover:bg-(--hl-xs) focus:ring-(--hl-md) focus:ring-inset"
-            >
-              Back to Project
-            </Button>
-          </div>
-        ) : null}
-      </Modal>
-    </div>
+          ) : null}
+        </Modal>
+      </div>
+    </KonnectDebuggerContext.Provider>
   );
 };
 

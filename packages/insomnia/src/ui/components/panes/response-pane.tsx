@@ -16,6 +16,7 @@ import {
   useRequestLoaderData,
 } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request.$requestId';
 import { useExecutionState } from '../../hooks/use-execution-state';
+import { useKonnectDebuggerContext } from '../../hooks/use-konnect-debugger';
 import { useRequestMetaPatcher } from '../../hooks/use-request';
 import { PreviewModeDropdown } from '../dropdowns/preview-mode-dropdown';
 import { ResponseHistoryDropdown } from '../dropdowns/response-history-dropdown';
@@ -33,6 +34,7 @@ import { ResponseViewer } from '../viewers/response-viewer';
 import { BlankPane } from './blank-pane';
 import { Pane, PaneHeader } from './pane';
 import { PlaceholderResponsePane } from './placeholder-response-pane';
+import { RequestDebuggerTab } from './request-debugger-tab';
 import { RequestTestResultPane } from './request-test-result-pane';
 import { downloadResponseBody } from './response-pane-utils';
 
@@ -72,6 +74,14 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
   const isRequestSending = requestSendingFetcher.state !== 'idle';
 
   const { isExecuting, steps } = useExecutionState({ requestId: activeRequest._id });
+  // Moved here from the Request pane per user feedback ("shouldn't debugger
+  // show in the Response panel, right after Preview, rather than Request?").
+  // Note the trade-off this creates: this whole tab bar (see the `!activeResponse`
+  // early return below) doesn't render until this request has been sent at
+  // least once — the Debugger tab is now only reachable after that, even
+  // though the session itself is control-plane-wide and doesn't depend on
+  // this request's response at all.
+  const konnectDebuggerCtx = useKonnectDebuggerContext();
 
   const handleDownloadResponseBody = useCallback(
     async (prettify: boolean) => {
@@ -189,6 +199,17 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
           </Tab>
           <Tab
             className="flex h-full shrink-0 cursor-pointer items-center justify-between gap-2 px-3 py-1 text-(--hl) outline-hidden transition-colors duration-300 select-none hover:bg-(--hl-sm) hover:text-(--color-font) focus:bg-(--hl-sm) aria-selected:bg-(--hl-xs) aria-selected:text-(--color-font) aria-selected:hover:bg-(--hl-sm) aria-selected:focus:bg-(--hl-sm)"
+            id="debugger"
+          >
+            <span>Konnect Debugger</span>
+            {konnectDebuggerCtx && konnectDebuggerCtx.debuggerState.status !== 'not-linked' && (
+              <span className="flex h-6 min-w-6 items-center justify-center rounded-lg border border-solid border-(--hl) p-1 text-xs">
+                <span className="h-2 w-2 rounded-full bg-green-500" />
+              </span>
+            )}
+          </Tab>
+          <Tab
+            className="flex h-full shrink-0 cursor-pointer items-center justify-between gap-2 px-3 py-1 text-(--hl) outline-hidden transition-colors duration-300 select-none hover:bg-(--hl-sm) hover:text-(--color-font) focus:bg-(--hl-sm) aria-selected:bg-(--hl-xs) aria-selected:text-(--color-font) aria-selected:hover:bg-(--hl-sm) aria-selected:focus:bg-(--hl-sm)"
             id="headers"
           >
             Headers
@@ -263,6 +284,11 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
             updateFilter={activeResponse.error ? undefined : handleSetFilter}
             url={activeResponse.url}
           />
+        </TabPanel>
+        <TabPanel className="w-full flex-1 overflow-hidden" id="debugger">
+          <ErrorBoundary key={activeResponse._id} errorClassName="font-error pad text-center">
+            <RequestDebuggerTab />
+          </ErrorBoundary>
         </TabPanel>
         <TabPanel className="flex w-full flex-1 flex-col overflow-y-auto" id="headers">
           <ErrorBoundary key={activeResponse._id} errorClassName="font-error pad text-center">

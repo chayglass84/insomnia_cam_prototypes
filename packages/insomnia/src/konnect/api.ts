@@ -295,6 +295,214 @@ function normalizePlugin(p: KonnectPlugin): KonnectPlugin {
   };
 }
 
+// ── Debugger (o11y/debug-sessions) ──────────────────────────────────────────
+//
+// PROTOTYPE SHORTCUT / READ THIS BEFORE RELYING ON THIS SECTION:
+// Everything below is REVERSE-ENGINEERED, not from a published API spec.
+// Kong's public API catalog (developer.konghq.com/api/) has no documented
+// endpoint for this feature as of 2026-09-23. We found it by driving the
+// real Konnect UI's "Start debugging" action in a browser and reading the
+// network tab, then verified the full request/response shapes against a
+// real control plane with a real PAT (see 3593.md, "Part 2: Debugger tab").
+// It could rename/reshape without notice since it's not a supported contract.
+// Before shipping this beyond a prototype, get Konnect's API/platform team
+// to confirm (a) this is the intended long-term contract, (b) `sampling_rule`
+// syntax for scoping a session to a single route/service (we never confirmed
+// this — see fetchDebugSessionTraces below, we filter client-side instead),
+// and (c) whether there's a supported SDK/client we should use instead of a
+// hand-rolled fetch.
+//
+// There is a SECOND, unrelated, and genuinely documented debugging mechanism
+// in Kong Gateway — header-based single-request debug via `X-Kong-Request-Debug`
+// / `X-Kong-Request-Debug-Output` (developer.konghq.com/gateway/debug-requests/).
+// We are NOT using it here because it requires control over the data plane's
+// config (`KONG_REQUEST_DEBUG_TOKEN`), which isn't available on Serverless
+// Cloud Gateways — the CP type we tested against. Don't conflate the two if
+// you're extending this later.
+
+export interface KonnectDataPlaneNode {
+  id: string;
+  hostname: string;
+}
+
+export async function fetchDataPlaneNodes(
+  pat: string,
+  cpId: string,
+  region: string,
+  signal?: AbortSignal,
+): Promise<KonnectDataPlaneNode[]> {
+  const response = await fetchWithRetry(`${regionalApiBase(region)}/v2/control-planes/${cpId}/nodes`, pat, signal);
+  if (!response.ok) {
+    throw new Error(`Konnect API error ${response.status} fetching data plane nodes for CP ${cpId}`);
+  }
+  const body = await response.json();
+  return (body.items as { id: string; hostname: string }[]).map(n => ({ id: n.id, hostname: n.hostname }));
+}
+
+export interface KonnectDebugSession {
+  id: string;
+  name: string;
+  duration_secs: number;
+  max_samples: number;
+  targets: string[];
+  created_at: string;
+  started_at: string;
+  // Absent while the session is still running. This is inferred from the
+  // real API's observed shape — there was no separate status enum field
+  // (the MCP tool description we initially found implied one exists, e.g.
+  // "in_progress | completed | timed_out | cancelled | pending"; the real
+  // REST response doesn't have it). Re-verify if this ever looks wrong.
+  completed_at?: string;
+  timed_out?: boolean;
+}
+
+// duration_secs: seen 10-1800 accepted in the real Konnect UI's form; not
+// independently confirmed as the hard min/max here.
+export async function createDebugSession(
+  pat: string,
+  cpId: string,
+  region: string,
+  params: { name: string; targets: string[]; durationSecs: number; maxSamples: number },
+  signal?: AbortSignal,
+): Promise<KonnectDebugSession> {
+  const response = await fetch(`${regionalApiBase(region)}/v1/control-planes/${cpId}/o11y/debug-sessions`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${pat}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: params.name,
+      targets: params.targets,
+      duration_secs: params.durationSecs,
+      max_samples: params.maxSamples,
+      capture_traces: true,
+      sampling_rate: 1,
+      // Empty string = capture all traffic on the targeted node(s), not just
+      // this route. PROTOTYPE SHORTCUT: we never confirmed the real filter
+      // expression syntax for scoping server-side to one route/service, so
+      // we over-capture here and filter client-side in fetchDebugSessionTraces
+      // callers instead (see use-konnect-debugger.ts). Fine for a single
+      // developer testing their own request; would be noisy on a busy
+      // shared control plane with real traffic.
+      sampling_rule: '',
+    }),
+    // BUG FIXED 2026-09-23: this used to pass `signal` straight through with
+    // no fallback. Every other request in this file goes through
+    // fetchWithRetry, which always applies REQUEST_TIMEOUT_MS even when the
+    // caller doesn't supply a signal — this one didn't, so a stalled request
+    // could hang forever with the UI stuck on "Starting debug session…" and
+    // no error ever surfacing. Match the same always-timeout pattern here.
+    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]) : AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
+  if (!response.ok) {
+    // Surface the real response body — this is an undocumented, unstable
+    // endpoint (see the caveat above), so a bare status code isn't enough
+    // to debug a 400/422 here. Don't strip this down to a generic message
+    // again; it's the only way to see Konnect's actual validation error.
+    const detail = await response.text().catch(() => '');
+    throw new Error(`Konnect API error ${response.status} creating debug session: ${detail}`);
+  }
+  return response.json();
+}
+
+export async function fetchDebugSession(
+  pat: string,
+  cpId: string,
+  sessionId: string,
+  region: string,
+  signal?: AbortSignal,
+): Promise<KonnectDebugSession> {
+  const response = await fetchWithRetry(
+    `${regionalApiBase(region)}/v1/control-planes/${cpId}/o11y/debug-sessions/${sessionId}`,
+    pat,
+    signal,
+  );
+  if (!response.ok) {
+    throw new Error(`Konnect API error ${response.status} fetching debug session ${sessionId}`);
+  }
+  return response.json();
+}
+
+// Cancels/deletes a session early. Confirmed by direct testing (204, session
+// is gone on subsequent GET — a 404, not a "cancelled" status) but not
+// documented anywhere; re-verify if Konnect changes this API.
+export async function cancelDebugSession(
+  pat: string,
+  cpId: string,
+  sessionId: string,
+  region: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  const response = await fetch(`${regionalApiBase(region)}/v1/control-planes/${cpId}/o11y/debug-sessions/${sessionId}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${pat}` },
+    signal,
+  });
+  if (!response.ok && response.status !== 404) {
+    throw new Error(`Konnect API error ${response.status} cancelling debug session ${sessionId}`);
+  }
+}
+
+export interface KonnectDebugTraceSummary {
+  trace_id: string;
+  duration_ms: number;
+}
+
+export async function fetchDebugSessionTraces(
+  pat: string,
+  cpId: string,
+  sessionId: string,
+  region: string,
+  signal?: AbortSignal,
+): Promise<KonnectDebugTraceSummary[]> {
+  const response = await fetchWithRetry(
+    `${regionalApiBase(region)}/v1/control-planes/${cpId}/o11y/debug-sessions/${sessionId}/traces?limit=2000`,
+    pat,
+    signal,
+  );
+  if (!response.ok) {
+    throw new Error(`Konnect API error ${response.status} fetching traces for debug session ${sessionId}`);
+  }
+  const body = await response.json();
+  const traces = (body.traces ?? []) as { trace_id: string; duration_ms: number }[];
+  return traces.map(t => ({ trace_id: t.trace_id, duration_ms: t.duration_ms }));
+}
+
+// Real OTel-shaped span, as returned by the traces/{traceId} endpoint. Only
+// the fields we actually read are declared — the real payload has more
+// (status, links, scope info) that we ignore for now.
+export interface KonnectDebugSpan {
+  span_id: string;
+  parent_span_id: string;
+  name: string;
+  start_time_unix_nano: string;
+  end_time_unix_nano: string;
+  attributes: Record<string, unknown>;
+}
+
+export async function fetchDebugSessionTraceDetail(
+  pat: string,
+  cpId: string,
+  sessionId: string,
+  traceId: string,
+  region: string,
+  signal?: AbortSignal,
+): Promise<KonnectDebugSpan[]> {
+  const response = await fetchWithRetry(
+    `${regionalApiBase(region)}/v1/control-planes/${cpId}/o11y/debug-sessions/${sessionId}/traces/${traceId}`,
+    pat,
+    signal,
+  );
+  if (!response.ok) {
+    throw new Error(`Konnect API error ${response.status} fetching trace ${traceId}`);
+  }
+  const body = await response.json();
+  // Real shape is OTel's resource_spans[].scope_spans[].spans[] — flatten it
+  // since we only have one resource/scope per trace in practice here.
+  const resourceSpans = body.resource_spans ?? [];
+  return resourceSpans.flatMap((rs: { scope_spans?: { spans?: KonnectDebugSpan[] }[] }) =>
+    (rs.scope_spans ?? []).flatMap(ss => ss.spans ?? []),
+  );
+}
+
 function regionalApiBase(region: string): string {
   const url = getKonnectApiUrl();
   // If KONNECT_API_URL is already a full URL (e.g. http://localhost:4010 in tests),
