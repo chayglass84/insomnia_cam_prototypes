@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Button } from 'react-aria-components';
+import { Button, ListBox, ListBoxItem, Popover, Select, SelectValue } from 'react-aria-components';
 import { createPortal } from 'react-dom';
 
 import { DEFAULT_SESSION_DURATION_SECS, type KonnectControlPlaneLink, type UseKonnectDebuggerResult } from '../../hooks/use-konnect-debugger';
+import { Icon } from '../icon';
 import { KongLogo } from '../kong-logo';
 
 interface Props {
@@ -11,6 +12,14 @@ interface Props {
 }
 
 const DOCS_URL = 'https://developer.konghq.com/observability/debugger/';
+
+const DURATION_OPTIONS: { id: number; name: string }[] = [
+  { id: 30, name: '30 seconds' },
+  { id: 60, name: '1 minute' },
+  { id: 120, name: '2 minutes' },
+  { id: 300, name: '5 minutes' },
+  { id: 600, name: '10 minutes' },
+];
 
 // PROTOTYPE SHORTCUT / PLACEMENT NOTE: the ask was "put this in the left
 // navigation bar, even as a floating window if it can't fit." The left nav
@@ -39,7 +48,7 @@ const DOCS_URL = 'https://developer.konghq.com/observability/debugger/';
 export function KonnectDebuggerBanner({ link, debuggerState }: Props) {
   const { status, error, startedAt, durationSecs, traces, start, stop } = debuggerState;
   const [dismissed, setDismissed] = useState(false);
-  const [durationInput, setDurationInput] = useState(String(DEFAULT_SESSION_DURATION_SECS));
+  const [selectedDuration, setSelectedDuration] = useState(DEFAULT_SESSION_DURATION_SECS);
   const [elapsedSecs, setElapsedSecs] = useState(0);
 
   useEffect(() => {
@@ -64,35 +73,34 @@ export function KonnectDebuggerBanner({ link, debuggerState }: Props) {
     return null;
   }
 
-  const parsedDuration = Number.parseInt(durationInput, 10);
-  const isDurationValid = Number.isFinite(parsedDuration) && parsedDuration >= 10 && parsedDuration <= 1800;
-
   return createPortal(
-    <div className="fixed bottom-12 left-4 z-[9999] flex h-[220px] w-80 flex-col rounded-lg border border-solid border-(--hl-md) bg-(--color-bg) p-4 shadow-lg">
+    <div className="fixed bottom-12 left-4 z-[9999] flex w-80 flex-col rounded-lg border border-solid border-(--hl-md) bg-(--color-bg) p-4 shadow-lg">
       {/* Header: identity + docs link + dismiss — always the same. */}
-      <div className="mb-3 flex items-center gap-2">
-        <KongLogo width={30} height={28} />
-        <span className="text-base font-semibold text-(--color-font)">Konnect Debugger</span>
+      <div className="mb-3 flex flex-col gap-1">
+        <div className="flex items-center gap-2">
+          <KongLogo width={20} height={18} />
+          <span className="flex-1 text-base font-semibold text-(--color-font)">Kong Debugger</span>
+          <Button
+            aria-label="Dismiss"
+            className="shrink-0 rounded-xs px-1 text-(--hl) hover:bg-(--hl-sm) hover:text-(--color-font)"
+            onPress={() => {
+              // Dismissing a running session cancels it — leaving it running
+              // with no visible way to see/stop it felt worse than ending it.
+              // Idle/completed/error dismissals just hide the panel.
+              if (status === 'in_progress') {
+                stop();
+              }
+              setDismissed(true);
+            }}
+          >
+            ✕
+          </Button>
+        </div>
         <Button
-          className="ml-auto shrink-0 text-xs text-(--hl) underline hover:text-(--color-font)"
+          className="self-start text-xs text-(--hl) underline hover:text-(--color-font)"
           onPress={() => window.main.openInBrowser(DOCS_URL)}
         >
-          Learn more
-        </Button>
-        <Button
-          aria-label="Dismiss"
-          className="shrink-0 rounded-xs px-1 text-(--hl) hover:bg-(--hl-sm) hover:text-(--color-font)"
-          onPress={() => {
-            // Dismissing a running session cancels it — leaving it running
-            // with no visible way to see/stop it felt worse than ending it.
-            // Idle/completed/error dismissals just hide the panel.
-            if (status === 'in_progress') {
-              stop();
-            }
-            setDismissed(true);
-          }}
-        >
-          ✕
+          Learn more about Kong Debugger
         </Button>
       </div>
 
@@ -102,26 +110,51 @@ export function KonnectDebuggerBanner({ link, debuggerState }: Props) {
           <>
             <p className="text-(--hl)">Capture live traffic across this control plane to see per-plugin latency.</p>
             <div className="flex items-center gap-2">
-              <input
-                type="number"
-                min={10}
-                max={1800}
-                value={durationInput}
-                onChange={e => setDurationInput(e.target.value)}
-                className="w-16 shrink-0 rounded-xs border border-solid border-(--hl-md) bg-(--color-bg) px-1 py-1 text-right text-(--color-font)"
-                aria-label="Session duration in seconds"
-              />
-              <span className="shrink-0 text-(--hl)">seconds</span>
+              <span className="shrink-0 text-(--hl)">Duration</span>
+              <Select
+                aria-label="Session duration"
+                selectedKey={selectedDuration}
+                onSelectionChange={key => key !== null && setSelectedDuration(Number(key))}
+              >
+                <Button className="flex flex-1 items-center justify-between gap-2 rounded-xs border border-solid border-(--hl-md) px-3 py-1 text-(--color-font) hover:bg-(--hl-xs)">
+                  <SelectValue<{ id: number; name: string }> className="truncate">
+                    {({ selectedText }) => <span>{selectedText}</span>}
+                  </SelectValue>
+                  <Icon icon="caret-down" />
+                </Button>
+                <Popover className="flex min-w-max flex-col overflow-y-hidden">
+                  <ListBox
+                    items={DURATION_OPTIONS}
+                    className="min-w-max overflow-y-auto rounded-md border border-solid border-(--hl-sm) bg-(--color-bg) py-2 text-sm shadow-lg select-none focus:outline-hidden"
+                  >
+                    {item => (
+                      <ListBoxItem
+                        className="flex h-(--line-height-xs) w-full items-center gap-2 bg-transparent px-(--padding-md) whitespace-nowrap text-(--color-font) transition-colors hover:bg-(--hl-sm) focus:bg-(--hl-xs) focus:outline-hidden aria-selected:font-bold"
+                        aria-label={item.name}
+                        textValue={item.name}
+                      >
+                        {({ isSelected }) => (
+                          <>
+                            <span>{item.name}</span>
+                            {isSelected && <Icon icon="check" className="justify-self-end text-(--color-success)" />}
+                          </>
+                        )}
+                      </ListBoxItem>
+                    )}
+                  </ListBox>
+                </Popover>
+              </Select>
+            </div>
+            <div className="flex justify-end">
               <Button
-                isDisabled={!isDurationValid}
                 // Same theme as the request pane's "Send" button (see
                 // request-url-bar.tsx) — deliberately, so this reads as the
                 // one prominent action in the panel rather than another
                 // quiet outlined button.
-                className="ml-auto shrink-0 rounded-xs bg-(--color-surprise) px-3 py-1 font-medium text-(--color-font-surprise) disabled:opacity-50"
-                onPress={() => start(parsedDuration)}
+                className="shrink-0 rounded-xs bg-(--color-surprise) px-3 py-1.5 text-center font-medium text-(--color-font-surprise)"
+                onPress={() => start(selectedDuration)}
               >
-                Start
+                Start debugging
               </Button>
             </div>
           </>
@@ -134,10 +167,10 @@ export function KonnectDebuggerBanner({ link, debuggerState }: Props) {
             <p className="text-(--hl)">
               Capturing… {elapsedSecs}s / {durationSecs}s
             </p>
-            <div className="flex items-center gap-2">
-              <span className="min-w-0 flex-1 truncate text-(--hl)">Send any request against this CP now.</span>
+            <p className="text-(--hl)">Send any request against this control plane now.</p>
+            <div className="flex justify-end">
               <Button
-                className="shrink-0 rounded-xs border border-solid border-(--hl-md) px-3 py-1 hover:bg-(--hl-sm)"
+                className="shrink-0 rounded-xs bg-(--color-danger) px-3 py-1.5 text-center font-medium text-(--color-font-danger)"
                 onPress={stop}
               >
                 Cancel
@@ -153,10 +186,10 @@ export function KonnectDebuggerBanner({ link, debuggerState }: Props) {
                 ? `Captured ${traces.length} request${traces.length === 1 ? '' : 's'}.`
                 : 'No matching requests captured this time.'}
             </p>
-            <div className="flex items-center gap-2">
-              <span className="min-w-0 flex-1 truncate text-(--hl)">See the "Konnect Debugger" tab on a response.</span>
+            <p className="text-(--hl)">See the "Debugger" tab on a response.</p>
+            <div className="flex justify-end">
               <Button
-                className="shrink-0 rounded-xs border border-solid border-(--hl-md) px-3 py-1 hover:bg-(--hl-sm)"
+                className="shrink-0 rounded-xs bg-(--color-surprise) px-3 py-1.5 text-center font-medium text-(--color-font-surprise)"
                 onPress={() => start()}
               >
                 Restart

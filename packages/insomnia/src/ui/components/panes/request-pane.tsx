@@ -18,7 +18,6 @@ import {
   useRequestLoaderData,
 } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request.$requestId';
 import { AnalyticsEvent } from '../../../ui/analytics';
-import { resolveKonnectRouteLink } from '../../hooks/use-konnect-plugins';
 import { useRequestPatcher, useSettingsPatcher } from '../../hooks/use-request';
 import { useGitVCSVersion } from '../../hooks/use-vcs-version';
 import { AuthWrapper } from '../editors/auth/auth-wrapper';
@@ -28,6 +27,7 @@ import { RequestParametersEditor } from '../editors/request-parameters-editor';
 import { RequestScriptEditor } from '../editors/request-script-editor';
 import { ErrorBoundary } from '../error-boundary';
 import { Icon } from '../icon';
+import { KongLogo } from '../kong-logo';
 import { MarkdownEditor } from '../markdown-editor';
 import { RequestSettingsModal } from '../modals/request-settings-modal';
 import { RenderedQueryString } from '../rendered-query-string';
@@ -94,12 +94,6 @@ export const RequestPane: FC<Props> = ({ environmentId, settings, onPaste }) => 
     useWorkspaceLoaderData()!;
   // Force re-render when we switch requests, the environment gets modified, or the (Git|Sync)VCS version changes
   const uniqueKey = `${activeEnvironment?._id}::${activeEnvironment?.modified}::${activeGlobalEnvironment?._id}::${activeGlobalEnvironment?.modified}::${requestId}::${gitVersion}::${vcsVersion}::${activeRequestMeta?.activeResponseId}`;
-
-  // Computed above the `!activeRequest` early return so this stays
-  // consistent across renders. Only used to gate the "Konnect Plugins" tab's
-  // visibility badge now — the Debugger tab moved to the Response pane (see
-  // response-pane.tsx) and is control-plane-wide, not per-request.
-  const konnectLink = activeRequest ? resolveKonnectRouteLink(activeRequest, activeWorkspace, activeProject) : null;
 
   if (!activeRequest) {
     return <PlaceholderRequestPane />;
@@ -251,8 +245,8 @@ export const RequestPane: FC<Props> = ({ environmentId, settings, onPaste }) => 
             >
               <span>{activeProject?.konnectAiGateway ? 'Konnect Policies' : 'Konnect Plugins'}</span>
               {isKonnectLinked && (
-                <span className="flex h-6 min-w-6 items-center justify-center rounded-lg border border-solid border-(--hl) p-1 text-xs">
-                  <span className="h-2 w-2 rounded-full bg-green-500" />
+                <span className="flex h-6 min-w-6 shrink-0 items-center justify-center">
+                  <KongLogo width={14} height={13} />
                 </span>
               )}
             </Tab>
