@@ -16,12 +16,12 @@ import {
   useRequestLoaderData,
 } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request.$requestId';
 import { useExecutionState } from '../../hooks/use-execution-state';
-import { useKonnectDebuggerContext } from '../../hooks/use-konnect-debugger';
 import { useRequestMetaPatcher } from '../../hooks/use-request';
 import { PreviewModeDropdown } from '../dropdowns/preview-mode-dropdown';
 import { ResponseHistoryDropdown } from '../dropdowns/response-history-dropdown';
 import { MockResponseExtractor } from '../editors/mock-response-extractor';
 import { ErrorBoundary } from '../error-boundary';
+import { KongLogo } from '../kong-logo';
 import { showError } from '../modals';
 import { ResponseTimer } from '../response-timer';
 import { SizeTag } from '../tags/size-tag';
@@ -81,7 +81,6 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
   // least once — the Debugger tab is now only reachable after that, even
   // though the session itself is control-plane-wide and doesn't depend on
   // this request's response at all.
-  const konnectDebuggerCtx = useKonnectDebuggerContext();
 
   const handleDownloadResponseBody = useCallback(
     async (prettify: boolean) => {
@@ -201,12 +200,10 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
             className="flex h-full shrink-0 cursor-pointer items-center justify-between gap-2 px-3 py-1 text-(--hl) outline-hidden transition-colors duration-300 select-none hover:bg-(--hl-sm) hover:text-(--color-font) focus:bg-(--hl-sm) aria-selected:bg-(--hl-xs) aria-selected:text-(--color-font) aria-selected:hover:bg-(--hl-sm) aria-selected:focus:bg-(--hl-sm)"
             id="debugger"
           >
-            <span>Konnect Debugger</span>
-            {konnectDebuggerCtx && konnectDebuggerCtx.debuggerState.status !== 'not-linked' && (
-              <span className="flex h-6 min-w-6 items-center justify-center rounded-lg border border-solid border-(--hl) p-1 text-xs">
-                <span className="h-2 w-2 rounded-full bg-green-500" />
-              </span>
-            )}
+            <span>Debugger</span>
+            <span className="flex h-6 min-w-6 shrink-0 items-center justify-center">
+              <KongLogo width={14} height={13} />
+            </span>
           </Tab>
           <Tab
             className="flex h-full shrink-0 cursor-pointer items-center justify-between gap-2 px-3 py-1 text-(--hl) outline-hidden transition-colors duration-300 select-none hover:bg-(--hl-sm) hover:text-(--color-font) focus:bg-(--hl-sm) aria-selected:bg-(--hl-xs) aria-selected:text-(--color-font) aria-selected:hover:bg-(--hl-sm) aria-selected:focus:bg-(--hl-sm)"

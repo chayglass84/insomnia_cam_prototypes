@@ -17,7 +17,6 @@ import {
   useRequestLoaderData,
 } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request.$requestId';
 import { AnalyticsEvent } from '../../../ui/analytics';
-import { resolveKonnectRouteLink } from '../../hooks/use-konnect-plugins';
 import { useRequestPatcher, useSettingsPatcher } from '../../hooks/use-request';
 import { useGitVCSVersion } from '../../hooks/use-vcs-version';
 import { AuthWrapper } from '../editors/auth/auth-wrapper';
@@ -27,6 +26,7 @@ import { RequestParametersEditor } from '../editors/request-parameters-editor';
 import { RequestScriptEditor } from '../editors/request-script-editor';
 import { ErrorBoundary } from '../error-boundary';
 import { Icon } from '../icon';
+import { KongLogo } from '../kong-logo';
 import { MarkdownEditor } from '../markdown-editor';
 import { RequestSettingsModal } from '../modals/request-settings-modal';
 import { RenderedQueryString } from '../rendered-query-string';
@@ -83,12 +83,6 @@ export const RequestPane: FC<Props> = ({ environmentId, settings, onPaste }) => 
   // Force re-render when we switch requests, the environment gets modified, or the (Git|Sync)VCS version changes
   const uniqueKey = `${activeEnvironment?.modified}::${requestId}::${gitVersion}::${vcsVersion}::${activeRequestMeta?.activeResponseId}`;
 
-  // Computed above the `!activeRequest` early return so this stays
-  // consistent across renders. Only used to gate the "Konnect Plugins" tab's
-  // visibility badge now — the Debugger tab moved to the Response pane (see
-  // response-pane.tsx) and is control-plane-wide, not per-request.
-  const konnectLink = activeRequest ? resolveKonnectRouteLink(activeRequest, activeWorkspace, activeProject) : null;
-
   if (!activeRequest) {
     return <PlaceholderRequestPane />;
   }
@@ -105,7 +99,6 @@ export const RequestPane: FC<Props> = ({ environmentId, settings, onPaste }) => 
   const isBodyEmpty = Boolean(typeof activeRequest.body.mimeType !== 'string' && !activeRequest.body.text);
   const requestAuth = getAuthObjectOrNull(activeRequest.authentication);
   const isNoneOrInherited = requestAuth?.type === 'none' || requestAuth === null;
-  const isKonnectLinked = Boolean(konnectLink);
 
   return (
     <Pane type="request">
@@ -200,12 +193,10 @@ export const RequestPane: FC<Props> = ({ environmentId, settings, onPaste }) => 
             className="flex h-full shrink-0 cursor-pointer items-center justify-between gap-2 px-3 py-1 text-(--hl) outline-hidden transition-colors duration-300 select-none hover:bg-(--hl-sm) hover:text-(--color-font) focus:bg-(--hl-sm) aria-selected:bg-(--hl-xs) aria-selected:text-(--color-font) aria-selected:hover:bg-(--hl-sm) aria-selected:focus:bg-(--hl-sm) data-focus-visible:ring-2 data-focus-visible:ring-(--hl-md) data-focus-visible:ring-inset"
             id="plugins"
           >
-            <span>Konnect Plugins</span>
-            {isKonnectLinked && (
-              <span className="flex h-6 min-w-6 items-center justify-center rounded-lg border border-solid border-(--hl) p-1 text-xs">
-                <span className="h-2 w-2 rounded-full bg-green-500" />
-              </span>
-            )}
+            <span>Plugins</span>
+            <span className="flex h-6 min-w-6 shrink-0 items-center justify-center">
+              <KongLogo width={14} height={13} />
+            </span>
           </Tab>
         </TabList>
         <TabPanel className="flex h-full w-full flex-1 flex-col overflow-y-auto" id="params">
