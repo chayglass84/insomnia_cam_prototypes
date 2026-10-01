@@ -1,13 +1,15 @@
 import type { ResponseTimelineEntry } from 'insomnia-data';
-import { services } from 'insomnia-data';
+import { models, services } from 'insomnia-data';
 import { PREVIEW_MODE_SOURCE } from 'insomnia-data/common';
 import { type FC, useCallback, useEffect, useMemo, useState } from 'react';
-import { Tab, TabList, TabPanel, Tabs, Toolbar } from 'react-aria-components';
+import { Button, Tab, TabList, TabPanel, Tabs, Toolbar } from 'react-aria-components';
 import { useFetcher } from 'react-router';
 
+import { extractChatCompletion, supportsStreaming } from '~/common/chat-completion';
 import { bodyBufferToUtf8 } from '~/common/utils/utf8-bytes';
 import { useRootLoaderData } from '~/root';
 import { AnalyticsEvent } from '~/ui/analytics';
+import { showToast } from '~/ui/components/toast-notification';
 
 import { getSetCookieHeaders } from '../../../common/misc';
 import { cancelRequestById } from '../../../network/cancellation.renderer';
@@ -16,7 +18,7 @@ import {
   useRequestLoaderData,
 } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request.$requestId';
 import { useExecutionState } from '../../hooks/use-execution-state';
-import { useRequestMetaPatcher } from '../../hooks/use-request';
+import { useRequestMetaPatcher, useRequestPatcher } from '../../hooks/use-request';
 import { PreviewModeDropdown } from '../dropdowns/preview-mode-dropdown';
 import { ResponseHistoryDropdown } from '../dropdowns/response-history-dropdown';
 import { MockResponseExtractor } from '../editors/mock-response-extractor';
@@ -46,7 +48,77 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
   const filterHistory = activeRequestMeta.responseFilterHistory || [];
   const filter = activeRequestMeta.responseFilter || '';
   const patchRequestMeta = useRequestMetaPatcher();
+  const patchRequest = useRequestPatcher();
   const { settings } = useRootLoaderData()!;
+  const [streamingTeaserDismissed, setStreamingTeaserDismissed] = useState(false);
+  useEffect(() => {
+    setStreamingTeaserDismissed(false);
+  }, [activeRequest._id]);
+
+  const chatCompletionSummary = useMemo(() => {
+    if (!activeResponse?.bodyBuffer) {
+      return null;
+    }
+    try {
+      return extractChatCompletion(bodyBufferToUtf8(activeResponse.bodyBuffer), activeRequest.body?.text);
+    } catch {
+      return null;
+    }
+  }, [activeResponse, activeRequest.body?.text]);
+
+  const showStreamingTeaser =
+    !streamingTeaserDismissed &&
+    Boolean(chatCompletionSummary) &&
+    Boolean(activeResponse) &&
+    supportsStreaming(activeResponse!.url) &&
+    !models.request.isEventStreamRequest(activeRequest);
+
+  const handleEnableStreaming = () => {
+    const previousBody = activeRequest.body;
+    const previousHeaders = activeRequest.headers;
+
+    let bodyPatched = false;
+    try {
+      const parsedBody = previousBody.text ? JSON.parse(previousBody.text) : {};
+      const nextBodyText = JSON.stringify({ ...parsedBody, stream: true });
+      patchRequest(activeRequest._id, { body: { ...previousBody, text: nextBodyText } });
+      bodyPatched = true;
+    } catch {
+      // Body isn't valid JSON right now (e.g. mid-edit) — leave it alone and only add the header.
+    }
+
+    const existingAcceptHeaderIndex = previousHeaders.findIndex(header => header.name.toLowerCase() === 'accept');
+    const nextHeaders = existingAcceptHeaderIndex === -1
+      ? [...previousHeaders, { name: 'Accept', value: 'text/event-stream' }]
+      : previousHeaders.map((header, index) =>
+          index === existingAcceptHeaderIndex ? { ...header, value: 'text/event-stream' } : header,
+        );
+    if (previousHeaders[existingAcceptHeaderIndex]?.value !== 'text/event-stream') {
+      patchRequest(activeRequest._id, { headers: nextHeaders });
+    }
+
+    showToast(
+      {
+        icon: 'bolt',
+        title: 'Enabled streaming',
+        status: 'success',
+        description: (
+          <span>
+            {bodyPatched
+              ? 'Added "stream": true to the body and an Accept: text/event-stream header.'
+              : 'Body was not valid JSON, so only an Accept: text/event-stream header was added.'}{' '}
+            <Button
+              className="underline"
+              onPress={() => patchRequest(activeRequest._id, { body: previousBody, headers: previousHeaders })}
+            >
+              Undo
+            </Button>
+          </span>
+        ),
+      },
+      { timeout: null },
+    );
+  };
   const previewMode = activeRequestMeta.previewMode || PREVIEW_MODE_SOURCE;
   const handleSetFilter = async (responseFilter: string) => {
     if (!activeResponse) {
@@ -245,6 +317,26 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
               }}
             />
           </Toolbar>
+          {showStreamingTeaser && (
+            <div className="flex items-center justify-between gap-2 border-b border-solid border-(--hl-md) bg-(--hl-xs) px-3 py-2 text-sm text-(--color-font)">
+              <span>This endpoint supports live streaming — see the response fill in token-by-token.</span>
+              <div className="flex shrink-0 items-center gap-2">
+                <Button
+                  onPress={handleEnableStreaming}
+                  className="rounded-sm border border-solid border-(--hl-sm) px-2 py-1 text-xs hover:bg-(--hl-sm)"
+                >
+                  Enable streaming
+                </Button>
+                <Button
+                  aria-label="Dismiss"
+                  onPress={() => setStreamingTeaserDismissed(true)}
+                  className="text-(--hl) hover:text-(--color-font)"
+                >
+                  ✕
+                </Button>
+              </div>
+            </div>
+          )}
           <ResponseViewer
             key={activeResponse._id}
             bytes={Math.max(activeResponse.bytesContent, activeResponse.bytesRead)}
@@ -259,6 +351,7 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
             bodyBuffer={activeResponse.bodyBuffer}
             getBody={() => services.helpers.getResponseBodyBuffer(activeResponse)}
             previewMode={activeResponse.error ? PREVIEW_MODE_SOURCE : previewMode}
+            requestBodyText={activeRequest.body?.text}
             responseId={activeResponse._id}
             updateFilter={activeResponse.error ? undefined : handleSetFilter}
             url={activeResponse.url}
