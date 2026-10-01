@@ -3,20 +3,26 @@ import { models, services } from 'insomnia-data';
 import { PREVIEW_MODE_SOURCE } from 'insomnia-data/common';
 import { type FC, useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Tab, TabList, TabPanel, Tabs, Toolbar } from 'react-aria-components';
-import { useFetcher } from 'react-router';
+import { useFetcher, useParams } from 'react-router';
 
 import { extractChatCompletion, supportsStreaming } from '~/common/chat-completion';
+import { parseChatRequestBody, serializeChatRequestBody } from '~/common/chat-request';
+import { buildQueryStringFromParams, joinUrlAndQueryString } from '~/common/utils/url/querystring';
 import { bodyBufferToUtf8 } from '~/common/utils/utf8-bytes';
 import { useRootLoaderData } from '~/root';
 import { AnalyticsEvent } from '~/ui/analytics';
 import { showToast } from '~/ui/components/toast-notification';
+import { recordProjectRecentRequest } from '~/ui/utils/recent-project-requests';
+import { renderRealtimeConnectPayload } from '~/ui/utils/render-realtime-connect';
 
 import { getSetCookieHeaders } from '../../../common/misc';
 import { cancelRequestById } from '../../../network/cancellation.renderer';
+import { useWorkspaceLoaderData } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId';
 import {
   type RequestLoaderData,
   useRequestLoaderData,
 } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request.$requestId';
+import { useRequestConnectActionFetcher } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request.$requestId.connect';
 import { useExecutionState } from '../../hooks/use-execution-state';
 import { useRequestMetaPatcher, useRequestPatcher } from '../../hooks/use-request';
 import { PreviewModeDropdown } from '../dropdowns/preview-mode-dropdown';
@@ -55,16 +61,27 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
     setStreamingTeaserDismissed(false);
   }, [activeRequest._id]);
 
+  // The request body is live-edited (e.g. composing the next turn in the Chat tab) while an
+  // older response is still showing, so folding in `activeRequest.body.text` directly would make
+  // the displayed conversation re-render with every keystroke before anything's actually sent.
+  // Freeze a snapshot the moment a (new) response becomes active instead, and only read that.
+  const [snapshotResponseId, setSnapshotResponseId] = useState(activeResponse?._id);
+  const [snapshotRequestBodyText, setSnapshotRequestBodyText] = useState(activeRequest.body?.text);
+  if (activeResponse?._id !== snapshotResponseId) {
+    setSnapshotResponseId(activeResponse?._id);
+    setSnapshotRequestBodyText(activeRequest.body?.text);
+  }
+
   const chatCompletionSummary = useMemo(() => {
     if (!activeResponse?.bodyBuffer) {
       return null;
     }
     try {
-      return extractChatCompletion(bodyBufferToUtf8(activeResponse.bodyBuffer), activeRequest.body?.text);
+      return extractChatCompletion(bodyBufferToUtf8(activeResponse.bodyBuffer), snapshotRequestBodyText);
     } catch {
       return null;
     }
-  }, [activeResponse, activeRequest.body?.text]);
+  }, [activeResponse, snapshotRequestBodyText]);
 
   const showStreamingTeaser =
     !streamingTeaserDismissed &&
@@ -119,6 +136,57 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
       { timeout: null },
     );
   };
+
+  const { organizationId, projectId, workspaceId } = useParams() as {
+    organizationId: string;
+    projectId: string;
+    workspaceId: string;
+  };
+  const { activeWorkspace, activeEnvironment } = useWorkspaceLoaderData()!;
+  const connectRequestFetcher = useRequestConnectActionFetcher();
+  const [followUpText, setFollowUpText] = useState('');
+  const isEventStreamChat = Boolean(chatCompletionSummary) && models.request.isEventStreamRequest(activeRequest);
+  const isSendingFollowUp = connectRequestFetcher.state !== 'idle';
+
+  const handleSendFollowUp = async () => {
+    const text = followUpText.trim();
+    const parsedBody = parseChatRequestBody(activeRequest.body.text || '');
+    if (!text || !parsedBody) {
+      return;
+    }
+    const nextBodyText = serializeChatRequestBody(activeRequest.body.text || '', parsedBody.format, {
+      model: parsedBody.model,
+      messages: [...parsedBody.messages, { role: 'user', content: text }],
+    });
+    const nextBody = { ...activeRequest.body, text: nextBodyText };
+    patchRequest(activeRequest._id, { body: nextBody });
+    setFollowUpText('');
+
+    const rendered = await renderRealtimeConnectPayload({
+      request: { ...activeRequest, body: nextBody },
+      environmentId: activeEnvironment._id,
+      workspaceId: activeWorkspace._id,
+    });
+    if (!rendered) {
+      return;
+    }
+    connectRequestFetcher.submit({
+      organizationId,
+      projectId,
+      workspaceId,
+      requestId: activeRequest._id,
+      connectParams: {
+        url: joinUrlAndQueryString(rendered.url, buildQueryStringFromParams(rendered.parameters)),
+        headers: rendered.headers,
+        authentication: rendered.authentication,
+        body: rendered.body,
+        cookieJar: rendered.workspaceCookieJar,
+        suppressUserAgent: rendered.suppressUserAgent,
+      },
+    });
+    recordProjectRecentRequest({ projectId, requestId: activeRequest._id, workspaceId: activeWorkspace._id });
+  };
+
   const previewMode = activeRequestMeta.previewMode || PREVIEW_MODE_SOURCE;
   const handleSetFilter = async (responseFilter: string) => {
     if (!activeResponse) {
@@ -351,11 +419,32 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
             bodyBuffer={activeResponse.bodyBuffer}
             getBody={() => services.helpers.getResponseBodyBuffer(activeResponse)}
             previewMode={activeResponse.error ? PREVIEW_MODE_SOURCE : previewMode}
-            requestBodyText={activeRequest.body?.text}
+            requestBodyText={snapshotRequestBodyText}
             responseId={activeResponse._id}
             updateFilter={activeResponse.error ? undefined : handleSetFilter}
             url={activeResponse.url}
           />
+          {isEventStreamChat && (
+            <div
+              data-ignore-send-hotkey
+              className="flex shrink-0 items-end gap-2 border-t border-solid border-(--hl-md) bg-(--color-bg) p-2"
+            >
+              <textarea
+                value={followUpText}
+                onChange={event => setFollowUpText(event.target.value)}
+                placeholder="Reply to continue the conversation…"
+                rows={2}
+                className="w-full flex-1 resize-y rounded-xs border border-solid border-(--hl-md) bg-(--color-bg) px-2 py-1 text-sm text-(--color-font) outline-hidden focus:border-(--hl)"
+              />
+              <Button
+                onPress={handleSendFollowUp}
+                isDisabled={!followUpText.trim() || isSendingFollowUp}
+                className="rounded-sm border border-solid border-(--hl-sm) px-3 py-1.5 text-xs hover:bg-(--hl-sm) disabled:opacity-50"
+              >
+                Send
+              </Button>
+            </div>
+          )}
         </TabPanel>
         <TabPanel className="flex w-full flex-1 flex-col overflow-y-auto" id="headers">
           <ErrorBoundary key={activeResponse._id} errorClassName="font-error pad text-center">
