@@ -6,9 +6,12 @@ import React, { type FC, useCallback } from 'react';
 import { Toolbar } from 'react-aria-components';
 import { useParams } from 'react-router';
 
+import { parseChatRequestBody } from '~/common/chat-request';
+
 import { CONTENT_TYPE_FILE, CONTENT_TYPE_FORM_DATA } from '../../../../common/constants';
 import { documentationLinks } from '../../../../common/documentation';
 import { getContentTypeHeader } from '../../../../common/misc';
+import { ChatRequestEditor } from './chat-request-editor';
 
 const lookupMimeType = (path: string) => {
   const ext = path.split('.').pop()?.toLowerCase();
@@ -157,6 +160,16 @@ export const BodyEditor: FC<Props> = ({ request, environmentId }) => {
       );
     } else if (!isBodyEmpty) {
       const contentType = getContentTypeFromHeaders(request.headers) || mimeType;
+      if (contentType?.includes('json') && !isEventStreamRequest(request) && parseChatRequestBody(request.body.text || '')) {
+        return (
+          <ChatRequestEditor
+            bodyText={request.body.text || ''}
+            onChange={handleRawChange}
+            contentType={contentType || 'text/plain'}
+            historyKey={uniqueKey}
+          />
+        );
+      }
       return (
         <RawEditor
           historyKey={uniqueKey}

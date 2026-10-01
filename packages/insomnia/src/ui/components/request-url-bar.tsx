@@ -285,7 +285,10 @@ export const RequestUrlBar = forwardRef<RequestUrlBarHandle, Props>(
         inputRef.current?.selectAll();
       },
       request_send: () => {
-        if (activeRequest.url) {
+        // tinykeys binds this hotkey on `window` in the capture phase, which fires before the
+        // event reaches any focused descendant element — so a composing text field can't stop
+        // this by calling stopPropagation in its own handler, it has to opt out here instead.
+        if (activeRequest.url && !document.activeElement?.closest('[data-ignore-send-hotkey]')) {
           sendOrConnect();
         }
       },
