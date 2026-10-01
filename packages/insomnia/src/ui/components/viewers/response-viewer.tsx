@@ -1,6 +1,7 @@
 import { PREVIEW_MODE_FRIENDLY, PREVIEW_MODE_RAW } from 'insomnia-data/common';
 import { Fragment, useCallback, useRef, useState } from 'react';
 
+import { extractChatCompletion } from '~/common/chat-completion';
 import { bytesToBase64, utf8StringFromBytes } from '~/common/utils/utf8-bytes';
 import { AnalyticsEvent } from '~/ui/analytics';
 import { CodeEditor, type CodeEditorHandle } from '~/ui/components/.client/codemirror/code-editor';
@@ -8,6 +9,7 @@ import { CodeEditor, type CodeEditorHandle } from '~/ui/components/.client/codem
 import { HUGE_RESPONSE_MB, LARGE_RESPONSE_MB } from '../../../common/constants';
 import { unescapeForwardSlash } from '../../../common/misc';
 import { useDocBodyKeyboardShortcuts } from '../keydown-binder';
+import { ResponseChatViewer } from './response-chat-viewer';
 import { ResponseCSVViewer } from './response-csv-viewer';
 import { ResponseErrorViewer } from './response-error-viewer';
 import { ResponseMultipartViewer } from './response-multipart-viewer';
@@ -67,6 +69,7 @@ export interface ResponseViewerProps {
   url: string;
   updateFilter?: (filter: string) => void;
   error?: string | null;
+  requestBodyText?: string;
 }
 
 export const ResponseViewer = ({
@@ -82,6 +85,7 @@ export const ResponseViewer = ({
   filter,
   filterHistory,
   previewMode,
+  requestBodyText,
   responseId,
   updateFilter,
   url,
@@ -233,6 +237,11 @@ export const ResponseViewer = ({
   const contentType = _getContentType();
 
   if (previewMode === PREVIEW_MODE_FRIENDLY && contentType === 'application/json') {
+    const chatCompletion = extractChatCompletion(getBodyAsString(), requestBodyText);
+    if (chatCompletion) {
+      return <ResponseChatViewer key={`${responseId}-chat`} summary={chatCompletion} />;
+    }
+
     let bodyStr = getBodyAsString();
     // Although there is a prettifier for json inside the CodeEditor, but it is to prettify json strings that is being edited which may have syntax errors.
     // There are some cases that the prettifier inside the CodeEditor can not handle.
