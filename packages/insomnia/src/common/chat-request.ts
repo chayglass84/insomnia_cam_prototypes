@@ -133,3 +133,47 @@ export const serializeChatRequestBody = (
 
   return JSON.stringify(next, null, 2);
 };
+
+export interface ChatSamplingParams {
+  temperature?: number;
+  maxTokens?: number;
+}
+
+// `temperature`/`max_tokens` are literal top-level JSON keys shared by both the OpenAI and
+// Anthropic request shapes, so these work unmodified for either `format`. Gemini nests the
+// equivalent fields under `generationConfig` with different names (`maxOutputTokens`) — callers
+// should not use these for a Gemini-format request.
+export const parseChatSamplingParams = (bodyText: string): ChatSamplingParams => {
+  try {
+    const parsed = JSON.parse(bodyText);
+    return {
+      temperature: typeof parsed?.temperature === 'number' ? parsed.temperature : undefined,
+      maxTokens: typeof parsed?.max_tokens === 'number' ? parsed.max_tokens : undefined,
+    };
+  } catch {
+    return {};
+  }
+};
+
+export const applyChatSamplingParams = (bodyText: string, params: ChatSamplingParams): string => {
+  let original: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(bodyText);
+    original = parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    original = {};
+  }
+
+  const next = { ...original };
+  if (params.temperature === undefined) {
+    delete next.temperature;
+  } else {
+    next.temperature = params.temperature;
+  }
+  if (params.maxTokens === undefined) {
+    delete next.max_tokens;
+  } else {
+    next.max_tokens = params.maxTokens;
+  }
+  return JSON.stringify(next, null, 2);
+};

@@ -9,7 +9,7 @@ import type {
 } from 'insomnia-data';
 import { models, services } from 'insomnia-data';
 import { deserializeNDJSON } from 'insomnia-data/common';
-import React, { type FC, useEffect, useMemo, useState } from 'react';
+import React, { type FC, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Button,
   Input,
@@ -25,8 +25,13 @@ import {
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { useParams } from 'react-router';
 
-import { extractRequestMessages } from '~/common/chat-completion';
-import { parseChatRequestBody, serializeChatRequestBody } from '~/common/chat-request';
+import { type ChatMessage, extractRequestMessages } from '~/common/chat-completion';
+import {
+  applyChatSamplingParams,
+  parseChatRequestBody,
+  parseChatSamplingParams,
+  serializeChatRequestBody,
+} from '~/common/chat-request';
 import { ensureStreamingBodyFlag, hasStreamingBodyFlag } from '~/common/chat-streaming';
 import { docsMcpAuthentication } from '~/common/documentation';
 import { extractStreamChatMeta, getCandidatePayloadsFromEvents, type StreamMessageEvent } from '~/common/stream-summary';
@@ -69,6 +74,7 @@ import { SvgIcon } from '../svg-icon';
 import { SizeTag } from '../tags/size-tag';
 import { StatusTag } from '../tags/status-tag';
 import { TimeTag } from '../tags/time-tag';
+import type { ChatSettingsValues } from '../viewers/chat-settings-bar';
 import { ResponseChatViewer } from '../viewers/response-chat-viewer';
 import { ResponseCookiesViewer } from '../viewers/response-cookies-viewer';
 import { ResponseErrorViewer } from '../viewers/response-error-viewer';
@@ -369,6 +375,91 @@ const RealtimeActiveResponsePane: FC<RealtimeActiveResponsePaneProps & { readySt
     );
   };
 
+  const chatSettingsValues: ChatSettingsValues = useMemo(() => {
+    const samplingParams = parseChatSamplingParams(requestBodyText || '');
+    return {
+      model: parsedChatRequest?.model,
+      systemPrompt: parsedChatRequest?.messages.find(message => message.role === 'system')?.content,
+      temperature: samplingParams.temperature,
+      maxTokens: samplingParams.maxTokens,
+    };
+  }, [parsedChatRequest, requestBodyText]);
+
+  // Tracks that a settings edit was applied to the request body but the live connection (if any)
+  // still reflects the old values — cleared once the user reconnects.
+  const [settingsChangedSinceConnect, setSettingsChangedSinceConnect] = useState(false);
+  // The just-applied body, read directly by reconnect rather than via `activeRequest` — the patch
+  // above persists immediately, but `activeRequest` only reflects it once the router loader this
+  // component reads from has revalidated, which isn't guaranteed to have happened yet by the time
+  // the user reacts to the "reconnect" notice and clicks it.
+  const pendingSettingsBodyRef = useRef<typeof activeRequest.body | null>(null);
+  useEffect(() => {
+    pendingSettingsBodyRef.current = null;
+    setSettingsChangedSinceConnect(false);
+  }, [activeRequest._id]);
+
+  const handleApplyChatSettings = async (next: ChatSettingsValues) => {
+    if (!parsedChatRequest) {
+      return;
+    }
+    const unchanged =
+      (next.model || undefined) === chatSettingsValues.model &&
+      (next.systemPrompt || undefined) === chatSettingsValues.systemPrompt &&
+      next.temperature === chatSettingsValues.temperature &&
+      next.maxTokens === chatSettingsValues.maxTokens;
+    if (unchanged) {
+      return;
+    }
+
+    const nonSystemMessages = parsedChatRequest.messages.filter(message => message.role !== 'system');
+    const nextMessages: ChatMessage[] = next.systemPrompt
+      ? [{ role: 'system', content: next.systemPrompt }, ...nonSystemMessages]
+      : nonSystemMessages;
+
+    let nextBodyText = serializeChatRequestBody(requestBodyText || '', parsedChatRequest.format, {
+      model: next.model,
+      messages: nextMessages,
+    });
+    nextBodyText = applyChatSamplingParams(nextBodyText, {
+      temperature: next.temperature,
+      maxTokens: next.maxTokens,
+    });
+
+    const nextBody = { ...activeRequest.body, text: nextBodyText };
+    pendingSettingsBodyRef.current = nextBody;
+    await services.request.update(activeRequest, { body: nextBody });
+    patchRequest(activeRequest._id, { body: nextBody });
+    setSettingsChangedSinceConnect(true);
+  };
+
+  const handleReconnectAfterSettingsChange = async () => {
+    const rendered = await renderRealtimeConnectPayload({
+      request: { ...activeRequest, body: pendingSettingsBodyRef.current ?? activeRequest.body },
+      environmentId: activeEnvironment._id,
+      workspaceId: activeWorkspace._id,
+    });
+    if (!rendered) {
+      return;
+    }
+    connectRequestFetcher.submit({
+      organizationId,
+      projectId,
+      workspaceId,
+      requestId: activeRequest._id,
+      connectParams: {
+        url: joinUrlAndQueryString(rendered.url, buildQueryStringFromParams(rendered.parameters)),
+        headers: rendered.headers,
+        authentication: rendered.authentication,
+        body: rendered.body,
+        cookieJar: rendered.workspaceCookieJar,
+        suppressUserAgent: rendered.suppressUserAgent,
+      },
+    });
+    recordProjectRecentRequest({ projectId, requestId: activeRequest._id, workspaceId: activeWorkspace._id });
+    pendingSettingsBodyRef.current = null;
+    setSettingsChangedSinceConnect(false);
+  };
+
   // Picks up the "Enable streaming" teaser's auto-connect intent (see pending-auto-connect.ts for
   // why it's deferred here rather than fired from the component that flagged it).
   useEffect(() => {
@@ -407,7 +498,11 @@ const RealtimeActiveResponsePane: FC<RealtimeActiveResponsePaneProps & { readySt
 
   const handleSendFollowUp = async () => {
     const text = followUpText.trim();
-    const parsedBody = parseChatRequestBody(requestBodyText || '');
+    // Prefer the just-applied settings body over `requestBodyText` — a settings edit persists
+    // immediately, but `requestBodyText` (from `activeRequest`) only reflects it once the router
+    // loader has revalidated, which isn't guaranteed to have happened yet.
+    const baseBodyText = pendingSettingsBodyRef.current?.text ?? requestBodyText;
+    const parsedBody = parseChatRequestBody(baseBodyText || '');
     if (!text || !parsedBody) {
       return;
     }
@@ -419,13 +514,15 @@ const RealtimeActiveResponsePane: FC<RealtimeActiveResponsePaneProps & { readySt
     const messagesWithPreviousReply = previousAssistantText
       ? [...parsedBody.messages, { role: 'assistant' as const, content: previousAssistantText }]
       : parsedBody.messages;
-    const nextBodyText = serializeChatRequestBody(requestBodyText || '', parsedBody.format, {
+    const nextBodyText = serializeChatRequestBody(baseBodyText || '', parsedBody.format, {
       model: parsedBody.model,
       messages: [...messagesWithPreviousReply, { role: 'user', content: text }],
     });
     const nextBody = { ...activeRequest.body, text: nextBodyText };
     patchRequest(activeRequest._id, { body: nextBody });
     setFollowUpText('');
+    pendingSettingsBodyRef.current = null;
+    setSettingsChangedSinceConnect(false);
 
     const rendered = await renderRealtimeConnectPayload({
       request: { ...activeRequest, body: nextBody },
@@ -680,6 +777,19 @@ const RealtimeActiveResponsePane: FC<RealtimeActiveResponsePaneProps & { readySt
                 stopReason: streamChatMeta.stopReason,
               }}
               isStreaming={isConnected}
+              requestKey={activeRequest._id}
+              format={parsedChatRequest?.format ?? 'openai'}
+              settingsValues={chatSettingsValues}
+              onApplySettings={handleApplyChatSettings}
+              pendingSettingsNotice={
+                settingsChangedSinceConnect
+                  ? {
+                      message: 'Settings changed — reconnect to use them.',
+                      actionLabel: 'Reconnect',
+                      onAction: handleReconnectAfterSettingsChange,
+                    }
+                  : null
+              }
             />
             <div
               data-ignore-send-hotkey
