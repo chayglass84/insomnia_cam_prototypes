@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseChatRequestBody, serializeChatRequestBody } from './chat-request';
+import {
+  applyChatSamplingParams,
+  parseChatRequestBody,
+  parseChatSamplingParams,
+  serializeChatRequestBody,
+} from './chat-request';
 
 describe('parseChatRequestBody', () => {
   it('parses an OpenAI-style request body', () => {
@@ -146,5 +151,29 @@ describe('serializeChatRequestBody round-trips', () => {
     const reparsed = JSON.parse(serialized);
     expect(reparsed.max_tokens).toBe(1024);
     expect(reparsed.temperature).toBe(0.7);
+  });
+});
+
+describe('parseChatSamplingParams / applyChatSamplingParams', () => {
+  it('parses temperature and max_tokens when present', () => {
+    const body = JSON.stringify({ temperature: 0.5, max_tokens: 2048 });
+    expect(parseChatSamplingParams(body)).toEqual({ temperature: 0.5, maxTokens: 2048 });
+  });
+
+  it('returns undefined fields when absent or malformed', () => {
+    expect(parseChatSamplingParams(JSON.stringify({}))).toEqual({ temperature: undefined, maxTokens: undefined });
+    expect(parseChatSamplingParams('not json')).toEqual({});
+  });
+
+  it('sets, updates, and clears sampling params without disturbing other fields', () => {
+    const original = JSON.stringify({ model: 'gpt-4o-mini', messages: [] });
+    const withParams = applyChatSamplingParams(original, { temperature: 0.9, maxTokens: 512 });
+    expect(JSON.parse(withParams)).toMatchObject({ model: 'gpt-4o-mini', temperature: 0.9, max_tokens: 512 });
+
+    const cleared = applyChatSamplingParams(withParams, {});
+    const reparsed = JSON.parse(cleared);
+    expect(reparsed.temperature).toBeUndefined();
+    expect(reparsed.max_tokens).toBeUndefined();
+    expect(reparsed.model).toBe('gpt-4o-mini');
   });
 });

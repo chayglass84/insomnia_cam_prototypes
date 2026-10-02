@@ -299,3 +299,96 @@ test('AI Gateway chat: "Enable streaming" fixes the header and body and auto-con
   await responsePane.getByRole('button', { name: 'Send' }).click();
   await expect.soft(followUpBox).toHaveValue('');
 });
+
+// Real bug: the message list didn't stay scrolled to the bottom as a reply grew past the visible
+// height of the pane, leaving the user looking at the top of a long reply instead of its end.
+test('AI Gateway chat: the message list stays scrolled to the bottom as a long reply streams in', async ({
+  page,
+  insomnia,
+}) => {
+  test.slow(process.platform === 'darwin' || process.platform === 'win32', 'Slow app start on these platforms');
+
+  const requestPane = page.getByTestId('request-pane');
+  const responsePane = page.getByTestId('response-pane').first();
+
+  await page.getByRole('button', { name: 'Create request collection', exact: true }).click();
+  await insomnia.navigationSidebar.openWorkspaceActionsDropdown('My first collection');
+  await page.getByRole('menuitemradio', { name: 'From Curl' }).click();
+  await page
+    .getByRole('dialog')
+    .locator('.CodeMirror textarea')
+    .fill(
+      `curl --request POST --url 'http://127.0.0.1:4010/v1/messages?longReply=1' ` +
+        `-H 'Accept: text/event-stream' -H 'Content-Type: application/json' ` +
+        `--data '{"model":"claude-sonnet-5","max_tokens":100,"stream":true,"messages":[{"role":"user","content":"Give me a long reply"}]}'`,
+    );
+  await page.getByRole('dialog').getByRole('button', { name: 'Import' }).click();
+  await requestPane.getByRole('button', { name: 'Connect' }).click();
+  await expect.soft(responsePane.getByTestId('response-status-tag')).toContainText('200', { timeout: 10_000 });
+  await expect.soft(responsePane.getByText('Line 60')).toBeVisible({ timeout: 10_000 });
+
+  const messageList = responsePane.getByTestId('chat-message-list');
+  const readScrollState = () =>
+    messageList.evaluate(el => ({
+      scrollTop: el.scrollTop,
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+    }));
+
+  // The auto-scroll is driven by a ResizeObserver, whose callback fires on a later frame than the
+  // DOM mutation that triggered it (and `toBeVisible()` above doesn't itself wait for scrolling
+  // within an overflow container) — poll instead of reading scroll position exactly once.
+  await expect
+    .poll(async () => {
+      const { scrollTop, scrollHeight, clientHeight } = await readScrollState();
+      return scrollTop + clientHeight >= scrollHeight - 2;
+    }, { timeout: 5000 })
+    .toBe(true);
+
+  const { scrollHeight, clientHeight } = await readScrollState();
+  expect.soft(scrollHeight).toBeGreaterThan(clientHeight); // sanity: the content actually overflows
+});
+
+// The user's ask: move the system prompt (and model/temperature/max_tokens) into the summary bar
+// as editable fields, and warn when a change needs a reconnect to take effect.
+test('AI Gateway chat: editing settings in the bar warns that a reconnect is needed, and reconnect applies them', async ({
+  page,
+  insomnia,
+}) => {
+  test.slow(process.platform === 'darwin' || process.platform === 'win32', 'Slow app start on these platforms');
+
+  const requestPane = page.getByTestId('request-pane');
+  const responsePane = page.getByTestId('response-pane').first();
+
+  await page.getByRole('button', { name: 'Create request collection', exact: true }).click();
+  await insomnia.navigationSidebar.openWorkspaceActionsDropdown('My first collection');
+  await page.getByRole('menuitemradio', { name: 'From Curl' }).click();
+  await page
+    .getByRole('dialog')
+    .locator('.CodeMirror textarea')
+    .fill(
+      `curl --request POST --url 'http://127.0.0.1:4010/v1/messages?reportThreading=1' ` +
+        `-H 'Accept: text/event-stream' -H 'Content-Type: application/json' ` +
+        `--data '{"model":"claude-sonnet-5","max_tokens":100,"stream":true,"system":"Be terse.","messages":[{"role":"user","content":"turn1"}]}'`,
+    );
+  await page.getByRole('dialog').getByRole('button', { name: 'Import' }).click();
+  await requestPane.getByRole('button', { name: 'Connect' }).click();
+  await expect.soft(responsePane.getByTestId('response-status-tag')).toContainText('200', { timeout: 10_000 });
+
+  // No bubble for the system prompt anymore — it lives in the settings bar instead.
+  await expect.soft(responsePane.getByText('System prompt', { exact: true })).toHaveCount(0);
+
+  const systemField = responsePane.getByPlaceholder('System prompt…');
+  await expect.soft(systemField).toHaveValue('Be terse.');
+  await systemField.fill('Speak like a pirate.');
+  await systemField.blur();
+
+  // Editing warns that the live connection won't see the change until reconnecting.
+  const notice = responsePane.getByText('Settings changed — reconnect to use them.');
+  await expect.soft(notice).toBeVisible();
+
+  await responsePane.getByRole('button', { name: 'Reconnect' }).click();
+  await expect.soft(notice).toBeHidden();
+  await expect.soft(responsePane.getByTestId('response-status-tag')).toContainText('200', { timeout: 10_000 });
+  await expect.soft(responsePane.getByText('system=Speak like a pirate.')).toBeVisible();
+});

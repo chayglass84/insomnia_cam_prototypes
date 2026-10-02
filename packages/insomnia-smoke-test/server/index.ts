@@ -134,6 +134,12 @@ app.post('/v1/messages', rawParser, (req, res) => {
       index: 0,
       delta: { type: 'text_delta', text: `assistantTurns=${assistantTurns} lastUser=${lastUserContent} system=${system}` },
     });
+  } else if (req.query.longReply === '1') {
+    // Enough lines to overflow the chat pane's visible height, so a test can confirm the message
+    // list stays pinned to the bottom as it grows instead of leaving the user scrolled up.
+    for (let i = 1; i <= 60; i++) {
+      send('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: `Line ${i}\n` } });
+    }
   } else {
     for (const text of ['Hello', ' from', ' mock', ' Anthropic', ' stream!']) {
       send('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } });

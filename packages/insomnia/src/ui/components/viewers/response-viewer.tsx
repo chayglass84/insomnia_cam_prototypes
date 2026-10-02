@@ -2,6 +2,7 @@ import { PREVIEW_MODE_FRIENDLY, PREVIEW_MODE_RAW } from 'insomnia-data/common';
 import { Fragment, useCallback, useRef, useState } from 'react';
 
 import { extractChatCompletion } from '~/common/chat-completion';
+import { parseChatRequestBody, parseChatSamplingParams } from '~/common/chat-request';
 import { bytesToBase64, utf8StringFromBytes } from '~/common/utils/utf8-bytes';
 import { AnalyticsEvent } from '~/ui/analytics';
 import { CodeEditor, type CodeEditorHandle } from '~/ui/components/.client/codemirror/code-editor';
@@ -239,7 +240,22 @@ export const ResponseViewer = ({
   if (previewMode === PREVIEW_MODE_FRIENDLY && contentType === 'application/json') {
     const chatCompletion = extractChatCompletion(getBodyAsString(), requestBodyText);
     if (chatCompletion) {
-      return <ResponseChatViewer key={`${responseId}-chat`} summary={chatCompletion} />;
+      const parsedRequest = requestBodyText ? parseChatRequestBody(requestBodyText) : null;
+      const samplingParams = requestBodyText ? parseChatSamplingParams(requestBodyText) : {};
+      return (
+        <ResponseChatViewer
+          key={`${responseId}-chat`}
+          summary={chatCompletion}
+          requestKey={responseId}
+          format={parsedRequest?.format ?? 'openai'}
+          settingsValues={{
+            model: parsedRequest?.model,
+            systemPrompt: parsedRequest?.messages.find(message => message.role === 'system')?.content,
+            temperature: samplingParams.temperature,
+            maxTokens: samplingParams.maxTokens,
+          }}
+        />
+      );
     }
 
     let bodyStr = getBodyAsString();

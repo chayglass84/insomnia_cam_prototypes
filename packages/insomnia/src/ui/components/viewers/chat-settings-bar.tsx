@@ -1,0 +1,224 @@
+import React, { type FC, useRef } from 'react';
+import { Button } from 'react-aria-components';
+
+import { Icon } from '~/ui/components/icon';
+
+export interface ChatSettingsValues {
+  model?: string;
+  systemPrompt?: string;
+  temperature?: number;
+  maxTokens?: number;
+}
+
+interface Props {
+  // Remounts the bar's uncontrolled fields when the underlying request/response changes —
+  // same "uncontrolled + key" pattern used elsewhere in this codebase (e.g. the stream-summary
+  // JSONPath field) so a round trip through patching the request doesn't clobber mid-edit typing.
+  requestKey: string;
+  format: 'openai' | 'anthropic' | 'gemini';
+  values: ChatSettingsValues;
+  // Omit for a plain read-only summary (no editing, no pending-change warning) — used where there's
+  // no obvious "apply this" action to wire up to yet (the one-shot non-streaming response pane).
+  onApply?: (next: ChatSettingsValues) => void;
+  usage?: { inputTokens?: number; outputTokens?: number };
+  stopReason?: string;
+  isStreaming?: boolean;
+  pendingNotice?: { message: string; actionLabel: string; onAction: () => void } | null;
+}
+
+const fieldClassName =
+  'rounded-xs border border-solid border-(--hl-sm) bg-(--color-bg) px-2 py-1 text-xs text-(--color-font) outline-hidden focus:border-(--hl)';
+
+export const ChatSettingsBar: FC<Props> = ({
+  requestKey,
+  format,
+  values,
+  onApply,
+  usage,
+  stopReason,
+  isStreaming,
+  pendingNotice,
+}) => {
+  // Gemini nests sampling params under a differently-shaped `generationConfig` object, which
+  // neither this bar nor chat-request.ts's sampling-param helpers handle — hide rather than edit
+  // a field that would silently write to the wrong place.
+  const supportsSamplingParams = format !== 'gemini';
+
+  const modelRef = useRef<HTMLInputElement>(null);
+  const systemRef = useRef<HTMLTextAreaElement>(null);
+  const temperatureRef = useRef<HTMLInputElement>(null);
+  const maxTokensRef = useRef<HTMLInputElement>(null);
+
+  const commit = () => {
+    if (!onApply) {
+      return;
+    }
+    onApply({
+      model: modelRef.current?.value.trim() || undefined,
+      systemPrompt: systemRef.current?.value.trim() || undefined,
+      temperature:
+        temperatureRef.current?.value && !Number.isNaN(Number(temperatureRef.current.value))
+          ? Number(temperatureRef.current.value)
+          : undefined,
+      maxTokens:
+        maxTokensRef.current?.value && !Number.isNaN(Number(maxTokensRef.current.value))
+          ? Number(maxTokensRef.current.value)
+          : undefined,
+    });
+  };
+
+  const commitOnEnter = (event: React.KeyboardEvent) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      (event.target as HTMLElement).blur();
+    }
+  };
+
+  const totalTokens =
+    usage?.inputTokens !== undefined && usage?.outputTokens !== undefined
+      ? usage.inputTokens + usage.outputTokens
+      : undefined;
+
+  if (!onApply) {
+    if (!values.model && !values.systemPrompt && !usage && !stopReason && !isStreaming) {
+      return null;
+    }
+    return (
+      <div
+        key={requestKey}
+        className="flex shrink-0 flex-col gap-1 border-b border-solid border-(--hl-md) bg-(--hl-xs) px-3 py-1.5 text-xs text-(--hl)"
+      >
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          {isStreaming && (
+            <span className="flex items-center gap-1 text-(--color-font)">
+              <Icon icon="spinner" className="animate-spin" />
+              Streaming…
+            </span>
+          )}
+          {values.model && (
+            <span className="flex items-center gap-1">
+              <Icon icon="robot" />
+              {values.model}
+            </span>
+          )}
+          {usage && (
+            <span className="flex items-center gap-1">
+              <Icon icon="coins" />
+              {usage.inputTokens ?? '?'} in / {usage.outputTokens ?? '?'} out
+              {totalTokens !== undefined && <span className="text-(--hl)">({totalTokens} total)</span>}
+            </span>
+          )}
+          {stopReason && (
+            <span className="flex items-center gap-1">
+              <Icon icon="stop" />
+              {stopReason}
+            </span>
+          )}
+        </div>
+        {values.systemPrompt && (
+          <div className="truncate text-(--hl) italic" title={values.systemPrompt}>
+            {values.systemPrompt}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      key={requestKey}
+      className="flex shrink-0 flex-col gap-1.5 border-b border-solid border-(--hl-md) bg-(--hl-xs) px-3 py-2 text-xs text-(--hl)"
+    >
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        {isStreaming && (
+          <span className="flex items-center gap-1 text-(--color-font)">
+            <Icon icon="spinner" className="animate-spin" />
+            Streaming…
+          </span>
+        )}
+        <label className="flex items-center gap-1">
+          <Icon icon="robot" />
+          <input
+            ref={modelRef}
+            defaultValue={values.model ?? ''}
+            onBlur={commit}
+            onKeyDown={commitOnEnter}
+            placeholder="model"
+            aria-label="Model"
+            className={`${fieldClassName} w-36`}
+          />
+        </label>
+        {supportsSamplingParams && (
+          <>
+            <label className="flex items-center gap-1">
+              <Icon icon="temperature-half" />
+              <input
+                ref={temperatureRef}
+                defaultValue={values.temperature ?? ''}
+                onBlur={commit}
+                onKeyDown={commitOnEnter}
+                type="number"
+                step="0.1"
+                min="0"
+                max="2"
+                placeholder="temp"
+                aria-label="Temperature"
+                className={`${fieldClassName} w-16`}
+              />
+            </label>
+            <label className="flex items-center gap-1">
+              <Icon icon="hashtag" />
+              <input
+                ref={maxTokensRef}
+                defaultValue={values.maxTokens ?? ''}
+                onBlur={commit}
+                onKeyDown={commitOnEnter}
+                type="number"
+                step="1"
+                min="1"
+                placeholder="max tokens"
+                aria-label="Max tokens"
+                className={`${fieldClassName} w-24`}
+              />
+            </label>
+          </>
+        )}
+        {usage && (
+          <span className="flex items-center gap-1">
+            <Icon icon="coins" />
+            {usage.inputTokens ?? '?'} in / {usage.outputTokens ?? '?'} out
+            {totalTokens !== undefined && <span className="text-(--hl)">({totalTokens} total)</span>}
+          </span>
+        )}
+        {stopReason && (
+          <span className="flex items-center gap-1">
+            <Icon icon="stop" />
+            {stopReason}
+          </span>
+        )}
+      </div>
+      <textarea
+        ref={systemRef}
+        defaultValue={values.systemPrompt ?? ''}
+        onBlur={commit}
+        placeholder="System prompt…"
+        rows={1}
+        className={`${fieldClassName} w-full resize-y italic`}
+      />
+      {pendingNotice && (
+        <div className="flex items-center justify-between gap-2 rounded-xs border border-solid border-(--color-warning) bg-(--color-bg) px-2 py-1 text-(--color-font)">
+          <span className="flex items-center gap-1">
+            <Icon icon="triangle-exclamation" className="text-(--color-warning)" />
+            {pendingNotice.message}
+          </span>
+          <Button
+            onPress={pendingNotice.onAction}
+            className="shrink-0 rounded-xs border border-solid border-(--hl-sm) px-2 py-0.5 hover:bg-(--hl-sm)"
+          >
+            {pendingNotice.actionLabel}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+};

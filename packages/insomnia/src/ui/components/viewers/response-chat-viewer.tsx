@@ -1,15 +1,20 @@
-import React, { type FC } from 'react';
+import React, { type FC, useEffect, useRef } from 'react';
 
 import type { ChatCompletionSummary, ChatMessage } from '~/common/chat-completion';
 import { getChatTurnMeta } from '~/ui/utils/chat-turn-meta-cache';
 
 import { Icon } from '../icon';
 import { MarkdownPreview } from '../markdown-preview';
-import { ChatSummaryBar } from './chat-summary-bar';
+import { ChatSettingsBar, type ChatSettingsValues } from './chat-settings-bar';
 
 interface Props {
   summary: ChatCompletionSummary;
   isStreaming?: boolean;
+  requestKey: string;
+  format: 'openai' | 'anthropic' | 'gemini';
+  settingsValues: ChatSettingsValues;
+  onApplySettings?: (next: ChatSettingsValues) => void;
+  pendingSettingsNotice?: { message: string; actionLabel: string; onAction: () => void } | null;
 }
 
 const roleAlignment: Record<ChatMessage['role'], string> = {
@@ -40,17 +45,6 @@ const ChatBubble: FC<{ message: ChatMessage; isLast: boolean; summary: ChatCompl
   isLast,
   summary,
 }) => {
-  if (message.role === 'system') {
-    return (
-      <div className={`flex w-full flex-col items-center gap-1`}>
-        <div className="text-[10px] font-semibold tracking-wide text-(--hl) uppercase">System prompt</div>
-        <div className="max-w-[80%] rounded-md bg-transparent px-3 py-1 text-center text-xs break-words whitespace-pre-wrap text-(--hl) italic">
-          {message.content}
-        </div>
-      </div>
-    );
-  }
-
   const isAssistant = message.role === 'assistant';
   // The live/current turn's model+usage comes from the response's own summary; any earlier
   // turn's only exists in the in-memory turn-meta cache (see chat-turn-meta-cache.ts) — past
@@ -74,32 +68,107 @@ const ChatBubble: FC<{ message: ChatMessage; isLast: boolean; summary: ChatCompl
   );
 };
 
-export const ResponseChatViewer: FC<Props> = ({ summary, isStreaming }) => {
+export const ResponseChatViewer: FC<Props> = ({
+  summary,
+  isStreaming,
+  requestKey,
+  format,
+  settingsValues,
+  onApplySettings,
+  pendingSettingsNotice,
+}) => {
+  // The system prompt now lives in the settings bar above, not as a bubble in the list.
+  const visibleMessages = summary.messages.filter(message => message.role !== 'system');
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  // Whether the viewport was already scrolled to (near) the bottom before the content grew — so a
+  // user who's deliberately scrolled up to reread earlier messages isn't yanked back down.
+  const isPinnedToBottomRef = useRef(true);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) {
+      return;
+    }
+    const handleScroll = () => {
+      const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+      isPinnedToBottomRef.current = distanceFromBottom < 24;
+    };
+    el.addEventListener('scroll', handleScroll);
+    return () => el.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    const content = contentRef.current;
+    if (!el || !content) {
+      return;
+    }
+    // A plain effect keyed on message content isn't enough: markdown compiles asynchronously
+    // (see markdown-preview.tsx) via its own effect setting `dangerouslySetInnerHTML` on a later
+    // render, so the DOM's final height isn't known yet when this component's own effect runs. A
+    // MutationObserver on the content wrapper reacts directly to that DOM swap (and any other
+    // content change) as it happens; the scroll itself is deferred one frame so it reads the
+    // post-mutation layout rather than racing it.
+    let frame = 0;
+    const observer = new MutationObserver(() => {
+      if (!isPinnedToBottomRef.current) {
+        return;
+      }
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        el.scrollTop = el.scrollHeight;
+      });
+    });
+    observer.observe(content, { childList: true, subtree: true, characterData: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, []);
+
+  // A different request/response means a different conversation — always start pinned to the
+  // bottom of it rather than carrying over whatever scroll state the previous one ended in.
+  useEffect(() => {
+    isPinnedToBottomRef.current = true;
+  }, [requestKey]);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <ChatSummaryBar
-        model={summary.model}
+      <ChatSettingsBar
+        requestKey={requestKey}
+        format={format}
+        values={settingsValues}
+        onApply={onApplySettings}
         usage={summary.usage}
         stopReason={summary.stopReason}
         isStreaming={isStreaming}
+        pendingNotice={pendingSettingsNotice}
       />
-      <div className="flex flex-1 flex-col gap-3 overflow-x-hidden overflow-y-auto p-(--padding-sm)">
-        {summary.messages.length === 0 ? (
-          <div className="flex items-center gap-2 text-(--hl)">
-            <Icon icon="comment" />
-            No chat messages found in this exchange.
-          </div>
-        ) : (
-          summary.messages.map((message, index) => (
-            <ChatBubble
-              // eslint-disable-next-line react/no-array-index-key -- messages have no stable id
-              key={index}
-              message={message}
-              isLast={index === summary.messages.length - 1}
-              summary={summary}
-            />
-          ))
-        )}
+      <div
+        ref={scrollRef}
+        data-testid="chat-message-list"
+        className="flex flex-1 flex-col overflow-x-hidden overflow-y-auto p-(--padding-sm)"
+      >
+        <div ref={contentRef} className="flex flex-col gap-3">
+          {visibleMessages.length === 0 ? (
+            <div className="flex items-center gap-2 text-(--hl)">
+              <Icon icon="comment" />
+              No chat messages found in this exchange.
+            </div>
+          ) : (
+            visibleMessages.map((message, index) => (
+              <ChatBubble
+                // eslint-disable-next-line react/no-array-index-key -- messages have no stable id
+                key={index}
+                message={message}
+                isLast={index === visibleMessages.length - 1}
+                summary={summary}
+              />
+            ))
+          )}
+        </div>
       </div>
     </div>
   );
