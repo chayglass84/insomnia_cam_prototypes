@@ -28,6 +28,10 @@ export interface RAToastContent {
   };
   status?: Status;
   time?: string;
+  // Shifts this toast up from its default bottom-right corner position, for a caller that knows a
+  // persistent (non-auto-dismissing) toast would otherwise sit over other on-screen controls —
+  // e.g. a response pane's own Send button, which also lives bottom-right.
+  raised?: boolean;
 }
 
 const logTransitionError = (error: unknown) => {
@@ -131,13 +135,25 @@ const StatusIconMap: Record<Status, IconProp> = {
 };
 
 // Render a <ToastRegion> in the root of your app.
+//
+// The region renders via react-aria's "top layer" (see its own data-react-aria-top-layer
+// attribute), which paints above the entire normal page regardless of any z-index an app author
+// sets elsewhere — so a plain z-index bump on a covered control (e.g. a response pane's own Send
+// button, in the same bottom-right corner) can never win a click back from it. The region's own
+// bounding box is also larger than any single toast card inside it. `pointer-events-none` here,
+// with `pointer-events-auto` restored only on the actual `<Toast>` card below, means only the
+// visible card itself ever captures a click — the rest of the region's box (and the gap a
+// `raised` toast opens up beneath it) passes clicks straight through to whatever's underneath.
 export const Toaster = () => (
-  <ToastRegion queue={queue} className="fixed right-4 bottom-4 z-50 flex flex-col gap-2 rounded-lg outline-hidden">
+  <ToastRegion
+    queue={queue}
+    className="pointer-events-none fixed right-4 bottom-4 z-50 flex flex-col gap-2 rounded-lg outline-hidden"
+  >
     {({ toast }) => (
       <Toast
         toast={toast}
         style={{ viewTransitionName: toast.key }}
-        className={`flex items-center gap-4 rounded-lg border border-solid border-(--hl-sm) bg-(--color-bg) px-3 py-2 text-sm text-(--color-font) shadow-lg outline-hidden`}
+        className={`pointer-events-auto flex items-center gap-4 rounded-lg border border-solid border-(--hl-sm) bg-(--color-bg) px-3 py-2 text-sm text-(--color-font) shadow-lg outline-hidden ${toast.content.raised ? 'mb-24' : ''}`}
       >
         <ToastContent className="flex min-w-0 flex-1 flex-col">
           <div className="flex items-center gap-2">

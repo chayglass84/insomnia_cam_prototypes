@@ -67,6 +67,104 @@ app.get('/sse', (_req, res) => {
   res.end();
 });
 
+// Anthropic Messages API streaming shape (message_start -> content_block_delta* -> message_delta
+// -> message_stop), used to exercise the chat-completion bubble/summary UI against a real SSE
+// response rather than a single JSON body. Path matches the real Anthropic Messages API exactly
+// so the app's streaming-JSONPath auto-inference (keyed on pathname) kicks in with no manual setup.
+// Mirrors the real API's behavior of only streaming when the body sets `"stream": true` — a
+// request with an Accept: text/event-stream header but no body flag gets one normal, complete,
+// non-SSE JSON reply instead, same as the real Anthropic API would send.
+app.post('/v1/messages', rawParser, (req, res) => {
+  let streamRequested = false;
+  try {
+    streamRequested = JSON.parse(req.body.toString() || '{}')?.stream === true;
+  } catch {
+    // ignore malformed bodies in this test fixture
+  }
+  if (!streamRequested) {
+    res.json({
+      id: 'msg_test_non_stream',
+      role: 'assistant',
+      model: 'claude-sonnet-5',
+      content: [{ type: 'text', text: 'Hello from mock Anthropic non-stream reply!' }],
+      stop_reason: 'end_turn',
+      usage: { input_tokens: 12, output_tokens: 8 },
+    });
+    return;
+  }
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+  });
+  const send = (event: string, data: unknown) => {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+  };
+  send('message_start', {
+    type: 'message_start',
+    message: {
+      id: 'msg_test',
+      model: 'claude-sonnet-5',
+      role: 'assistant',
+      usage: { input_tokens: 12, output_tokens: 1 },
+    },
+  });
+  send('content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } });
+  // `?reportThreading=1` (query string only — the pathname still matches exactly, so the app's
+  // pathname-keyed streaming-JSONPath auto-inference still applies) reports how many assistant-role
+  // turns and what the latest user turn were in the *request* body, so a test can confirm the
+  // follow-up composer is actually threading prior replies back into the conversation instead of
+  // resending it as consecutive user-only turns.
+  if (req.query.reportThreading === '1') {
+    let assistantTurns = 0;
+    let lastUserContent = '';
+    let system = '';
+    try {
+      const body = JSON.parse(req.body.toString() || '{}');
+      const messages = Array.isArray(body.messages) ? body.messages : [];
+      assistantTurns = messages.filter((message: { role?: string }) => message.role === 'assistant').length;
+      const userMessages = messages.filter((message: { role?: string }) => message.role === 'user');
+      lastUserContent = userMessages[userMessages.length - 1]?.content ?? '';
+      system = typeof body.system === 'string' ? body.system : '';
+    } catch {
+      // ignore malformed bodies in this test fixture
+    }
+    send('content_block_delta', {
+      type: 'content_block_delta',
+      index: 0,
+      delta: { type: 'text_delta', text: `assistantTurns=${assistantTurns} lastUser=${lastUserContent} system=${system}` },
+    });
+  } else {
+    for (const text of ['Hello', ' from', ' mock', ' Anthropic', ' stream!']) {
+      send('content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } });
+    }
+  }
+  send('content_block_stop', { type: 'content_block_stop', index: 0 });
+  send('message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 8 } });
+  send('message_stop', { type: 'message_stop' });
+  res.end();
+});
+
+// Non-streaming Anthropic Messages API shape, echoing the last request message back so a test can
+// confirm a follow-up reply actually triggered a fresh send (not just a stale cached response).
+app.post('/v1/messages-sync', rawParser, (req, res) => {
+  let lastMessage = '';
+  try {
+    const body = JSON.parse(req.body.toString() || '{}');
+    lastMessage = body.messages?.[body.messages.length - 1]?.content ?? '';
+  } catch {
+    // ignore malformed bodies in this test fixture
+  }
+  res.json({
+    id: 'msg_sync',
+    role: 'assistant',
+    model: 'claude-sonnet-5',
+    content: [{ type: 'text', text: `Echo: ${lastMessage}` }],
+    stop_reason: 'end_turn',
+    usage: { input_tokens: 5, output_tokens: 3 },
+  });
+});
+
 app.get('/large-json', (_req, res) => {
   const items = Array.from({ length: 100_000 }, (_, i) => ({
     id: i,

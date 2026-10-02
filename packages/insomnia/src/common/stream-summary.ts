@@ -191,6 +191,80 @@ const PATH_TO_JSONPATH: { pathname: string; jsonPath: string }[] = [
   { pathname: '/v1/messages', jsonPath: '$.delta.text' },
 ];
 
+export interface StreamChatMeta {
+  model?: string;
+  usage?: { inputTokens?: number; outputTokens?: number };
+  stopReason?: string;
+}
+
+const tryPaths = (parsed: unknown, paths: string[]): unknown => {
+  for (const path of paths) {
+    const result = JSONPath({ path, json: parsed as object });
+    if (Array.isArray(result) && result.length > 0 && result[0] !== null && result[0] !== undefined) {
+      return result[0];
+    }
+  }
+  return undefined;
+};
+
+// Scans every SSE chunk seen so far for model/usage/stop-reason fields, trying each provider's
+// known shape. Usage in particular only ever arrives in specific chunks (e.g. Anthropic's
+// `message_start` for input tokens, `message_delta` for output tokens; OpenAI's final chunk when
+// `stream_options.include_usage` is set) — later non-null sightings simply overwrite earlier
+// ones, which naturally lands on the final/complete value once the stream finishes.
+export const extractStreamChatMeta = (payloads: string[]): StreamChatMeta => {
+  let model: string | undefined;
+  let inputTokens: number | undefined;
+  let outputTokens: number | undefined;
+  let stopReason: string | undefined;
+
+  for (const payload of payloads) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(payload);
+    } catch {
+      continue;
+    }
+
+    const nextModel = tryPaths(parsed, ['$.model', '$.message.model']);
+    if (typeof nextModel === 'string') {
+      model = nextModel;
+    }
+
+    const nextInputTokens = tryPaths(parsed, [
+      '$.usage.prompt_tokens',
+      '$.usage.input_tokens',
+      '$.message.usage.input_tokens',
+      '$.usageMetadata.promptTokenCount',
+    ]);
+    if (typeof nextInputTokens === 'number') {
+      inputTokens = nextInputTokens;
+    }
+
+    const nextOutputTokens = tryPaths(parsed, [
+      '$.usage.completion_tokens',
+      '$.usage.output_tokens',
+      '$.usageMetadata.candidatesTokenCount',
+    ]);
+    if (typeof nextOutputTokens === 'number') {
+      outputTokens = nextOutputTokens;
+    }
+
+    const nextStopReason = tryPaths(parsed, [
+      '$.choices[0].finish_reason',
+      '$.delta.stop_reason',
+      '$.stop_reason',
+      '$.candidates[0].finishReason',
+    ]);
+    if (typeof nextStopReason === 'string') {
+      stopReason = nextStopReason;
+    }
+  }
+
+  const usage = inputTokens !== undefined || outputTokens !== undefined ? { inputTokens, outputTokens } : undefined;
+  return { model, usage, stopReason };
+};
+
 export const inferStreamSummaryPath = (url: string): string | null => {
   try {
     const { pathname } = new URL(url);

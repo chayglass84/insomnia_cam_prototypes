@@ -7,22 +7,21 @@ import { useFetcher, useParams } from 'react-router';
 
 import { extractChatCompletion, supportsStreaming } from '~/common/chat-completion';
 import { parseChatRequestBody, serializeChatRequestBody } from '~/common/chat-request';
-import { buildQueryStringFromParams, joinUrlAndQueryString } from '~/common/utils/url/querystring';
+import { ensureEventStreamAcceptHeader, ensureStreamingBodyFlag, hasStreamingBodyFlag } from '~/common/chat-streaming';
 import { bodyBufferToUtf8 } from '~/common/utils/utf8-bytes';
 import { useRootLoaderData } from '~/root';
 import { AnalyticsEvent } from '~/ui/analytics';
 import { showToast } from '~/ui/components/toast-notification';
+import { markPendingAutoConnect } from '~/ui/utils/pending-auto-connect';
 import { recordProjectRecentRequest } from '~/ui/utils/recent-project-requests';
-import { renderRealtimeConnectPayload } from '~/ui/utils/render-realtime-connect';
 
 import { getSetCookieHeaders } from '../../../common/misc';
 import { cancelRequestById } from '../../../network/cancellation.renderer';
-import { useWorkspaceLoaderData } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId';
 import {
   type RequestLoaderData,
   useRequestLoaderData,
 } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request.$requestId';
-import { useRequestConnectActionFetcher } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request.$requestId.connect';
+import { useDebugRequestSendActionFetcher } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request.$requestId.send';
 import { useExecutionState } from '../../hooks/use-execution-state';
 import { useRequestMetaPatcher, useRequestPatcher } from '../../hooks/use-request';
 import { PreviewModeDropdown } from '../dropdowns/preview-mode-dropdown';
@@ -90,28 +89,30 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
     supportsStreaming(activeResponse!.url) &&
     !models.request.isEventStreamRequest(activeRequest);
 
-  const handleEnableStreaming = () => {
+  const handleEnableStreaming = async () => {
     const previousBody = activeRequest.body;
     const previousHeaders = activeRequest.headers;
 
-    let bodyPatched = false;
-    try {
-      const parsedBody = previousBody.text ? JSON.parse(previousBody.text) : {};
-      const nextBodyText = JSON.stringify({ ...parsedBody, stream: true });
-      patchRequest(activeRequest._id, { body: { ...previousBody, text: nextBodyText } });
-      bodyPatched = true;
-    } catch {
-      // Body isn't valid JSON right now (e.g. mid-edit) — leave it alone and only add the header.
-    }
+    const nextBodyText = ensureStreamingBodyFlag(previousBody.text);
+    const bodyPatched = nextBodyText !== null;
+    const nextBody = bodyPatched ? { ...previousBody, text: nextBodyText } : previousBody;
+    const bodyAlreadyHadFlag = !bodyPatched && hasStreamingBodyFlag(previousBody.text);
 
-    const existingAcceptHeaderIndex = previousHeaders.findIndex(header => header.name.toLowerCase() === 'accept');
-    const nextHeaders = existingAcceptHeaderIndex === -1
-      ? [...previousHeaders, { name: 'Accept', value: 'text/event-stream' }]
-      : previousHeaders.map((header, index) =>
-          index === existingAcceptHeaderIndex ? { ...header, value: 'text/event-stream' } : header,
-        );
-    if (previousHeaders[existingAcceptHeaderIndex]?.value !== 'text/event-stream') {
-      patchRequest(activeRequest._id, { headers: nextHeaders });
+    const { headers: nextHeaders, changed: headersPatched } = ensureEventStreamAcceptHeader(previousHeaders);
+
+    // Persist directly and await it before connecting (rather than the fire-and-forget patchRequest
+    // fetcher), so the connect payload built from these values below and what's actually saved
+    // agree, and the pane doesn't race the switch to RealtimeResponsePane that follows.
+    const patch: { body?: typeof nextBody; headers?: typeof nextHeaders } = {};
+    if (bodyPatched) {
+      patch.body = nextBody;
+    }
+    if (headersPatched) {
+      patch.headers = nextHeaders;
+    }
+    if (Object.keys(patch).length > 0) {
+      await services.request.update(activeRequest, patch);
+      patchRequest(activeRequest._id, patch);
     }
 
     showToast(
@@ -119,14 +120,28 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
         icon: 'bolt',
         title: 'Enabled streaming',
         status: 'success',
+        raised: true,
         description: (
           <span>
-            {bodyPatched
-              ? 'Added "stream": true to the body and an Accept: text/event-stream header.'
-              : 'Body was not valid JSON, so only an Accept: text/event-stream header was added.'}{' '}
+            <ul className="list-disc pl-4">
+              <li>
+                {bodyPatched
+                  ? 'Added "stream": true to the body'
+                  : bodyAlreadyHadFlag
+                    ? 'Body already had "stream": true'
+                    : 'Body was not valid JSON — could not add "stream": true'}
+              </li>
+              <li>
+                {headersPatched ? 'Added an Accept: text/event-stream header' : 'Accept header was already set'}
+              </li>
+              <li>Connecting…</li>
+            </ul>
             <Button
               className="underline"
-              onPress={() => patchRequest(activeRequest._id, { body: previousBody, headers: previousHeaders })}
+              onPress={async () => {
+                await services.request.update(activeRequest, { body: previousBody, headers: previousHeaders });
+                patchRequest(activeRequest._id, { body: previousBody, headers: previousHeaders });
+              }}
             >
               Undo
             </Button>
@@ -135,6 +150,14 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
       },
       { timeout: null },
     );
+
+    // Don't connect from here: patching the headers above is what flips this request to
+    // event-stream, which makes the parent route swap this whole pane out for
+    // RealtimeResponsePane on its next render — unmounting this component. Firing the connect
+    // fetcher from a component that's about to unmount is a race (an unkeyed useFetcher() aborts
+    // its in-flight submission on unmount). Flag the intent instead; the new, long-lived pane picks
+    // it up on mount using its own stable connect fetcher.
+    markPendingAutoConnect(activeRequest._id);
   };
 
   const { organizationId, projectId, workspaceId } = useParams() as {
@@ -142,11 +165,14 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
     projectId: string;
     workspaceId: string;
   };
-  const { activeWorkspace, activeEnvironment } = useWorkspaceLoaderData()!;
-  const connectRequestFetcher = useRequestConnectActionFetcher();
+  const sendRequestFetcher = useDebugRequestSendActionFetcher({ key: `send-request-${activeRequest._id}` });
   const [followUpText, setFollowUpText] = useState('');
-  const isEventStreamChat = Boolean(chatCompletionSummary) && models.request.isEventStreamRequest(activeRequest);
-  const isSendingFollowUp = connectRequestFetcher.state !== 'idle';
+  // This pane only ever renders for non-event-stream requests (the parent route sends any
+  // isEventStreamRequest to RealtimeResponsePane instead), so a detected chat completion here is
+  // always a one-shot, already-finished exchange — continuing it is a plain re-send, not a
+  // reconnect. The event-stream/live case lives in realtime-response-pane.tsx instead.
+  const showFollowUpComposer = Boolean(chatCompletionSummary);
+  const isSendingFollowUp = sendRequestFetcher.state !== 'idle';
 
   const handleSendFollowUp = async () => {
     const text = followUpText.trim();
@@ -159,32 +185,21 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
       messages: [...parsedBody.messages, { role: 'user', content: text }],
     });
     const nextBody = { ...activeRequest.body, text: nextBodyText };
+    // Persist directly and await it (rather than the fire-and-forget patchRequest fetcher) so the
+    // send action — which re-reads the request fresh from the database — can't race ahead of this
+    // write and send the old body.
+    await services.request.update(activeRequest, { body: nextBody });
     patchRequest(activeRequest._id, { body: nextBody });
     setFollowUpText('');
 
-    const rendered = await renderRealtimeConnectPayload({
-      request: { ...activeRequest, body: nextBody },
-      environmentId: activeEnvironment._id,
-      workspaceId: activeWorkspace._id,
-    });
-    if (!rendered) {
-      return;
-    }
-    connectRequestFetcher.submit({
+    sendRequestFetcher.submit({
       organizationId,
       projectId,
       workspaceId,
       requestId: activeRequest._id,
-      connectParams: {
-        url: joinUrlAndQueryString(rendered.url, buildQueryStringFromParams(rendered.parameters)),
-        headers: rendered.headers,
-        authentication: rendered.authentication,
-        body: rendered.body,
-        cookieJar: rendered.workspaceCookieJar,
-        suppressUserAgent: rendered.suppressUserAgent,
-      },
+      params: {},
     });
-    recordProjectRecentRequest({ projectId, requestId: activeRequest._id, workspaceId: activeWorkspace._id });
+    recordProjectRecentRequest({ projectId, requestId: activeRequest._id, workspaceId });
   };
 
   const previewMode = activeRequestMeta.previewMode || PREVIEW_MODE_SOURCE;
@@ -424,14 +439,20 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
             updateFilter={activeResponse.error ? undefined : handleSetFilter}
             url={activeResponse.url}
           />
-          {isEventStreamChat && (
+          {showFollowUpComposer && (
             <div
               data-ignore-send-hotkey
-              className="flex shrink-0 items-end gap-2 border-t border-solid border-(--hl-md) bg-(--color-bg) p-2"
+              className="flex shrink-0 items-stretch gap-2 border-t border-solid border-(--hl-md) bg-(--color-bg) p-2"
             >
               <textarea
                 value={followUpText}
                 onChange={event => setFollowUpText(event.target.value)}
+                onKeyDown={event => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    handleSendFollowUp();
+                  }
+                }}
                 placeholder="Reply to continue the conversation…"
                 rows={2}
                 className="w-full flex-1 resize-y rounded-xs border border-solid border-(--hl-md) bg-(--color-bg) px-2 py-1 text-sm text-(--color-font) outline-hidden focus:border-(--hl)"
@@ -439,7 +460,7 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
               <Button
                 onPress={handleSendFollowUp}
                 isDisabled={!followUpText.trim() || isSendingFollowUp}
-                className="rounded-sm border border-solid border-(--hl-sm) px-3 py-1.5 text-xs hover:bg-(--hl-sm) disabled:opacity-50"
+                className="rounded-sm bg-(--color-surprise) px-4 text-sm text-(--color-font-surprise) hover:opacity-90 disabled:opacity-50"
               >
                 Send
               </Button>

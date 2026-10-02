@@ -1,12 +1,15 @@
-import React, { type FC, useState } from 'react';
-import { Button } from 'react-aria-components';
+import React, { type FC } from 'react';
 
 import type { ChatCompletionSummary, ChatMessage } from '~/common/chat-completion';
-import { Icon } from '~/ui/components/icon';
-import { Tooltip } from '~/ui/components/tooltip';
+import { getChatTurnMeta } from '~/ui/utils/chat-turn-meta-cache';
+
+import { Icon } from '../icon';
+import { MarkdownPreview } from '../markdown-preview';
+import { ChatSummaryBar } from './chat-summary-bar';
 
 interface Props {
   summary: ChatCompletionSummary;
+  isStreaming?: boolean;
 }
 
 const roleAlignment: Record<ChatMessage['role'], string> = {
@@ -21,98 +24,83 @@ const roleBubbleStyle: Record<ChatMessage['role'], string> = {
   system: 'bg-transparent text-(--hl) text-xs italic',
 };
 
+const formatTurnFooter = (turnMeta: { model?: string; usage?: { inputTokens?: number; outputTokens?: number } }) => {
+  const parts: string[] = [];
+  if (turnMeta.model) {
+    parts.push(turnMeta.model);
+  }
+  if (turnMeta.usage) {
+    parts.push(`${turnMeta.usage.inputTokens ?? '?'} tokens in, ${turnMeta.usage.outputTokens ?? '?'} out`);
+  }
+  return parts.join(' / ');
+};
+
 const ChatBubble: FC<{ message: ChatMessage; isLast: boolean; summary: ChatCompletionSummary }> = ({
   message,
   isLast,
   summary,
 }) => {
-  const [expanded, setExpanded] = useState(false);
-  const showInspector = isLast && message.role === 'assistant';
-
-  const tooltipMessage = (
-    <div className="flex flex-col gap-0.5">
-      <div className="capitalize">{message.role}</div>
-      {showInspector && summary.model && <div>Model: {summary.model}</div>}
-      {showInspector && summary.usage && (
-        <div>
-          {summary.usage.inputTokens ?? '?'} in / {summary.usage.outputTokens ?? '?'} out tokens
-        </div>
-      )}
-      {showInspector && summary.stopReason && <div>Stop reason: {summary.stopReason}</div>}
-      <div className="text-(--hl)">Click to {expanded ? 'collapse' : 'expand'}</div>
-    </div>
-  );
-
   if (message.role === 'system') {
     return (
-      <div className={`flex w-full flex-col gap-1 ${roleAlignment[message.role]}`}>
-        <div className={`max-w-[80%] rounded-md px-3 py-1 ${roleBubbleStyle[message.role]}`}>{message.content}</div>
+      <div className={`flex w-full flex-col items-center gap-1`}>
+        <div className="text-[10px] font-semibold tracking-wide text-(--hl) uppercase">System prompt</div>
+        <div className="max-w-[80%] rounded-md bg-transparent px-3 py-1 text-center text-xs break-words whitespace-pre-wrap text-(--hl) italic">
+          {message.content}
+        </div>
       </div>
     );
   }
 
+  const isAssistant = message.role === 'assistant';
+  // The live/current turn's model+usage comes from the response's own summary; any earlier
+  // turn's only exists in the in-memory turn-meta cache (see chat-turn-meta-cache.ts) — past
+  // turns' content is never persisted with structure, only as plain text.
+  const turnMeta = isAssistant
+    ? isLast
+      ? { model: summary.model, usage: summary.usage }
+      : getChatTurnMeta(message.content)
+    : undefined;
+  const footer = turnMeta ? formatTurnFooter(turnMeta) : '';
+
   return (
     <div className={`flex w-full flex-col gap-1 ${roleAlignment[message.role]}`}>
-      <Tooltip message={tooltipMessage} position="top">
-        <Button
-          onPress={() => setExpanded(current => !current)}
-          className={`max-w-[80%] rounded-md px-3 py-2 text-left text-sm whitespace-pre-wrap outline-hidden ${roleBubbleStyle[message.role]}`}
-        >
-          {message.content}
-        </Button>
-      </Tooltip>
-      {expanded && (
-        <div className="max-w-[80%] rounded-md border border-solid border-(--hl-sm) bg-(--color-bg) px-3 py-2 text-xs text-(--color-font)">
-          <div className="flex flex-col gap-1">
-            <div>
-              <span className="text-(--hl)">Role:</span> {message.role}
-            </div>
-            {showInspector && summary.model && (
-              <div>
-                <span className="text-(--hl)">Model:</span> {summary.model}
-              </div>
-            )}
-            {showInspector && summary.stopReason && (
-              <div>
-                <span className="text-(--hl)">Stop reason:</span> {summary.stopReason}
-              </div>
-            )}
-            {showInspector && summary.usage && (
-              <div>
-                <span className="text-(--hl)">Tokens:</span>{' '}
-                {summary.usage.inputTokens ?? '?'} in / {summary.usage.outputTokens ?? '?'} out
-              </div>
-            )}
-            <details className="mt-1">
-              <summary className="cursor-pointer text-(--hl)">View raw</summary>
-              <pre className="mt-1 overflow-auto font-mono whitespace-pre-wrap">{message.content}</pre>
-            </details>
-          </div>
-        </div>
-      )}
+      <div
+        className={`max-w-[80%] min-w-0 rounded-md px-3 py-2 text-left text-sm break-words whitespace-normal ${roleBubbleStyle[message.role]}`}
+      >
+        <MarkdownPreview markdown={message.content} />
+      </div>
+      {footer && <div className="px-1 text-[11px] text-(--hl)">{footer}</div>}
     </div>
   );
 };
 
-export const ResponseChatViewer: FC<Props> = ({ summary }) => {
+export const ResponseChatViewer: FC<Props> = ({ summary, isStreaming }) => {
   return (
-    <div className="flex h-full flex-col gap-3 overflow-y-auto p-(--padding-sm)">
-      {summary.messages.length === 0 ? (
-        <div className="flex items-center gap-2 text-(--hl)">
-          <Icon icon="comment" />
-          No chat messages found in this exchange.
-        </div>
-      ) : (
-        summary.messages.map((message, index) => (
-          <ChatBubble
-            // eslint-disable-next-line react/no-array-index-key -- messages have no stable id
-            key={index}
-            message={message}
-            isLast={index === summary.messages.length - 1}
-            summary={summary}
-          />
-        ))
-      )}
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <ChatSummaryBar
+        model={summary.model}
+        usage={summary.usage}
+        stopReason={summary.stopReason}
+        isStreaming={isStreaming}
+      />
+      <div className="flex flex-1 flex-col gap-3 overflow-x-hidden overflow-y-auto p-(--padding-sm)">
+        {summary.messages.length === 0 ? (
+          <div className="flex items-center gap-2 text-(--hl)">
+            <Icon icon="comment" />
+            No chat messages found in this exchange.
+          </div>
+        ) : (
+          summary.messages.map((message, index) => (
+            <ChatBubble
+              // eslint-disable-next-line react/no-array-index-key -- messages have no stable id
+              key={index}
+              message={message}
+              isLast={index === summary.messages.length - 1}
+              summary={summary}
+            />
+          ))
+        )}
+      </div>
     </div>
   );
 };

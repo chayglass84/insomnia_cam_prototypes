@@ -7,7 +7,7 @@ import type {
   SocketIOResponse,
   WebSocketResponse,
 } from 'insomnia-data';
-import { models } from 'insomnia-data';
+import { models, services } from 'insomnia-data';
 import { deserializeNDJSON } from 'insomnia-data/common';
 import React, { type FC, useEffect, useMemo, useState } from 'react';
 import {
@@ -23,21 +23,38 @@ import {
   TooltipTrigger,
 } from 'react-aria-components';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
+import { useParams } from 'react-router';
 
+import { extractRequestMessages } from '~/common/chat-completion';
+import { parseChatRequestBody, serializeChatRequestBody } from '~/common/chat-request';
+import { ensureStreamingBodyFlag, hasStreamingBodyFlag } from '~/common/chat-streaming';
 import { docsMcpAuthentication } from '~/common/documentation';
+import { extractStreamChatMeta, getCandidatePayloadsFromEvents, type StreamMessageEvent } from '~/common/stream-summary';
+import { buildQueryStringFromParams, joinUrlAndQueryString } from '~/common/utils/url/querystring';
+import { showToast } from '~/ui/components/toast-notification';
 import { useMcpReadyState } from '~/ui/hooks/use-mcp-ready-state';
 import { useRealtimeConnectionNotifications } from '~/ui/hooks/use-realtime-connection-notifications';
 import { useStreamSummary } from '~/ui/hooks/use-stream-summary';
+import { recordChatTurnMeta } from '~/ui/utils/chat-turn-meta-cache';
+import { consumePendingAutoConnect } from '~/ui/utils/pending-auto-connect';
+import { recordProjectRecentRequest } from '~/ui/utils/recent-project-requests';
+import { renderRealtimeConnectPayload } from '~/ui/utils/render-realtime-connect';
 
 import { getSetCookieHeaders } from '../../../common/misc';
 import type { McpEvent } from '../../../main/mcp/types';
 import type { CurlEvent } from '../../../main/network/curl';
 import type { SocketIOEvent } from '../../../main/network/socket-io';
 import type { WebSocketEvent } from '../../../main/network/websocket';
-import { useRequestLoaderData } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request.$requestId';
+import { useWorkspaceLoaderData } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId';
+import {
+  type RequestLoaderData,
+  useRequestLoaderData,
+} from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request.$requestId';
+import { useRequestConnectActionFetcher } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request.$requestId.connect';
 import { AnalyticsEvent } from '../../../ui/analytics';
 import { useReadyState } from '../../hooks/use-ready-state';
 import { useRealtimeConnectionEvents } from '../../hooks/use-realtime-connection-events';
+import { useRequestPatcher } from '../../hooks/use-request';
 import { Dropdown, DropdownItem, DropdownSection, ItemContent } from '../base/dropdown';
 import { ResponseHistoryDropdown } from '../dropdowns/response-history-dropdown';
 import { ErrorBoundary } from '../error-boundary';
@@ -52,6 +69,7 @@ import { SvgIcon } from '../svg-icon';
 import { SizeTag } from '../tags/size-tag';
 import { StatusTag } from '../tags/status-tag';
 import { TimeTag } from '../tags/time-tag';
+import { ResponseChatViewer } from '../viewers/response-chat-viewer';
 import { ResponseCookiesViewer } from '../viewers/response-cookies-viewer';
 import { ResponseErrorViewer } from '../viewers/response-error-viewer';
 import { ResponseHeadersViewer } from '../viewers/response-headers-viewer';
@@ -247,6 +265,193 @@ const RealtimeActiveResponsePane: FC<RealtimeActiveResponsePaneProps & { readySt
     // the UI for those.
     events: showStreamSummaryTab ? (allEvents as CurlEvent[]) : [],
   });
+
+  // Chat-completion detection for live streaming responses: only curl (HTTP event-stream)
+  // responses can be chat completions, never webSocket/socketIO/MCP.
+  const { activeRequest } = useRequestLoaderData() as RequestLoaderData;
+  const requestBodyText = protocol === 'curl' ? activeRequest.body?.text : undefined;
+  const parsedChatRequest = useMemo(
+    () => (requestBodyText ? parseChatRequestBody(requestBodyText) : null),
+    [requestBodyText],
+  );
+  const showChatTab = protocol === 'curl' && Boolean(parsedChatRequest);
+  const candidatePayloads = useMemo(
+    () =>
+      showChatTab
+        ? getCandidatePayloadsFromEvents(
+            (allEvents as CurlEvent[]).map((event): StreamMessageEvent => ({
+              type: event.type,
+              direction: 'direction' in event ? event.direction : '',
+              data: 'data' in event ? event.data : '',
+            })),
+          )
+        : [],
+    [allEvents, showChatTab],
+  );
+  const streamChatMeta = useMemo(() => extractStreamChatMeta(candidatePayloads), [candidatePayloads]);
+  const chatModel = streamChatMeta.model ?? parsedChatRequest?.model;
+  const chatMessages = useMemo(() => {
+    if (!showChatTab) {
+      return [];
+    }
+    const requestMessages = extractRequestMessages(requestBodyText);
+    const assistantText = streamSummary.summary.summary;
+    return assistantText
+      ? [...requestMessages, { role: 'assistant' as const, content: assistantText }]
+      : requestMessages;
+  }, [showChatTab, requestBodyText, streamSummary.summary.summary]);
+
+  // Keeps the per-bubble token/model footer (chat-turn-meta-cache.ts) up to date for the live turn
+  // as it streams in, so the metadata is already recorded by the time a follow-up or navigation
+  // moves past it.
+  useEffect(() => {
+    if (!showChatTab || !streamSummary.summary.summary.trim()) {
+      return;
+    }
+    recordChatTurnMeta(streamSummary.summary.summary, {
+      model: chatModel,
+      usage: streamChatMeta.usage,
+      stopReason: streamChatMeta.stopReason,
+    });
+  }, [showChatTab, streamSummary.summary.summary, chatModel, streamChatMeta.usage, streamChatMeta.stopReason]);
+
+  const { organizationId, projectId, workspaceId } = useParams() as {
+    organizationId: string;
+    projectId: string;
+    workspaceId: string;
+  };
+  const { activeWorkspace, activeEnvironment } = useWorkspaceLoaderData()!;
+  const patchRequest = useRequestPatcher();
+  const connectRequestFetcher = useRequestConnectActionFetcher();
+  const [followUpText, setFollowUpText] = useState('');
+  const isSendingFollowUp = connectRequestFetcher.state !== 'idle';
+
+  // The Accept header alone (which is all that's needed to route a request here) doesn't make a
+  // provider actually stream — OpenAI/Anthropic also require a `stream: true` body flag, and a
+  // request missing it sends fine but comes back as one slow blocking reply with nothing to show
+  // here until it's fully done. Gemini streams via a distinct URL suffix instead of a body flag,
+  // so it's excluded from this check rather than showing a banner that doesn't apply to it.
+  const isMissingStreamingBodyFlag =
+    showChatTab && parsedChatRequest?.format !== 'gemini' && !hasStreamingBodyFlag(requestBodyText);
+
+  const handleFixMissingStreamFlag = async () => {
+    const previousBody = activeRequest.body;
+    const nextBodyText = ensureStreamingBodyFlag(previousBody.text);
+    if (nextBodyText === null) {
+      return;
+    }
+    const nextBody = { ...previousBody, text: nextBodyText };
+    await services.request.update(activeRequest, { body: nextBody });
+    patchRequest(activeRequest._id, { body: nextBody });
+    showToast(
+      {
+        icon: 'bolt',
+        title: 'Added "stream": true',
+        status: 'success',
+        raised: true,
+        description: (
+          <span>
+            The request had an Accept: text/event-stream header but no "stream": true in the body —
+            without it most providers send one slow blocking reply instead of real chunks.{' '}
+            <Button
+              className="underline"
+              onPress={async () => {
+                await services.request.update(activeRequest, { body: previousBody });
+                patchRequest(activeRequest._id, { body: previousBody });
+              }}
+            >
+              Undo
+            </Button>
+          </span>
+        ),
+      },
+      { timeout: null },
+    );
+  };
+
+  // Picks up the "Enable streaming" teaser's auto-connect intent (see pending-auto-connect.ts for
+  // why it's deferred here rather than fired from the component that flagged it).
+  useEffect(() => {
+    if (protocol !== 'curl' || !consumePendingAutoConnect(activeRequest._id)) {
+      return;
+    }
+    (async () => {
+      const rendered = await renderRealtimeConnectPayload({
+        request: activeRequest,
+        environmentId: activeEnvironment._id,
+        workspaceId: activeWorkspace._id,
+      });
+      if (!rendered) {
+        return;
+      }
+      connectRequestFetcher.submit({
+        organizationId,
+        projectId,
+        workspaceId,
+        requestId: activeRequest._id,
+        connectParams: {
+          url: joinUrlAndQueryString(rendered.url, buildQueryStringFromParams(rendered.parameters)),
+          headers: rendered.headers,
+          authentication: rendered.authentication,
+          body: rendered.body,
+          cookieJar: rendered.workspaceCookieJar,
+          suppressUserAgent: rendered.suppressUserAgent,
+        },
+      });
+      recordProjectRecentRequest({ projectId, requestId: activeRequest._id, workspaceId: activeWorkspace._id });
+    })();
+    // Intentionally keyed only on the request id — this should fire once per mount for a given
+    // request, not re-run on every unrelated change to activeRequest/env/workspace identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRequest._id]);
+
+  const handleSendFollowUp = async () => {
+    const text = followUpText.trim();
+    const parsedBody = parseChatRequestBody(requestBodyText || '');
+    if (!text || !parsedBody) {
+      return;
+    }
+    // The just-finished turn's reply only ever existed as live-accumulated SSE text (this
+    // component's own streamSummary), never written back into the request body — so without this,
+    // every follow-up resent the history as consecutive user turns with no assistant turns between
+    // them, and the model would answer the entire run-on history in one reply on the next connect.
+    const previousAssistantText = streamSummary.summary.summary.trim();
+    const messagesWithPreviousReply = previousAssistantText
+      ? [...parsedBody.messages, { role: 'assistant' as const, content: previousAssistantText }]
+      : parsedBody.messages;
+    const nextBodyText = serializeChatRequestBody(requestBodyText || '', parsedBody.format, {
+      model: parsedBody.model,
+      messages: [...messagesWithPreviousReply, { role: 'user', content: text }],
+    });
+    const nextBody = { ...activeRequest.body, text: nextBodyText };
+    patchRequest(activeRequest._id, { body: nextBody });
+    setFollowUpText('');
+
+    const rendered = await renderRealtimeConnectPayload({
+      request: { ...activeRequest, body: nextBody },
+      environmentId: activeEnvironment._id,
+      workspaceId: activeWorkspace._id,
+    });
+    if (!rendered) {
+      return;
+    }
+    connectRequestFetcher.submit({
+      organizationId,
+      projectId,
+      workspaceId,
+      requestId: activeRequest._id,
+      connectParams: {
+        url: joinUrlAndQueryString(rendered.url, buildQueryStringFromParams(rendered.parameters)),
+        headers: rendered.headers,
+        authentication: rendered.authentication,
+        body: rendered.body,
+        cookieJar: rendered.workspaceCookieJar,
+        suppressUserAgent: rendered.suppressUserAgent,
+      },
+    });
+    recordProjectRecentRequest({ projectId, requestId: activeRequest._id, workspaceId: activeWorkspace._id });
+  };
+
   const handleSelection = (event: EventType) => {
     setSelectedEvent((selected: EventType | null) => (selected?._id === event._id ? null : event));
   };
@@ -375,12 +580,22 @@ const RealtimeActiveResponsePane: FC<RealtimeActiveResponsePaneProps & { readySt
         key={response._id}
         aria-label="Request group tabs"
         className="flex h-full w-full flex-1 flex-col"
-        defaultSelectedKey={showStreamSummaryTab && streamSummary.inferredPath != null ? 'summary' : 'events'}
+        defaultSelectedKey={
+          showChatTab ? 'chat' : showStreamSummaryTab && streamSummary.inferredPath != null ? 'summary' : 'events'
+        }
       >
         <TabList
           className="flex h-(--line-height-sm) w-full shrink-0 items-center overflow-x-auto border-b border-solid border-b-(--hl-md) bg-(--color-bg)"
           aria-label="Request pane tabs"
         >
+          {showChatTab && (
+            <Tab
+              className="flex h-full shrink-0 cursor-pointer items-center justify-between gap-2 px-3 py-1 text-(--hl) outline-hidden transition-colors duration-300 select-none hover:bg-(--hl-sm) hover:text-(--color-font) focus:bg-(--hl-sm) aria-selected:bg-(--hl-xs) aria-selected:text-(--color-font) aria-selected:hover:bg-(--hl-sm) aria-selected:focus:bg-(--hl-sm)"
+              id="chat"
+            >
+              Chat
+            </Tab>
+          )}
           <Tab
             className="flex h-full shrink-0 cursor-pointer items-center justify-between gap-2 px-3 py-1 text-(--hl) outline-hidden transition-colors duration-300 select-none hover:bg-(--hl-sm) hover:text-(--color-font) focus:bg-(--hl-sm) aria-selected:bg-(--hl-xs) aria-selected:text-(--color-font) aria-selected:hover:bg-(--hl-sm) aria-selected:focus:bg-(--hl-sm)"
             id="events"
@@ -441,6 +656,58 @@ const RealtimeActiveResponsePane: FC<RealtimeActiveResponsePaneProps & { readySt
             Console
           </Tab>
         </TabList>
+        {showChatTab && (
+          <TabPanel className="flex w-full flex-1 flex-col overflow-hidden" id="chat">
+            {isMissingStreamingBodyFlag && (
+              <div className="flex items-center justify-between gap-2 border-b border-solid border-(--hl-md) bg-(--hl-xs) px-3 py-2 text-sm text-(--color-font)">
+                <span>
+                  This request has an event-stream Accept header but no "stream": true in the body —
+                  it'll send fine but come back as one slow reply instead of live chunks.
+                </span>
+                <Button
+                  onPress={handleFixMissingStreamFlag}
+                  className="shrink-0 rounded-sm border border-solid border-(--hl-sm) px-2 py-1 text-xs hover:bg-(--hl-sm)"
+                >
+                  Add "stream": true
+                </Button>
+              </div>
+            )}
+            <ResponseChatViewer
+              summary={{
+                messages: chatMessages,
+                model: chatModel,
+                usage: streamChatMeta.usage,
+                stopReason: streamChatMeta.stopReason,
+              }}
+              isStreaming={isConnected}
+            />
+            <div
+              data-ignore-send-hotkey
+              className="flex shrink-0 items-stretch gap-2 border-t border-solid border-(--hl-md) bg-(--color-bg) p-2"
+            >
+              <textarea
+                value={followUpText}
+                onChange={event => setFollowUpText(event.target.value)}
+                onKeyDown={event => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    handleSendFollowUp();
+                  }
+                }}
+                placeholder="Reply to continue the conversation…"
+                rows={2}
+                className="w-full flex-1 resize-y rounded-xs border border-solid border-(--hl-md) bg-(--color-bg) px-2 py-1 text-sm text-(--color-font) outline-hidden focus:border-(--hl)"
+              />
+              <Button
+                onPress={handleSendFollowUp}
+                isDisabled={!followUpText.trim() || isSendingFollowUp}
+                className="rounded-sm bg-(--color-surprise) px-4 text-sm text-(--color-font-surprise) hover:opacity-90 disabled:opacity-50"
+              >
+                Send
+              </Button>
+            </div>
+          </TabPanel>
+        )}
         <TabPanel className="flex w-full flex-1 flex-col overflow-hidden" id="events">
           <PanelGroup direction="vertical" className="grid h-full w-full grid-rows-[repeat(auto-fit,minmax(0,1fr))]">
             {response.error && !isMCPAuthError ? (
