@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   candidateJsonPayloadsFromSseText,
   computeStreamSummary,
+  extractStreamChatMeta,
   extractStreamValueAtPath,
   getCandidatePayloadsFromEvents,
   inferStreamSummaryPath,
@@ -200,5 +201,61 @@ describe('getCandidatePayloadsFromEvents', () => {
       { type: 'open', direction: '', data: '' },
     ];
     expect(getCandidatePayloadsFromEvents(events)).toEqual(['{"delta":"kept"}']);
+  });
+});
+
+describe('extractStreamChatMeta', () => {
+  it('accumulates Anthropic usage across message_start and message_delta chunks', () => {
+    const payloads = [
+      JSON.stringify({
+        type: 'message_start',
+        message: { model: 'claude-sonnet-5', usage: { input_tokens: 42, output_tokens: 1 } },
+      }),
+      JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text: 'Hi' } }),
+      JSON.stringify({ type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 9 } }),
+    ];
+    expect(extractStreamChatMeta(payloads)).toEqual({
+      model: 'claude-sonnet-5',
+      usage: { inputTokens: 42, outputTokens: 9 },
+      stopReason: 'end_turn',
+    });
+  });
+
+  it('reads OpenAI-shaped model/usage/finish_reason from the final chunk', () => {
+    const payloads = [
+      JSON.stringify({ model: 'gpt-5', choices: [{ delta: { content: 'Hi' } }] }),
+      JSON.stringify({
+        model: 'gpt-5',
+        choices: [{ delta: {}, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 10, completion_tokens: 3 },
+      }),
+    ];
+    expect(extractStreamChatMeta(payloads)).toEqual({
+      model: 'gpt-5',
+      usage: { inputTokens: 10, outputTokens: 3 },
+      stopReason: 'stop',
+    });
+  });
+
+  it('reads Gemini-shaped usageMetadata and finishReason', () => {
+    const payloads = [
+      JSON.stringify({
+        candidates: [{ content: { parts: [{ text: 'Hi' }] }, finishReason: 'STOP' }],
+        usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 2 },
+      }),
+    ];
+    expect(extractStreamChatMeta(payloads)).toEqual({
+      model: undefined,
+      usage: { inputTokens: 5, outputTokens: 2 },
+      stopReason: 'STOP',
+    });
+  });
+
+  it('returns an empty meta object for payloads with no known usage/model shape', () => {
+    expect(extractStreamChatMeta(['not json', JSON.stringify({ foo: 'bar' })])).toEqual({
+      model: undefined,
+      usage: undefined,
+      stopReason: undefined,
+    });
   });
 });

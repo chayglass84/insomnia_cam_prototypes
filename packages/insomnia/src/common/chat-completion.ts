@@ -14,7 +14,7 @@ export interface ChatCompletionSummary {
 
 const asString = (value: unknown): string | null => (typeof value === 'string' ? value : null);
 
-const extractRequestMessages = (requestBodyText?: string): ChatMessage[] => {
+export const extractRequestMessages = (requestBodyText?: string): ChatMessage[] => {
   if (!requestBodyText) {
     return [];
   }
