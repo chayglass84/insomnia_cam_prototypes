@@ -1,5 +1,5 @@
 import React, { type FC, useRef } from 'react';
-import { Button } from 'react-aria-components';
+import { Button, ComboBox, Group, Input, ListBox, ListBoxItem, Popover } from 'react-aria-components';
 
 import { Icon } from '~/ui/components/icon';
 
@@ -10,12 +10,23 @@ export interface ChatSettingsValues {
   maxTokens?: number;
 }
 
+type ChatSettingsBarFormat = 'openai' | 'anthropic' | 'gemini';
+
+// Suggestions only, not an enforced enum — new models ship constantly and a self-hosted or
+// gateway-fronted model (e.g. via Kong AI Gateway) may use a name that'll never appear in any
+// fixed list, so the combobox below always allows typing a custom value too.
+const MODEL_SUGGESTIONS: Record<ChatSettingsBarFormat, string[]> = {
+  anthropic: ['claude-opus-5-5', 'claude-sonnet-5', 'claude-haiku-4-5-20251001', 'claude-fable-5-1'],
+  openai: ['gpt-5', 'gpt-5-mini', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4o', 'gpt-4o-mini', 'o3', 'o3-mini'],
+  gemini: ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash'],
+};
+
 interface Props {
   // Remounts the bar's uncontrolled fields when the underlying request/response changes —
   // same "uncontrolled + key" pattern used elsewhere in this codebase (e.g. the stream-summary
   // JSONPath field) so a round trip through patching the request doesn't clobber mid-edit typing.
   requestKey: string;
-  format: 'openai' | 'anthropic' | 'gemini';
+  format: ChatSettingsBarFormat;
   values: ChatSettingsValues;
   // Omit for a plain read-only summary (no editing, no pending-change warning) — used where there's
   // no obvious "apply this" action to wire up to yet (the one-shot non-streaming response pane).
@@ -49,12 +60,15 @@ export const ChatSettingsBar: FC<Props> = ({
   const temperatureRef = useRef<HTMLInputElement>(null);
   const maxTokensRef = useRef<HTMLInputElement>(null);
 
-  const commit = () => {
+  // Takes an optional `model` override for the one path where reading `modelRef.current.value`
+  // directly would race React's own (batched, asynchronous) update of the combobox's displayed
+  // text: selecting a suggestion from the dropdown rather than typing and blurring.
+  const commit = (overrides?: { model?: string }) => {
     if (!onApply) {
       return;
     }
     onApply({
-      model: modelRef.current?.value.trim() || undefined,
+      model: overrides && 'model' in overrides ? overrides.model : modelRef.current?.value.trim() || undefined,
       systemPrompt: systemRef.current?.value.trim() || undefined,
       temperature:
         temperatureRef.current?.value && !Number.isNaN(Number(temperatureRef.current.value))
@@ -136,18 +150,44 @@ export const ChatSettingsBar: FC<Props> = ({
             Streaming…
           </span>
         )}
-        <label className="flex items-center gap-1">
-          <Icon icon="robot" />
-          <input
-            ref={modelRef}
-            defaultValue={values.model ?? ''}
-            onBlur={commit}
-            onKeyDown={commitOnEnter}
-            placeholder="model"
-            aria-label="Model"
-            className={`${fieldClassName} w-36`}
-          />
-        </label>
+        <ComboBox
+          aria-label="Model"
+          allowsCustomValue
+          defaultInputValue={values.model ?? ''}
+          defaultItems={MODEL_SUGGESTIONS[format].map(model => ({ id: model }))}
+          onSelectionChange={key => commit({ model: key ? String(key) : undefined })}
+          menuTrigger="focus"
+        >
+          <Group className="flex w-44 items-center gap-1 rounded-xs border border-solid border-(--hl-sm) bg-(--color-bg) pl-2 text-(--color-font) focus-within:border-(--hl)">
+            <Icon icon="robot" />
+            <Input
+              ref={modelRef}
+              onBlur={() => commit()}
+              onKeyDown={commitOnEnter}
+              placeholder="model"
+              className="w-full bg-transparent py-1 outline-hidden"
+            />
+            <Button className="flex items-center px-1 py-1">
+              <Icon icon="caret-down" />
+            </Button>
+          </Group>
+          <Popover className="w-(--trigger-width)">
+            <ListBox
+              className="max-h-60 overflow-y-auto rounded-md border border-solid border-(--hl-sm) bg-(--color-bg) py-1 text-xs shadow-lg select-none focus:outline-hidden"
+              aria-label="Suggested models"
+            >
+              {(item: { id: string }) => (
+                <ListBoxItem
+                  id={item.id}
+                  textValue={item.id}
+                  className="flex h-(--line-height-xs) w-full items-center px-(--padding-md) whitespace-nowrap text-(--color-font) transition-colors hover:bg-(--hl-sm) focus:bg-(--hl-xs) focus:outline-hidden aria-selected:font-bold data-focused:bg-(--hl-xs)"
+                >
+                  {item.id}
+                </ListBoxItem>
+              )}
+            </ListBox>
+          </Popover>
+        </ComboBox>
         {supportsSamplingParams && (
           <>
             <label className="flex items-center gap-1">
@@ -155,7 +195,7 @@ export const ChatSettingsBar: FC<Props> = ({
               <input
                 ref={temperatureRef}
                 defaultValue={values.temperature ?? ''}
-                onBlur={commit}
+                onBlur={() => commit()}
                 onKeyDown={commitOnEnter}
                 type="number"
                 step="0.1"
@@ -171,7 +211,7 @@ export const ChatSettingsBar: FC<Props> = ({
               <input
                 ref={maxTokensRef}
                 defaultValue={values.maxTokens ?? ''}
-                onBlur={commit}
+                onBlur={() => commit()}
                 onKeyDown={commitOnEnter}
                 type="number"
                 step="1"
@@ -200,7 +240,7 @@ export const ChatSettingsBar: FC<Props> = ({
       <textarea
         ref={systemRef}
         defaultValue={values.systemPrompt ?? ''}
-        onBlur={commit}
+        onBlur={() => commit()}
         placeholder="System prompt…"
         rows={1}
         className={`${fieldClassName} w-full resize-y italic`}

@@ -392,3 +392,45 @@ test('AI Gateway chat: editing settings in the bar warns that a reconnect is nee
   await expect.soft(responsePane.getByTestId('response-status-tag')).toContainText('200', { timeout: 10_000 });
   await expect.soft(responsePane.getByText('system=Speak like a pirate.')).toBeVisible();
 });
+
+// The user's ask: a dropdown for the model field so they don't have to guess at names.
+test('AI Gateway chat: picking a model from the settings-bar dropdown applies it on reconnect', async ({
+  page,
+  insomnia,
+}) => {
+  test.slow(process.platform === 'darwin' || process.platform === 'win32', 'Slow app start on these platforms');
+
+  const requestPane = page.getByTestId('request-pane');
+  const responsePane = page.getByTestId('response-pane').first();
+
+  await page.getByRole('button', { name: 'Create request collection', exact: true }).click();
+  await insomnia.navigationSidebar.openWorkspaceActionsDropdown('My first collection');
+  await page.getByRole('menuitemradio', { name: 'From Curl' }).click();
+  await page
+    .getByRole('dialog')
+    .locator('.CodeMirror textarea')
+    .fill(
+      `curl --request POST --url 'http://127.0.0.1:4010/v1/messages?reportThreading=1' ` +
+        `-H 'Accept: text/event-stream' -H 'Content-Type: application/json' ` +
+        `--data '{"model":"claude-sonnet-5","max_tokens":100,"stream":true,"messages":[{"role":"user","content":"turn1"}]}'`,
+    );
+  await page.getByRole('dialog').getByRole('button', { name: 'Import' }).click();
+  await requestPane.getByRole('button', { name: 'Connect' }).click();
+  await expect.soft(responsePane.getByTestId('response-status-tag')).toContainText('200', { timeout: 10_000 });
+
+  const modelField = responsePane.getByRole('combobox', { name: 'Model' });
+  await expect.soft(modelField).toHaveValue('claude-sonnet-5');
+  await modelField.click();
+  // The combobox's popover renders in a portal outside the response pane's own DOM subtree (same
+  // as the toast region elsewhere in this file).
+  await page.getByRole('option', { name: 'claude-opus-5-5' }).click();
+  await expect.soft(modelField).toHaveValue('claude-opus-5-5');
+
+  const notice = responsePane.getByText('Settings changed — reconnect to use them.');
+  await expect.soft(notice).toBeVisible();
+
+  await responsePane.getByRole('button', { name: 'Reconnect' }).click();
+  await expect.soft(notice).toBeHidden();
+  await expect.soft(responsePane.getByTestId('response-status-tag')).toContainText('200', { timeout: 10_000 });
+  await expect.soft(responsePane.getByText('model=claude-opus-5-5')).toBeVisible();
+});
