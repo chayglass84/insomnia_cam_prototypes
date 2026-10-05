@@ -273,7 +273,11 @@ export const inferStreamSummaryPath = (url: string): string | null => {
     if (pathname.toLowerCase().includes(':streamgeneratecontent')) {
       return '$.candidates[0].content.parts[0].text';
     }
-    const match = PATH_TO_JSONPATH.find(entry => entry.pathname === pathname);
+    // Exact-match would miss a gateway route that fronts the real API behind its own prefix
+    // (e.g. Kong AI Gateway's `/anthropic/v1/messages`, which it strips server-side before
+    // forwarding to the real `/v1/messages`) — match on suffix instead so the client-visible
+    // URL can carry an arbitrary prefix ahead of the provider's well-known path.
+    const match = PATH_TO_JSONPATH.find(entry => pathname.endsWith(entry.pathname));
     return match ? match.jsonPath : null;
   } catch {
     return null;
