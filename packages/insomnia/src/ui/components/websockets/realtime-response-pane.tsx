@@ -402,9 +402,14 @@ const RealtimeActiveResponsePane: FC<RealtimeActiveResponsePaneProps & { readySt
     if (!parsedChatRequest) {
       return;
     }
+    // Both sides must be normalized the same way before comparing — `next` already comes trimmed
+    // out of the settings bar's own fields, but the *current* value (from the raw request body)
+    // isn't, so comparing them as-is reported "changed" for any system prompt or model that
+    // happened to have incidental surrounding whitespace, even with no actual edit.
+    const normalizeText = (value?: string) => value?.trim() || undefined;
     const unchanged =
-      (next.model || undefined) === chatSettingsValues.model &&
-      (next.systemPrompt || undefined) === chatSettingsValues.systemPrompt &&
+      normalizeText(next.model) === normalizeText(chatSettingsValues.model) &&
+      normalizeText(next.systemPrompt) === normalizeText(chatSettingsValues.systemPrompt) &&
       next.temperature === chatSettingsValues.temperature &&
       next.maxTokens === chatSettingsValues.maxTokens;
     if (unchanged) {

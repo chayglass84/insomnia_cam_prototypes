@@ -375,16 +375,26 @@ test('AI Gateway chat: editing settings in the bar warns that a reconnect is nee
   await requestPane.getByRole('button', { name: 'Connect' }).click();
   await expect.soft(responsePane.getByTestId('response-status-tag')).toContainText('200', { timeout: 10_000 });
 
-  // No bubble for the system prompt anymore — it lives in the settings bar instead.
-  await expect.soft(responsePane.getByText('System prompt', { exact: true })).toHaveCount(0);
+  // No bubble for the system prompt anymore — it lives in the settings bar instead. (The mock's
+  // reply text contains "Be terse." as a substring — `system=Be terse. model=...` — so this must
+  // match exactly, not loosely, or it'll "find" that echoed reply instead of a real bubble.)
+  await expect.soft(responsePane.getByTestId('chat-message-list').getByText('Be terse.', { exact: true })).toHaveCount(0);
 
-  const systemField = responsePane.getByPlaceholder('System prompt…');
+  const notice = responsePane.getByText('Settings changed — reconnect to use them.');
+  const systemField = responsePane.getByRole('textbox', { name: 'System prompt', exact: true });
   await expect.soft(systemField).toHaveValue('Be terse.');
+
+  // Real bug: focusing and blurring a field without actually changing anything (e.g. just
+  // clicking in to read a value) used to show the warning anyway, because the "did this change"
+  // check compared a trimmed value against an untrimmed one.
+  await systemField.click();
+  await systemField.blur();
+  await expect.soft(notice).toBeHidden();
+
   await systemField.fill('Speak like a pirate.');
   await systemField.blur();
 
-  // Editing warns that the live connection won't see the change until reconnecting.
-  const notice = responsePane.getByText('Settings changed — reconnect to use them.');
+  // A real edit still warns that the live connection won't see the change until reconnecting.
   await expect.soft(notice).toBeVisible();
 
   await responsePane.getByRole('button', { name: 'Reconnect' }).click();

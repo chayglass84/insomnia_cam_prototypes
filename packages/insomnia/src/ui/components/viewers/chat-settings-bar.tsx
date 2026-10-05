@@ -130,8 +130,11 @@ export const ChatSettingsBar: FC<Props> = ({
           )}
         </div>
         {values.systemPrompt && (
-          <div className="truncate text-(--hl) italic" title={values.systemPrompt}>
-            {values.systemPrompt}
+          <div className="flex min-w-0 items-baseline gap-1">
+            <span className="shrink-0">System prompt:</span>
+            <span className="truncate text-(--color-font) italic" title={values.systemPrompt}>
+              {values.systemPrompt}
+            </span>
           </div>
         )}
       </div>
@@ -144,12 +147,6 @@ export const ChatSettingsBar: FC<Props> = ({
       className="flex shrink-0 flex-col gap-1.5 border-b border-solid border-(--hl-md) bg-(--hl-xs) px-3 py-2 text-xs text-(--hl)"
     >
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-        {isStreaming && (
-          <span className="flex items-center gap-1 text-(--color-font)">
-            <Icon icon="spinner" className="animate-spin" />
-            Streaming…
-          </span>
-        )}
         <ComboBox
           aria-label="Model"
           allowsCustomValue
@@ -188,10 +185,25 @@ export const ChatSettingsBar: FC<Props> = ({
             </ListBox>
           </Popover>
         </ComboBox>
+        {usage && (
+          <span className="flex items-center gap-1">
+            <Icon icon="coins" />
+            {usage.inputTokens ?? '?'} in / {usage.outputTokens ?? '?'} out
+            {totalTokens !== undefined && <span className="text-(--hl)">({totalTokens} total)</span>}
+          </span>
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        {isStreaming && (
+          <span className="flex items-center gap-1 text-(--color-font)">
+            <Icon icon="spinner" className="animate-spin" />
+            Streaming…
+          </span>
+        )}
         {supportsSamplingParams && (
           <>
             <label className="flex items-center gap-1">
-              <Icon icon="temperature-half" />
+              <span>Temp</span>
               <input
                 ref={temperatureRef}
                 defaultValue={values.temperature ?? ''}
@@ -201,13 +213,13 @@ export const ChatSettingsBar: FC<Props> = ({
                 step="0.1"
                 min="0"
                 max="2"
-                placeholder="temp"
+                placeholder="0.0–2.0"
                 aria-label="Temperature"
                 className={`${fieldClassName} w-16`}
               />
             </label>
             <label className="flex items-center gap-1">
-              <Icon icon="hashtag" />
+              <span>Max tokens</span>
               <input
                 ref={maxTokensRef}
                 defaultValue={values.maxTokens ?? ''}
@@ -216,35 +228,31 @@ export const ChatSettingsBar: FC<Props> = ({
                 type="number"
                 step="1"
                 min="1"
-                placeholder="max tokens"
+                placeholder="default"
                 aria-label="Max tokens"
                 className={`${fieldClassName} w-24`}
               />
             </label>
           </>
         )}
-        {usage && (
-          <span className="flex items-center gap-1">
-            <Icon icon="coins" />
-            {usage.inputTokens ?? '?'} in / {usage.outputTokens ?? '?'} out
-            {totalTokens !== undefined && <span className="text-(--hl)">({totalTokens} total)</span>}
-          </span>
-        )}
         {stopReason && (
           <span className="flex items-center gap-1">
-            <Icon icon="stop" />
-            {stopReason}
+            <span>Stop</span>
+            <span className="text-(--color-font)">{stopReason}</span>
           </span>
         )}
       </div>
-      <textarea
-        ref={systemRef}
-        defaultValue={values.systemPrompt ?? ''}
-        onBlur={() => commit()}
-        placeholder="System prompt…"
-        rows={1}
-        className={`${fieldClassName} w-full resize-y italic`}
-      />
+      <label className="flex flex-col gap-1">
+        <span>System prompt</span>
+        <textarea
+          ref={systemRef}
+          defaultValue={values.systemPrompt ?? ''}
+          onBlur={() => commit()}
+          placeholder="None set…"
+          rows={1}
+          className={`${fieldClassName} w-full resize-y italic`}
+        />
+      </label>
       {pendingNotice && (
         <div className="flex items-center justify-between gap-2 rounded-xs border border-solid border-(--color-warning) bg-(--color-bg) px-2 py-1 text-(--color-font)">
           <span className="flex items-center gap-1">
