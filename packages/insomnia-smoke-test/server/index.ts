@@ -119,6 +119,7 @@ app.post('/v1/messages', rawParser, (req, res) => {
     let assistantTurns = 0;
     let lastUserContent = '';
     let system = '';
+    let model = '';
     try {
       const body = JSON.parse(req.body.toString() || '{}');
       const messages = Array.isArray(body.messages) ? body.messages : [];
@@ -126,13 +127,17 @@ app.post('/v1/messages', rawParser, (req, res) => {
       const userMessages = messages.filter((message: { role?: string }) => message.role === 'user');
       lastUserContent = userMessages[userMessages.length - 1]?.content ?? '';
       system = typeof body.system === 'string' ? body.system : '';
+      model = typeof body.model === 'string' ? body.model : '';
     } catch {
       // ignore malformed bodies in this test fixture
     }
     send('content_block_delta', {
       type: 'content_block_delta',
       index: 0,
-      delta: { type: 'text_delta', text: `assistantTurns=${assistantTurns} lastUser=${lastUserContent} system=${system}` },
+      delta: {
+        type: 'text_delta',
+        text: `assistantTurns=${assistantTurns} lastUser=${lastUserContent} system=${system} model=${model}`,
+      },
     });
   } else if (req.query.longReply === '1') {
     // Enough lines to overflow the chat pane's visible height, so a test can confirm the message
