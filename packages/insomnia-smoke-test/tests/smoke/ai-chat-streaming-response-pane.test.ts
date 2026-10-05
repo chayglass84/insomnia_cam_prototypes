@@ -444,3 +444,93 @@ test('AI Gateway chat: picking a model from the settings-bar dropdown applies it
   await expect.soft(responsePane.getByTestId('response-status-tag')).toContainText('200', { timeout: 10_000 });
   await expect.soft(responsePane.getByText('model=claude-opus-5-5')).toBeVisible();
 });
+
+// User-reported: chatting used to auto-save every follow-up onto the request body, drifting the
+// Body/REST view out from under the user just by talking. Chatting is now purely local to the chat
+// window; "Save as Default Body" is the only thing that writes it back, and only the follow-up's
+// user message(s) — not the seeded question (already in the body) and not assistant replies.
+test('AI Gateway chat: "Save as Default Body" is disabled until a follow-up is sent, then persists only that follow-up\'s user message', async ({
+  page,
+  insomnia,
+}) => {
+  test.slow(process.platform === 'darwin' || process.platform === 'win32', 'Slow app start on these platforms');
+
+  const requestPane = page.getByTestId('request-pane');
+  const responsePane = page.getByTestId('response-pane').first();
+
+  await page.getByRole('button', { name: 'Create request collection', exact: true }).click();
+  await insomnia.navigationSidebar.openWorkspaceActionsDropdown('My first collection');
+  await page.getByRole('menuitemradio', { name: 'From Curl' }).click();
+  await page
+    .getByRole('dialog')
+    .locator('.CodeMirror textarea')
+    .fill(
+      `curl --request POST --url http://127.0.0.1:4010/v1/messages ` +
+        `-H 'Accept: text/event-stream' -H 'Content-Type: application/json' ` +
+        `--data '{"model":"claude-sonnet-5","max_tokens":100,"stream":true,"messages":[{"role":"user","content":"Hi"}]}'`,
+    );
+  await page.getByRole('dialog').getByRole('button', { name: 'Import' }).click();
+  await requestPane.getByRole('button', { name: 'Connect' }).click();
+  await expect.soft(responsePane.getByTestId('response-status-tag')).toContainText('200', { timeout: 10_000 });
+
+  const saveButton = responsePane.getByRole('button', { name: 'Save as Default Body' });
+  // Nothing's been typed into the chat window yet — only the seeded question exists, and that's
+  // already in the saved body, so there's nothing new to save.
+  await expect.soft(saveButton).toBeDisabled();
+
+  const followUpBox = responsePane.getByPlaceholder('Reply to continue the conversation…');
+  await followUpBox.fill('What is the capital of France?');
+  await followUpBox.press('Enter');
+  await expect.soft(responsePane.getByText('Hello from mock Anthropic stream!').last()).toBeVisible({ timeout: 10_000 });
+
+  await expect.soft(saveButton).toBeEnabled();
+  await saveButton.click();
+  const toast = page.getByRole('alertdialog', { name: 'Saved' });
+  await expect.soft(toast).toBeVisible();
+
+  // The Body tab hasn't been visited yet this request, so clicking it now is a fresh mount that
+  // reads the just-saved content directly — no remount dance needed to see it.
+  await requestPane.getByRole('tab', { name: 'Body' }).click();
+  const rawEditor = requestPane.getByRole('tabpanel', { name: 'Body' }).locator('.CodeMirror');
+  await expect.soft(rawEditor.getByText('"Hi"')).toBeVisible();
+  await expect.soft(rawEditor.getByText('"What is the capital of France?"')).toBeVisible();
+  // Only two user messages, nothing else: no assistant reply got persisted alongside them.
+  await expect.soft(rawEditor.getByText('"role": "assistant"')).toBeHidden();
+});
+
+// User-reported: "Clear Chat Window" should wipe the entire window, including the seeded
+// question/reply from the connection itself — not just follow-ups sent afterward.
+test('AI Gateway chat: "Clear Chat Window" wipes the seeded question and reply, not just follow-ups', async ({
+  page,
+  insomnia,
+}) => {
+  test.slow(process.platform === 'darwin' || process.platform === 'win32', 'Slow app start on these platforms');
+
+  const requestPane = page.getByTestId('request-pane');
+  const responsePane = page.getByTestId('response-pane').first();
+
+  await page.getByRole('button', { name: 'Create request collection', exact: true }).click();
+  await insomnia.navigationSidebar.openWorkspaceActionsDropdown('My first collection');
+  await page.getByRole('menuitemradio', { name: 'From Curl' }).click();
+  await page
+    .getByRole('dialog')
+    .locator('.CodeMirror textarea')
+    .fill(
+      `curl --request POST --url http://127.0.0.1:4010/v1/messages ` +
+        `-H 'Accept: text/event-stream' -H 'Content-Type: application/json' ` +
+        `--data '{"model":"claude-sonnet-5","max_tokens":100,"stream":true,"messages":[{"role":"user","content":"Hi"}]}'`,
+    );
+  await page.getByRole('dialog').getByRole('button', { name: 'Import' }).click();
+  await requestPane.getByRole('button', { name: 'Connect' }).click();
+  await expect.soft(responsePane.getByTestId('response-status-tag')).toContainText('200', { timeout: 10_000 });
+
+  await expect.soft(responsePane.getByText('Hi', { exact: true })).toBeVisible();
+  await expect.soft(responsePane.getByText('Hello from mock Anthropic stream!')).toBeVisible();
+
+  await responsePane.getByRole('button', { name: 'Clear Chat Window' }).click();
+
+  const messageList = responsePane.getByTestId('chat-message-list');
+  await expect.soft(messageList.getByText('Hi', { exact: true })).toBeHidden();
+  await expect.soft(messageList.getByText('Hello from mock Anthropic stream!')).toBeHidden();
+  await expect.soft(messageList.getByText('No chat messages found in this exchange.')).toBeVisible();
+});

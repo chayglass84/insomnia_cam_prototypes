@@ -10,6 +10,7 @@ import { ChatSettingsBar, type ChatSettingsValues } from './chat-settings-bar';
 interface Props {
   summary: ChatCompletionSummary;
   isStreaming?: boolean;
+  isWaitingForReply?: boolean;
   requestKey: string;
   format: 'openai' | 'anthropic' | 'gemini';
   settingsValues: ChatSettingsValues;
@@ -68,9 +69,21 @@ const ChatBubble: FC<{ message: ChatMessage; isLast: boolean; summary: ChatCompl
   );
 };
 
+const LoadingBubble: FC = () => (
+  <div className={`flex w-full flex-col gap-1 ${roleAlignment.assistant}`}>
+    <div
+      className={`flex max-w-[80%] min-w-0 items-center gap-2 rounded-md px-3 py-2 text-sm ${roleBubbleStyle.assistant}`}
+    >
+      <Icon icon="spinner" className="animate-spin" />
+      <span className="text-(--hl)">Waiting for a reply…</span>
+    </div>
+  </div>
+);
+
 export const ResponseChatViewer: FC<Props> = ({
   summary,
   isStreaming,
+  isWaitingForReply,
   requestKey,
   format,
   settingsValues,
@@ -168,6 +181,7 @@ export const ResponseChatViewer: FC<Props> = ({
               />
             ))
           )}
+          {isWaitingForReply && <LoadingBubble />}
         </div>
       </div>
     </div>

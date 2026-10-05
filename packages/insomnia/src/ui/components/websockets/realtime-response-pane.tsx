@@ -25,7 +25,7 @@ import {
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { useParams } from 'react-router';
 
-import { type ChatMessage, extractRequestMessages } from '~/common/chat-completion';
+import type { ChatMessage } from '~/common/chat-completion';
 import {
   applyChatSamplingParams,
   parseChatRequestBody,
@@ -262,6 +262,16 @@ const RealtimeActiveResponsePane: FC<RealtimeActiveResponsePaneProps & { readySt
 
   const allEvents = useRealtimeConnectionEvents({ responseId: response._id, protocol }) as EventType[];
   const allNotifications = useRealtimeConnectionNotifications({ responseId: response._id, protocol });
+  // A follow-up chat message reuses this same response's event log rather than starting a fresh
+  // one, so without this cutoff the live-turn accumulator below would keep including every prior
+  // turn's already-complete SSE events alongside the new turn's — showing the previous reply
+  // (concatenated with whatever's arrived of the new one so far) instead of just the new turn.
+  // `clearEventsBefore` is reused here from the "Clear events" timeline action below for the same
+  // purpose: both mean "ignore everything logged before this point in time."
+  const eventsSinceClear = useMemo(
+    () => (clearEventsBefore ? allEvents.filter(event => event.timestamp > clearEventsBefore) : allEvents),
+    [allEvents, clearEventsBefore],
+  );
   const showStreamSummaryTab = protocol === 'curl';
   const streamSummary = useStreamSummary({
     requestId: response.parentId,
@@ -269,7 +279,7 @@ const RealtimeActiveResponsePane: FC<RealtimeActiveResponsePaneProps & { readySt
     // Only curl carries stream-summary-shaped data — never feed socketIO's/webSocket's
     // events in here mislabeled as curl, even though showStreamSummaryTab already hides
     // the UI for those.
-    events: showStreamSummaryTab ? (allEvents as CurlEvent[]) : [],
+    events: showStreamSummaryTab ? (eventsSinceClear as CurlEvent[]) : [],
   });
 
   // Chat-completion detection for live streaming responses: only curl (HTTP event-stream)
@@ -285,27 +295,58 @@ const RealtimeActiveResponsePane: FC<RealtimeActiveResponsePaneProps & { readySt
     () =>
       showChatTab
         ? getCandidatePayloadsFromEvents(
-            (allEvents as CurlEvent[]).map((event): StreamMessageEvent => ({
+            (eventsSinceClear as CurlEvent[]).map((event): StreamMessageEvent => ({
               type: event.type,
               direction: 'direction' in event ? event.direction : '',
               data: 'data' in event ? event.data : '',
             })),
           )
         : [],
-    [allEvents, showChatTab],
+    [eventsSinceClear, showChatTab],
   );
   const streamChatMeta = useMemo(() => extractStreamChatMeta(candidatePayloads), [candidatePayloads]);
   const chatModel = streamChatMeta.model ?? parsedChatRequest?.model;
+
+  // Chatting used to rewrite the request's saved body on every follow-up (to carry conversation
+  // history to the next turn), so the Body/REST view kept drifting out from under the user just by
+  // talking in the chat tab. Conversation history now lives here instead, and only covers what's
+  // actually been exchanged *through this chat window* — seeded, on first render of a given
+  // connection, with just the user message(s) that were actually sent to produce it (so the window
+  // isn't empty right after connecting), then added to as follow-ups happen. "Clear Chat Window"
+  // wipes it back to genuinely empty (not even the seeded question) rather than back to this seed.
+  const [localConversation, setLocalConversation] = useState<ChatMessage[]>([]);
+  // Separate from the above: only the user messages actually *typed into this chat window* via a
+  // follow-up — excludes the seeded question above, which already exists in the saved body. "Save
+  // as Default Body" appends only these, so it doesn't duplicate what's already saved.
+  const [sessionUserMessages, setSessionUserMessages] = useState<ChatMessage[]>([]);
+  // A follow-up reconnects too (see `handleSendFollowUp`), which produces its own new `response`
+  // just like the very first connect does — so the reseed effect below would otherwise fire again
+  // after every follow-up and silently wipe the conversation it just built. Set right before a
+  // follow-up's own `connectRequestFetcher.submit`, and consumed (not watched) by the effect, so it
+  // can tell "a new response I caused myself" apart from "a new response from an actual reconnect."
+  const skipNextChatSeedRef = useRef(false);
+  useEffect(() => {
+    if (skipNextChatSeedRef.current) {
+      skipNextChatSeedRef.current = false;
+      return;
+    }
+    setLocalConversation(parsedChatRequest?.messages.filter(message => message.role === 'user') ?? []);
+    setSessionUserMessages([]);
+    // Reseed once per connection (new response), not on every edit to the live request body —
+    // `parsedChatRequest` is read here as a one-time snapshot at connect time, intentionally not a
+    // dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [response._id]);
+
   const chatMessages = useMemo(() => {
     if (!showChatTab) {
       return [];
     }
-    const requestMessages = extractRequestMessages(requestBodyText);
     const assistantText = streamSummary.summary.summary;
     return assistantText
-      ? [...requestMessages, { role: 'assistant' as const, content: assistantText }]
-      : requestMessages;
-  }, [showChatTab, requestBodyText, streamSummary.summary.summary]);
+      ? [...localConversation, { role: 'assistant' as const, content: assistantText }]
+      : localConversation;
+  }, [showChatTab, localConversation, streamSummary.summary.summary]);
 
   // Keeps the per-bubble token/model footer (chat-turn-meta-cache.ts) up to date for the live turn
   // as it streams in, so the metadata is already recorded by the time a follow-up or navigation
@@ -331,6 +372,18 @@ const RealtimeActiveResponsePane: FC<RealtimeActiveResponsePaneProps & { readySt
   const connectRequestFetcher = useRequestConnectActionFetcher();
   const [followUpText, setFollowUpText] = useState('');
   const isSendingFollowUp = connectRequestFetcher.state !== 'idle';
+  // True from the moment a follow-up is sent until the new turn's first chunk of assistant text
+  // actually arrives — drives the loading bubble below. Cleared by whichever happens first: real
+  // content streaming in, the connection erroring out, or navigating to a different request.
+  const [isAwaitingFollowUpReply, setIsAwaitingFollowUpReply] = useState(false);
+  useEffect(() => {
+    if (isAwaitingFollowUpReply && (streamSummary.summary.summary.trim() || response.error)) {
+      setIsAwaitingFollowUpReply(false);
+    }
+  }, [isAwaitingFollowUpReply, streamSummary.summary.summary, response.error]);
+  useEffect(() => {
+    setIsAwaitingFollowUpReply(false);
+  }, [activeRequest._id]);
 
   // The Accept header alone (which is all that's needed to route a request here) doesn't make a
   // provider actually stream — OpenAI/Anthropic also require a `stream: true` body flag, and a
@@ -517,26 +570,41 @@ const RealtimeActiveResponsePane: FC<RealtimeActiveResponsePaneProps & { readySt
     // them, and the model would answer the entire run-on history in one reply on the next connect.
     const previousAssistantText = streamSummary.summary.summary.trim();
     const messagesWithPreviousReply = previousAssistantText
-      ? [...parsedBody.messages, { role: 'assistant' as const, content: previousAssistantText }]
-      : parsedBody.messages;
-    const nextBodyText = serializeChatRequestBody(baseBodyText || '', parsedBody.format, {
+      ? [...localConversation, { role: 'assistant' as const, content: previousAssistantText }]
+      : localConversation;
+    const nextConversation = [...messagesWithPreviousReply, { role: 'user' as const, content: text }];
+    // `localConversation` is seeded (on connect) with the saved body's own user message(s), so it
+    // already carries full history forward turn-by-turn — only the system message (deliberately
+    // excluded from the seed, since it's config rather than conversation) needs adding back in here.
+    const systemMessage = parsedBody.messages.find(message => message.role === 'system');
+    const outgoingMessages = systemMessage ? [systemMessage, ...nextConversation] : nextConversation;
+    // This body text is only ever used to render the outgoing network request below — it's
+    // deliberately never persisted onto `activeRequest` (see `localConversation` above).
+    const ephemeralBodyText = serializeChatRequestBody(baseBodyText || '', parsedBody.format, {
       model: parsedBody.model,
-      messages: [...messagesWithPreviousReply, { role: 'user', content: text }],
+      messages: outgoingMessages,
     });
-    const nextBody = { ...activeRequest.body, text: nextBodyText };
-    patchRequest(activeRequest._id, { body: nextBody });
+    const ephemeralBody = { ...activeRequest.body, text: ephemeralBodyText };
+    setLocalConversation(nextConversation);
+    setSessionUserMessages(previous => [...previous, { role: 'user', content: text }]);
     setFollowUpText('');
     pendingSettingsBodyRef.current = null;
     setSettingsChangedSinceConnect(false);
 
     const rendered = await renderRealtimeConnectPayload({
-      request: { ...activeRequest, body: nextBody },
+      request: { ...activeRequest, body: ephemeralBody },
       environmentId: activeEnvironment._id,
       workspaceId: activeWorkspace._id,
     });
     if (!rendered) {
       return;
     }
+    // The previous turn's text has already been read (above) and baked into the request body as
+    // history — safe to cut the live accumulator over to "only events from here on" now, so the
+    // new turn's reply isn't shown concatenated after the one that just finished.
+    setClearEventsBefore(Date.now());
+    setIsAwaitingFollowUpReply(true);
+    skipNextChatSeedRef.current = true;
     connectRequestFetcher.submit({
       organizationId,
       projectId,
@@ -552,6 +620,49 @@ const RealtimeActiveResponsePane: FC<RealtimeActiveResponsePaneProps & { readySt
       },
     });
     recordProjectRecentRequest({ projectId, requestId: activeRequest._id, workspaceId: activeWorkspace._id });
+  };
+
+  // Appends every user message *typed as a follow-up* in this chat window onto the saved body's own
+  // messages — deliberately user-only (no assistant replies, no system message beyond what's
+  // already there), and deliberately excluding the seeded question (it's already in the saved body)
+  // — so reconnecting (or resending) this request later replays those questions as context. This is
+  // the only thing that writes the chat window's content back to the saved body.
+  const handleSaveChatAsDefaultBody = async () => {
+    if (!parsedChatRequest || sessionUserMessages.length === 0) {
+      return;
+    }
+    const nextMessages = [...parsedChatRequest.messages, ...sessionUserMessages];
+    const nextBodyText = serializeChatRequestBody(requestBodyText || '', parsedChatRequest.format, {
+      model: parsedChatRequest.model,
+      messages: nextMessages,
+    });
+    const nextBody = { ...activeRequest.body, text: nextBodyText };
+    await services.request.update(activeRequest, { body: nextBody });
+    patchRequest(activeRequest._id, { body: nextBody });
+    // Those messages are now part of the saved body itself — clear the "pending" tracking so a
+    // second Save press doesn't append them again.
+    setSessionUserMessages([]);
+    showToast({
+      icon: 'bolt',
+      title: 'Saved',
+      status: 'success',
+      raised: true,
+      description:
+        'Added this chat window\'s user messages to the request\'s default body. ' +
+        'Switch away from the Body tab and back (or reselect the request) to see it refreshed there — ' +
+        'the body editor only re-reads its content on remount, same as every other external body update.',
+    });
+  };
+
+  // Wipes the chat window back to genuinely empty — including the seeded question and the
+  // current/most recent turn's reply, which otherwise keeps showing (it lives in the live SSE event
+  // log, not in `localConversation`) until a new one replaces it.
+  const handleClearChatWindow = () => {
+    setLocalConversation([]);
+    setSessionUserMessages([]);
+    setClearEventsBefore(Date.now());
+    setIsAwaitingFollowUpReply(false);
+    setFollowUpText('');
   };
 
   const handleSelection = (event: EventType) => {
@@ -782,6 +893,7 @@ const RealtimeActiveResponsePane: FC<RealtimeActiveResponsePaneProps & { readySt
                 stopReason: streamChatMeta.stopReason,
               }}
               isStreaming={isConnected}
+              isWaitingForReply={isAwaitingFollowUpReply}
               requestKey={activeRequest._id}
               format={parsedChatRequest?.format ?? 'openai'}
               settingsValues={chatSettingsValues}
@@ -819,6 +931,24 @@ const RealtimeActiveResponsePane: FC<RealtimeActiveResponsePaneProps & { readySt
                 className="rounded-sm bg-(--color-surprise) px-4 text-sm text-(--color-font-surprise) hover:opacity-90 disabled:opacity-50"
               >
                 Send
+              </Button>
+            </div>
+            <div
+              data-ignore-send-hotkey
+              className="flex shrink-0 items-center justify-end gap-2 border-t border-solid border-(--hl-md) bg-(--color-bg) px-2 py-1.5"
+            >
+              <Button
+                onPress={handleClearChatWindow}
+                className="rounded-sm border border-solid border-(--hl-sm) px-2 py-1 text-xs text-(--color-font) hover:bg-(--hl-sm)"
+              >
+                Clear Chat Window
+              </Button>
+              <Button
+                onPress={handleSaveChatAsDefaultBody}
+                isDisabled={sessionUserMessages.length === 0}
+                className="rounded-sm border border-solid border-(--hl-sm) px-2 py-1 text-xs text-(--color-font) hover:bg-(--hl-sm) disabled:opacity-50"
+              >
+                Save as Default Body
               </Button>
             </div>
           </TabPanel>

@@ -97,6 +97,10 @@ describe('inferStreamSummaryPath', () => {
     expect(inferStreamSummaryPath('https://api.anthropic.com/v1/messages')).toBe('$.delta.text');
   });
 
+  it('matches Anthropic messages API behind a gateway path prefix', () => {
+    expect(inferStreamSummaryPath('http://localhost:8500/anthropic/v1/messages')).toBe('$.delta.text');
+  });
+
   it('matches Google Gemini streamGenerateContent', () => {
     expect(
       inferStreamSummaryPath('https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:streamGenerateContent'),
