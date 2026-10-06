@@ -32,7 +32,12 @@ import {
   parseChatSamplingParams,
   serializeChatRequestBody,
 } from '~/common/chat-request';
-import { ensureStreamingBodyFlag, hasStreamingBodyFlag } from '~/common/chat-streaming';
+import {
+  ensureIncludeUsageFlag,
+  ensureStreamingBodyFlag,
+  hasIncludeUsageFlag,
+  hasStreamingBodyFlag,
+} from '~/common/chat-streaming';
 import { docsMcpAuthentication } from '~/common/documentation';
 import { extractStreamChatMeta, getCandidatePayloadsFromEvents, type StreamMessageEvent } from '~/common/stream-summary';
 import { buildQueryStringFromParams, joinUrlAndQueryString } from '~/common/utils/url/querystring';
@@ -392,6 +397,48 @@ const RealtimeActiveResponsePane: FC<RealtimeActiveResponsePaneProps & { readySt
   // so it's excluded from this check rather than showing a banner that doesn't apply to it.
   const isMissingStreamingBodyFlag =
     showChatTab && parsedChatRequest?.format !== 'gemini' && !hasStreamingBodyFlag(requestBodyText);
+
+  // Gateway workspaces show cost, which needs token usage; OpenAI-format streams only send it when asked.
+  const isMissingIncludeUsageFlag =
+    showChatTab &&
+    parsedChatRequest?.format === 'openai' &&
+    Boolean(activeWorkspace.konnectAiGatewayModels?.length) &&
+    hasStreamingBodyFlag(requestBodyText) &&
+    !hasIncludeUsageFlag(requestBodyText);
+
+  const handleFixMissingIncludeUsage = async () => {
+    const previousBody = activeRequest.body;
+    const nextBodyText = ensureIncludeUsageFlag(previousBody.text);
+    if (nextBodyText === null) {
+      return;
+    }
+    const nextBody = { ...previousBody, text: nextBodyText };
+    await services.request.update(activeRequest, { body: nextBody });
+    patchRequest(activeRequest._id, { body: nextBody });
+    showToast(
+      {
+        icon: 'coins',
+        title: 'Added "stream_options.include_usage"',
+        status: 'success',
+        raised: true,
+        description: (
+          <span>
+            Reconnect to see token usage and cost for the next reply.{' '}
+            <Button
+              className="underline"
+              onPress={async () => {
+                await services.request.update(activeRequest, { body: previousBody });
+                patchRequest(activeRequest._id, { body: previousBody });
+              }}
+            >
+              Undo
+            </Button>
+          </span>
+        ),
+      },
+      { timeout: null },
+    );
+  };
 
   const handleFixMissingStreamFlag = async () => {
     const previousBody = activeRequest.body;
@@ -885,6 +932,20 @@ const RealtimeActiveResponsePane: FC<RealtimeActiveResponsePaneProps & { readySt
                 </Button>
               </div>
             )}
+            {isMissingIncludeUsageFlag && (
+              <div className="flex items-center justify-between gap-2 border-b border-solid border-(--hl-md) bg-(--hl-xs) px-3 py-2 text-sm text-(--color-font)">
+                <span>
+                  OpenAI-format streams only report tokens (and so cost) when the body has
+                  "stream_options": {'{'}"include_usage": true{'}'}. Without it this chat can't show tokens or cost.
+                </span>
+                <Button
+                  onPress={handleFixMissingIncludeUsage}
+                  className="shrink-0 rounded-sm border border-solid border-(--hl-sm) px-2 py-1 text-xs hover:bg-(--hl-sm)"
+                >
+                  Add include_usage
+                </Button>
+              </div>
+            )}
             <ResponseChatViewer
               summary={{
                 messages: chatMessages,
@@ -893,6 +954,7 @@ const RealtimeActiveResponsePane: FC<RealtimeActiveResponsePaneProps & { readySt
                 stopReason: streamChatMeta.stopReason,
               }}
               isStreaming={isConnected}
+              isLiveConversation
               isWaitingForReply={isAwaitingFollowUpReply}
               requestKey={activeRequest._id}
               format={parsedChatRequest?.format ?? 'openai'}

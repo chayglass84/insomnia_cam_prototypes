@@ -1,10 +1,11 @@
-import type { AiGatewayModel } from 'insomnia-data';
 import React, { type FC, useEffect, useRef } from 'react';
 
 import type { ChatCompletionSummary, ChatMessage } from '~/common/chat-completion';
-import { computeCostUsd, formatUsd } from '~/common/llm-cost';
-import { findCatalogModelByResponseModel } from '~/konnect/transform';
+import { type ChatTurnStats, totalChatTurns } from '~/common/chat-totals';
+import { formatUsd } from '~/common/llm-cost';
+import { priceChatTurn } from '~/konnect/transform';
 import { useWorkspaceLoaderData } from '~/routes/organization.$organizationId.project.$projectId.workspace.$workspaceId';
+import { useRequestLoaderData } from '~/routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request.$requestId';
 import { getChatTurnMeta } from '~/ui/utils/chat-turn-meta-cache';
 
 import { Icon } from '../icon';
@@ -20,6 +21,8 @@ interface Props {
   settingsValues: ChatSettingsValues;
   onApplySettings?: (next: ChatSettingsValues) => void;
   pendingSettingsNotice?: { message: string; actionLabel: string; onAction: () => void } | null;
+  /** Earlier replies' usage lives in an in-memory cache here, so flag when some is missing from the totals. */
+  isLiveConversation?: boolean;
 }
 
 const roleAlignment: Record<ChatMessage['role'], string> = {
@@ -34,53 +37,36 @@ const roleBubbleStyle: Record<ChatMessage['role'], string> = {
   system: 'bg-transparent text-(--hl) text-xs italic',
 };
 
-const formatTurnFooter = (
-  turnMeta: { model?: string; usage?: { inputTokens?: number; outputTokens?: number } },
-  // In a synced AI Gateway workspace, the catalog carries Konnect's per-token price for each model.
-  catalog: AiGatewayModel[] = [],
-) => {
-  const parts: string[] = [];
-  if (turnMeta.model) {
-    parts.push(turnMeta.model);
-  }
-  if (turnMeta.usage) {
-    parts.push(`${turnMeta.usage.inputTokens ?? '?'} tokens in, ${turnMeta.usage.outputTokens ?? '?'} out`);
-    const cost = computeCostUsd(findCatalogModelByResponseModel(turnMeta.model, catalog), turnMeta.usage);
-    if (cost !== null) {
-      parts.push(formatUsd(cost));
+/** `model / 40 in, 120 out / $0.0012`; says so when tokens or cost are unknown rather than silently omitting them. */
+const formatTurnFooter = (turn: ChatTurnStats, showCost: boolean, fallbackModel?: string) => {
+  const parts: string[] = [turn.model || fallbackModel || 'model unknown'];
+  if (turn.usage) {
+    parts.push(`${turn.usage.inputTokens ?? '?'} tokens in, ${turn.usage.outputTokens ?? '?'} out`);
+    if (showCost) {
+      parts.push(
+        turn.costUsd !== null
+          ? formatUsd(turn.costUsd)
+          : turn.costNote === 'rotating'
+            ? 'cost n/a (alias rotates between models)'
+            : 'cost n/a (no price)',
+      );
     }
+  } else {
+    parts.push('tokens not reported');
   }
   return parts.join(' / ');
 };
 
-const ChatBubble: FC<{ message: ChatMessage; isLast: boolean; summary: ChatCompletionSummary }> = ({
-  message,
-  isLast,
-  summary,
-}) => {
-  const isAssistant = message.role === 'assistant';
-  const catalog = useWorkspaceLoaderData()?.activeWorkspace.konnectAiGatewayModels ?? undefined;
-  // The live/current turn's model+usage comes from the response's own summary; any earlier
-  // turn's only exists in the in-memory turn-meta cache (see chat-turn-meta-cache.ts) — past
-  // turns' content is never persisted with structure, only as plain text.
-  const turnMeta = isAssistant
-    ? isLast
-      ? { model: summary.model, usage: summary.usage }
-      : getChatTurnMeta(message.content)
-    : undefined;
-  const footer = turnMeta ? formatTurnFooter(turnMeta, catalog) : '';
-
-  return (
-    <div className={`flex w-full flex-col gap-1 ${roleAlignment[message.role]}`}>
-      <div
-        className={`max-w-[80%] min-w-0 rounded-md px-3 py-2 text-left text-sm break-words whitespace-normal ${roleBubbleStyle[message.role]}`}
-      >
-        <MarkdownPreview markdown={message.content} />
-      </div>
-      {footer && <div className="px-1 text-[11px] text-(--hl)">{footer}</div>}
+const ChatBubble: FC<{ message: ChatMessage; footer?: string }> = ({ message, footer }) => (
+  <div className={`flex w-full flex-col gap-1 ${roleAlignment[message.role]}`}>
+    <div
+      className={`max-w-[80%] min-w-0 rounded-md px-3 py-2 text-left text-sm break-words whitespace-normal ${roleBubbleStyle[message.role]}`}
+    >
+      <MarkdownPreview markdown={message.content} />
     </div>
-  );
-};
+    {footer && <div className="px-1 text-[11px] text-(--hl)">{footer}</div>}
+  </div>
+);
 
 const LoadingBubble: FC = () => (
   <div className={`flex w-full flex-col gap-1 ${roleAlignment.assistant}`}>
@@ -102,9 +88,34 @@ export const ResponseChatViewer: FC<Props> = ({
   settingsValues,
   onApplySettings,
   pendingSettingsNotice,
+  isLiveConversation,
 }) => {
   // The system prompt now lives in the settings bar above, not as a bubble in the list.
   const visibleMessages = summary.messages.filter(message => message.role !== 'system');
+
+  // Per-reply stats: the live reply comes from this response's own summary; earlier ones from the in-memory cache.
+  // Priced from the model that answered when known, else from the model the request's route + alias point at.
+  const catalog = useWorkspaceLoaderData()?.activeWorkspace.konnectAiGatewayModels ?? [];
+  const requestUrl = useRequestLoaderData()?.activeRequest?.url;
+  const turnStats = visibleMessages.map((message, index): ChatTurnStats | undefined => {
+    if (message.role !== 'assistant') {
+      return undefined;
+    }
+    const meta =
+      index === visibleMessages.length - 1
+        ? { model: summary.model, usage: summary.usage }
+        : isLiveConversation
+          ? getChatTurnMeta(message.content)
+          : undefined;
+    return meta
+      ? { ...meta, ...priceChatTurn(meta, { url: requestUrl, alias: settingsValues.model }, catalog) }
+      : undefined;
+  });
+  // In a one-shot response, earlier assistant messages are request history (billed inside the input), not missing data.
+  const totals = totalChatTurns(
+    turnStats.filter((_, index) => visibleMessages[index].role === 'assistant'),
+    Boolean(isLiveConversation),
+  );
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -167,7 +178,7 @@ export const ResponseChatViewer: FC<Props> = ({
         format={format}
         values={settingsValues}
         onApply={onApplySettings}
-        usage={summary.usage}
+        totals={totals}
         stopReason={summary.stopReason}
         isStreaming={isStreaming}
         pendingNotice={pendingSettingsNotice}
@@ -189,8 +200,11 @@ export const ResponseChatViewer: FC<Props> = ({
                 // eslint-disable-next-line react/no-array-index-key -- messages have no stable id
                 key={index}
                 message={message}
-                isLast={index === visibleMessages.length - 1}
-                summary={summary}
+                footer={
+                  message.role === 'assistant' && (turnStats[index] || index === visibleMessages.length - 1)
+                    ? formatTurnFooter(turnStats[index] ?? { costUsd: null }, catalog.length > 0, settingsValues.model)
+                    : undefined
+                }
               />
             ))
           )}

@@ -11,6 +11,7 @@ import {
   isRotatingModel,
   modelTargets,
   pickLlmPrice,
+  priceChatTurn,
   selectAppliedAiGatewayPolicies,
   withUsageFromResponseBody,
 } from '../transform';
@@ -357,5 +358,57 @@ describe('rotating models (several targets behind one alias)', () => {
       targetModel: 'gpt-5-nano',
       inputPerToken: 10,
     });
+  });
+});
+
+describe('priceChatTurn', () => {
+  const priced = model({
+    id: 'priced',
+    paths: ['/anthropic'],
+    routeModelValues: ['opus'],
+    targetModel: 'claude-opus-4-6',
+    inputPerToken: 1,
+    outputPerToken: 2,
+  });
+  const rotating = model({
+    id: 'rot',
+    paths: ['/rotating'],
+    routeModelValues: ['nano'],
+    targets: [
+      { name: 'gpt-4.1-nano', provider: 'openai', inputPerToken: 1, outputPerToken: 1 },
+      { name: 'gpt-5-nano', provider: 'openai', inputPerToken: 10, outputPerToken: 10 },
+    ],
+  });
+  const usage = { inputTokens: 2, outputTokens: 3 };
+
+  it('prices by the model that answered', () => {
+    expect(priceChatTurn({ model: 'claude-opus-4-6-2026', usage }, {}, [priced])).toEqual({ costUsd: 8 });
+  });
+
+  it('falls back to the request route + alias when the response model is just the alias', () => {
+    expect(
+      priceChatTurn(
+        { model: 'opus', usage },
+        { url: 'http://{{ _.proxy_host }}/anthropic/v1/messages', alias: 'opus' },
+        [priced],
+      ),
+    ).toEqual({
+      costUsd: 8,
+    });
+  });
+
+  it('will not guess a price for a rotating alias without the answering model', () => {
+    expect(
+      priceChatTurn({ model: 'nano', usage }, { url: 'http://h/rotating/chat/completions', alias: 'nano' }, [rotating]),
+    ).toEqual({
+      costUsd: null,
+      costNote: 'rotating',
+    });
+    expect(priceChatTurn({ model: 'gpt-5-nano-2025-08-07', usage }, {}, [rotating])).toEqual({ costUsd: 50 });
+  });
+
+  it('reports no price rather than zero, and nothing outside a gateway workspace', () => {
+    expect(priceChatTurn({ model: 'mystery', usage }, {}, [priced])).toEqual({ costUsd: null, costNote: 'no-price' });
+    expect(priceChatTurn({ model: 'x', usage }, {}, [])).toEqual({ costUsd: null });
   });
 });
