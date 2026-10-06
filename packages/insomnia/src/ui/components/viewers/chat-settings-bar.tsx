@@ -3,6 +3,10 @@ import { Button, ComboBox, Group, Input, ListBox, ListBoxItem, Popover } from 'r
 
 import { Icon } from '~/ui/components/icon';
 
+import { getAiGatewayModelSuggestions } from '../../../konnect/transform';
+import { useWorkspaceLoaderData } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId';
+import { useRequestLoaderData } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request.$requestId';
+
 export interface ChatSettingsValues {
   model?: string;
   systemPrompt?: string;
@@ -54,6 +58,14 @@ export const ChatSettingsBar: FC<Props> = ({
   // neither this bar nor chat-request.ts's sampling-param helpers handle — hide rather than edit
   // a field that would silently write to the wrong place.
   const supportsSamplingParams = format !== 'gemini';
+
+  // In a synced AI Gateway workspace, suggest the `model` values the request's route actually matches on
+  // (e.g. `opus`) instead of the generic provider model names, which the gateway would 404 on.
+  const gatewayModels = useWorkspaceLoaderData()?.activeWorkspace.konnectAiGatewayModels;
+  const requestUrl = useRequestLoaderData()?.activeRequest?.url;
+  const modelSuggestions =
+    (gatewayModels && requestUrl ? getAiGatewayModelSuggestions(requestUrl, gatewayModels) : null) ??
+    MODEL_SUGGESTIONS[format];
 
   const modelRef = useRef<HTMLInputElement>(null);
   const systemRef = useRef<HTMLTextAreaElement>(null);
@@ -151,7 +163,7 @@ export const ChatSettingsBar: FC<Props> = ({
           aria-label="Model"
           allowsCustomValue
           defaultInputValue={values.model ?? ''}
-          defaultItems={MODEL_SUGGESTIONS[format].map(model => ({ id: model }))}
+          defaultItems={modelSuggestions.map(model => ({ id: model }))}
           onSelectionChange={key => commit({ model: key ? String(key) : undefined })}
           menuTrigger="focus"
         >

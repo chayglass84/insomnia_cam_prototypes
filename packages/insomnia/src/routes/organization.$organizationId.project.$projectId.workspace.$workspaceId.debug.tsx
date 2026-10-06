@@ -34,6 +34,7 @@ import { ImportModal } from '~/ui/components/modals/import-modal/import-modal';
 import { PasteCurlModal } from '~/ui/components/modals/paste-curl-modal';
 import { PromptModal } from '~/ui/components/modals/prompt-modal';
 import { RequestSettingsModal } from '~/ui/components/modals/request-settings-modal';
+import { AiGatewayModelsPane } from '~/ui/components/panes/ai-gateway-models-pane';
 import { GrpcRequestPane } from '~/ui/components/panes/grpc-request-pane';
 import { GrpcResponsePane } from '~/ui/components/panes/grpc-response-pane';
 import { RequestGroupPane } from '~/ui/components/panes/request-group-pane';
@@ -535,22 +536,27 @@ const Debug = () => {
                             projectId={projectId}
                             workspaceId={workspaceId}
                             activeItemId="spec"
+                            specTabLabel={activeWorkspace.konnectAiGatewayModels ? 'Routes/Models' : undefined}
                             enableLegacyUnitTests={settings.enableLegacyUnitTests}
                             hasLegacyUnitTests={hasLegacyUnitTests}
                           />
                           <div className="min-h-0 flex-1">
-                            <SpecView
-                              organizationId={organizationId}
-                              projectId={projectId}
-                              workspaceId={workspaceId}
-                              gitSyncRulesetPath={gitSyncRulesetPath}
-                              isConnectedGitProject={isConnectedGitProject}
-                              rulesetContent={rulesetContent}
-                              rulesetLastCompiledAt={rulesetLastCompiledAt}
-                              rulesetImportIssue={rulesetImportIssue}
-                              parsedSpec={parsedSpec}
-                              apiSpec={apiSpec}
-                            />
+                            {activeWorkspace.konnectAiGatewayModels ? (
+                              <AiGatewayModelsPane models={activeWorkspace.konnectAiGatewayModels} />
+                            ) : (
+                              <SpecView
+                                organizationId={organizationId}
+                                projectId={projectId}
+                                workspaceId={workspaceId}
+                                gitSyncRulesetPath={gitSyncRulesetPath}
+                                isConnectedGitProject={isConnectedGitProject}
+                                rulesetContent={rulesetContent}
+                                rulesetLastCompiledAt={rulesetLastCompiledAt}
+                                rulesetImportIssue={rulesetImportIssue}
+                                parsedSpec={parsedSpec}
+                                apiSpec={apiSpec}
+                              />
+                            )}
                           </div>
                         </div>
                       )}

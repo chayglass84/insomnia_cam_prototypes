@@ -1,4 +1,4 @@
-import type { KonnectDeploymentType } from 'insomnia-data';
+import type { AiGatewayModel, KonnectDeploymentType } from 'insomnia-data';
 
 import type { KonnectControlPlane, KonnectProxyUrl, KonnectRoute } from './api';
 
@@ -401,4 +401,93 @@ function controlPlaneConfigToControlPlaneType<
   );
 
   return null as ReturnType;
+}
+
+// ─── AI Gateway (prototype, 3593AI) ───────────────────────────────────────────
+
+/**
+ * Konnect reports a model's request `format` but not the endpoint path, so this map is hardcoded
+ * (prototype shortcut). Paths match the ones chat streaming already recognises in common/stream-summary.ts.
+ * Formats not listed here (gemini, bedrock, cohere, huggingface) get a request at the bare route path.
+ */
+const AI_FORMAT_ENDPOINTS: Record<string, string> = {
+  anthropic: '/v1/messages',
+  openai: '/v1/chat/completions',
+};
+
+/** Groups models by route path. A model listening on several paths appears under each. */
+export function groupModelsByPath(models: AiGatewayModel[]): [string, AiGatewayModel[]][] {
+  const groups = new Map<string, AiGatewayModel[]>();
+  for (const model of models) {
+    for (const path of model.paths.length > 0 ? model.paths : ['(no path)']) {
+      groups.set(path, [...(groups.get(path) ?? []), model]);
+    }
+  }
+  return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
+}
+
+const AI_DEFAULT_MAX_TOKENS = 4096;
+const AI_DEFAULT_SYSTEM_PROMPT = 'Be a helpful assistant.';
+const AI_DEFAULT_FIRST_PROMPT = 'Tell me how Kong AI Gateway can help me, in five concise bullet points.';
+
+export interface AiGatewayRequestSpec {
+  name: string;
+  /** Path appended to `{{ _.proxy_host }}`, route path + format endpoint. */
+  path: string;
+  body?: string;
+  description: string;
+}
+
+/** Builds the starter streaming chat request for one route. Uses the first model's format and model value. */
+export function buildAiGatewayRequestSpec(routePath: string, models: AiGatewayModel[]): AiGatewayRequestSpec {
+  const model = models.find(m => m.routeModelValues.length > 0) ?? models[0];
+  const endpoint = AI_FORMAT_ENDPOINTS[model.format];
+  const name = `Chat — ${routePath}`;
+  if (!endpoint) {
+    return {
+      name,
+      path: routePath,
+      description: `No known chat endpoint for the "${model.format}" format. Set the URL path and body by hand.`,
+    };
+  }
+  const modelValue = model.routeModelValues[0];
+  // Anthropic takes `system` at the top level; OpenAI takes it as the first message.
+  const body =
+    model.format === 'anthropic'
+      ? {
+          model: modelValue,
+          // Literal on purpose: the chat editor JSON.parses the body, so it can't hold a `{{ _.var }}` template.
+          max_tokens: AI_DEFAULT_MAX_TOKENS,
+          stream: true,
+          system: AI_DEFAULT_SYSTEM_PROMPT,
+          messages: [{ role: 'user', content: AI_DEFAULT_FIRST_PROMPT }],
+        }
+      : {
+          model: modelValue,
+          stream: true,
+          messages: [
+            { role: 'system', content: AI_DEFAULT_SYSTEM_PROMPT },
+            { role: 'user', content: AI_DEFAULT_FIRST_PROMPT },
+          ],
+        };
+  return {
+    name,
+    path: `${routePath}${endpoint}`,
+    body: JSON.stringify(body, null, 2),
+    description: `Models on this route: ${models.map(m => `${m.displayName} (${m.routeModelValues.join(', ')})`).join('; ')}`,
+  };
+}
+
+/**
+ * Model-field suggestions for a request in an AI Gateway workspace: the `model` values the request's route
+ * matches on (e.g. `opus`, `fable` for `/anthropic`). Returns null when the URL matches no catalog route.
+ */
+export function getAiGatewayModelSuggestions(requestUrl: string, models: AiGatewayModel[]): string[] | null {
+  // Strip scheme + host. A templated host like `{{ _.proxy_host }}` contains no `/`, so this still works.
+  const pathname = requestUrl.replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]*/i, '').split('?')[0];
+  const matches = models.filter(m => m.paths.some(path => pathname === path || pathname.startsWith(`${path}/`)));
+  if (matches.length === 0) {
+    return null;
+  }
+  return [...new Set(matches.flatMap(m => m.routeModelValues))];
 }

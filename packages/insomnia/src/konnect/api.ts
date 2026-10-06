@@ -52,6 +52,26 @@ export interface KonnectRoute {
   service: { id: string } | null;
 }
 
+/** Prototype (3593AI): AI Gateways are a separate Konnect resource from control planes. */
+export interface KonnectAiGateway {
+  id: string;
+  name: string;
+  display_name: string;
+  deployment_type: string;
+  region: KonnectRegion;
+  proxy_urls: KonnectProxyUrl[] | null;
+}
+
+export interface KonnectAiGatewayModel {
+  id: string;
+  name: string;
+  display_name: string;
+  enabled: boolean;
+  formats?: { type: string }[];
+  targets: { name: string; provider: string }[];
+  config: { route?: { paths?: string[]; model?: { values?: string[] } } };
+}
+
 export const getActiveRegions = getKonnectApiRegions;
 
 // Boundary normalizers — coerce any missing nullable field to `null` so the
@@ -234,6 +254,66 @@ export async function fetchRoutesForService(
     signal,
   );
   return routes.map(normalizeRoute);
+}
+
+// List path confirmed with a real PAT (2026-10-06). The `/models` sub-path is inferred from the MCP tool name, still unconfirmed by curl.
+const AI_GATEWAYS_PATH = '/v1/ai-gateways';
+
+export async function* fetchAllAiGateways(
+  pat: string,
+  region: KonnectRegion,
+  signal?: AbortSignal,
+): AsyncGenerator<KonnectAiGateway[]> {
+  let page = 1;
+  let totalPages = 1;
+
+  do {
+    const url = `${regionalApiBase(region)}${AI_GATEWAYS_PATH}?page[size]=${PAGE_SIZE}&page[number]=${page}`;
+    const response = await fetchWithRetry(url, pat, signal);
+
+    if (!response.ok) {
+      throw new Error(`Konnect API error ${response.status} fetching AI gateways`);
+    }
+
+    const body = await response.json();
+    const total: number = body?.meta?.page?.total ?? 0;
+    totalPages = Math.ceil(total / PAGE_SIZE) || 1;
+
+    yield (body.data as KonnectAiGateway[]).map(gw => ({ ...gw, region, proxy_urls: gw.proxy_urls ?? null }));
+    page++;
+  } while (page <= totalPages);
+}
+
+export async function fetchAiGatewayModels(
+  pat: string,
+  gatewayId: string,
+  region: string,
+  signal?: AbortSignal,
+): Promise<KonnectAiGatewayModel[]> {
+  const models: KonnectAiGatewayModel[] = [];
+  let after: string | null = null;
+
+  do {
+    const base = `${regionalApiBase(region)}${AI_GATEWAYS_PATH}/${gatewayId}/models?page[size]=${PAGE_SIZE}`;
+    const response = await fetchWithRetry(
+      after ? `${base}&page[after]=${encodeURIComponent(after)}` : base,
+      pat,
+      signal,
+    );
+
+    if (!response.ok) {
+      throw new Error(`Konnect API error ${response.status} fetching models for AI gateway ${gatewayId}`);
+    }
+
+    const body = await response.json();
+    models.push(...(body.data as KonnectAiGatewayModel[]));
+    // The list response exposes the next cursor as `meta.page.next` (null on the last page).
+    const next = body?.meta?.page?.next ?? null;
+    after =
+      typeof next === 'string' && next ? (new URL(next, 'https://x').searchParams.get('page[after]') ?? null) : null;
+  } while (after);
+
+  return models;
 }
 
 function regionalApiBase(region: string): string {

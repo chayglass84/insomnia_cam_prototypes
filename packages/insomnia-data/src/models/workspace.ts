@@ -10,12 +10,29 @@ export const canSync = true;
 
 export const SCRATCHPAD_WORKSPACE_ID = 'wrk_scratchpad';
 
+/** One model exposed by a Konnect AI Gateway. Several models can share a path, told apart by `routeModelValues`. */
+export interface AiGatewayModel {
+  id: string;
+  displayName: string;
+  /** Upstream model the gateway targets, e.g. `claude-opus-4-6`. */
+  targetModel: string;
+  provider: string;
+  /** Konnect request/response format: anthropic, openai, gemini, bedrock, cohere, huggingface. */
+  format: string;
+  paths: string[];
+  /** Values of the request body `model` field that the route matches on, e.g. `["opus"]`. */
+  routeModelValues: string[];
+  enabled: boolean;
+}
+
 export interface BaseWorkspace {
   name: string;
   description: string;
   certificates?: any; // deprecated
   scope: 'design' | 'collection' | 'mock-server' | 'environment' | 'mcp';
   konnectServiceId?: string | null;
+  /** Prototype (3593AI): model catalog synced from a Konnect AI Gateway. */
+  konnectAiGatewayModels?: AiGatewayModel[] | null;
 }
 
 export type WorkspaceScope = BaseWorkspace['scope'];
@@ -32,7 +49,7 @@ export type Workspace = BaseModel & BaseWorkspace;
 
 export const isWorkspace = (model: Pick<BaseModel, 'type'>): model is Workspace => model.type === type;
 
-export const optionalKeys = ['konnectServiceId'];
+export const optionalKeys = ['konnectServiceId', 'konnectAiGatewayModels'];
 export const isWorkspaceId = (id?: string | null) => id?.startsWith(prefix + '_');
 
 export const isDesign = (workspace: Pick<Workspace, 'scope'>) => workspace.scope === WorkspaceScopeKeys.design;
