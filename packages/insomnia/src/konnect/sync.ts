@@ -1,14 +1,25 @@
-import type { GrpcRequest, Project, Request, RequestGroup, WebSocketRequest, Workspace } from 'insomnia-data';
+import type {
+  AiGatewayModel,
+  EnvironmentKvPairData,
+  GrpcRequest,
+  Project,
+  Request,
+  RequestGroup,
+  WebSocketRequest,
+  Workspace,
+} from 'insomnia-data';
 import { EnvironmentKvPairDataType, models, services as insoservices } from 'insomnia-data';
-
-import { getDataFromKVPair } from '~/common/utils/environment-utils';
 
 import { database as db } from '../common/database';
 import {
+  fetchAiGatewayModels,
+  fetchAllAiGateways,
   fetchAllControlPlanes,
   fetchAllServices,
   fetchRoutesForService,
   getActiveRegions,
+  type KonnectAiGateway,
+  type KonnectAiGatewayModel,
   type KonnectControlPlane,
   type KonnectRoute,
   type KonnectService,
@@ -16,8 +27,10 @@ import {
 import { applyExpressionFields } from './expression-parser';
 import { getKonnectDeploymentType } from './transform';
 import {
+  buildAiGatewayRequestSpec,
   buildRequestName,
   deriveProxyVarDefaults,
+  groupModelsByPath,
   KONNECT_PROXY_VAR_NAMES,
   konnectHeadersChanged,
   mergeHeaders,
@@ -47,6 +60,8 @@ export interface SyncResult {
   controlPlanes: SyncCounts;
   services: SyncCounts;
   routes: SyncCounts;
+  /** Prototype (3593AI) */
+  aiGateways: SyncCounts;
   skippedRoutes: SkippedRoute[];
   skippedRegions: string[];
   durationMs: number;
@@ -526,7 +541,12 @@ async function syncServiceWorkspace(
 }
 
 /** Upserts the project-level environment workspace and syncs Konnect proxy URL vars into it. Returns the environment id. */
-async function upsertProjectEnvVars(controlPlane: KonnectControlPlane, project: Project): Promise<string> {
+async function upsertProjectEnvVars(
+  controlPlane: Pick<KonnectControlPlane, 'name' | 'proxy_urls'>,
+  project: Project,
+  /** Used when Konnect reports no proxy URL (e.g. hybrid AI gateways). */
+  fallbackProxyHost?: string,
+): Promise<string> {
   const existingEnvWorkspaces = await insoservices.workspace.list({
     parentId: project._id,
     scope: 'environment',
@@ -541,38 +561,47 @@ async function upsertProjectEnvVars(controlPlane: KonnectControlPlane, project: 
         });
 
   const projectEnv = await insoservices.environment.getOrCreateForParentId(envWorkspace._id);
-  const existingKvPairs = projectEnv.kvPairData ?? [];
-  const existingByName = new Map(existingKvPairs.map(kv => [kv.name, kv]));
+  const existingKvPairs = projectEnv.kvPairData;
+  const existingData = projectEnv.data ?? {};
   const proxyDefaults = deriveProxyVarDefaults(controlPlane.proxy_urls);
-  const newKvPairs = [...KONNECT_PROXY_VAR_NAMES]
-    .filter(name => !existingByName.has(name))
-    .map(name => ({
-      id: `env_${name}`,
-      name,
-      value: proxyDefaults[name] ?? '',
-      type: EnvironmentKvPairDataType.STRING,
-      enabled: true,
-    }));
+  if (!proxyDefaults.proxy_host && fallbackProxyHost) {
+    proxyDefaults.proxy_host = fallbackProxyHost;
+  }
 
-  // For existing vars that are still empty, fill in from proxy_urls if available
-  const updatedExisting = existingKvPairs.map(kv => {
-    if (kv.value === '' && (KONNECT_PROXY_VAR_NAMES as readonly string[]).includes(kv.name)) {
-      const defaultValue = proxyDefaults[kv.name as (typeof KONNECT_PROXY_VAR_NAMES)[number]];
-      if (defaultValue) {
-        return { ...kv, value: defaultValue };
-      }
-    }
-    return kv;
+  // Only ever fill a var that has no value yet. The JSON ("Raw Edit") editor updates `data` alone, leaving
+  // `kvPairData` stale or absent, so a var counts as set if either representation has a non-empty value.
+  const varsToWrite = KONNECT_PROXY_VAR_NAMES.flatMap(name => {
+    const kv = existingKvPairs?.find(pair => pair.name === name);
+    const dataValue = existingData[name];
+    const hasValue = (kv?.value ?? '') !== '' || (dataValue !== undefined && dataValue !== null && dataValue !== '');
+    const isAbsent = !kv && !(name in existingData);
+    const defaultValue = proxyDefaults[name] ?? '';
+    return !hasValue && (isAbsent || defaultValue !== '') ? [{ name, value: defaultValue }] : [];
   });
 
-  if (newKvPairs.length > 0 || updatedExisting.some((kv, i) => kv !== existingKvPairs[i])) {
-    const finalKvPairData = [...updatedExisting, ...newKvPairs];
-    const { data, dataPropertyOrder } = getDataFromKVPair(finalKvPairData);
-    await insoservices.environment.update(projectEnv, {
-      kvPairData: finalKvPairData,
-      data,
-      dataPropertyOrder,
-    });
+  if (varsToWrite.length > 0) {
+    const isFresh = existingKvPairs === undefined && Object.keys(existingData).length === 0;
+    const patch: { data: Record<string, any>; kvPairData?: EnvironmentKvPairData[] } = {
+      // Merge into `data` rather than rebuilding it from kvPairData, so nothing else the user put there is lost.
+      data: { ...existingData, ...Object.fromEntries(varsToWrite.map(v => [v.name, v.value])) },
+    };
+    if (existingKvPairs !== undefined || isFresh) {
+      const written = new Map<string, string>(varsToWrite.map(v => [v.name, v.value]));
+      const updated = (existingKvPairs ?? []).map(kv =>
+        written.has(kv.name) ? { ...kv, value: written.get(kv.name)! } : kv,
+      );
+      const added = varsToWrite
+        .filter(v => !updated.some(kv => kv.name === v.name))
+        .map(v => ({
+          id: `env_${v.name}`,
+          name: v.name,
+          value: v.value,
+          type: EnvironmentKvPairDataType.STRING,
+          enabled: true,
+        }));
+      patch.kvPairData = [...updated, ...added];
+    }
+    await insoservices.environment.update(projectEnv, patch);
   }
 
   return projectEnv._id;
@@ -582,6 +611,7 @@ interface ControlPlaneSyncAccumulators {
   controlPlaneCounts: SyncCounts;
   serviceCounts: SyncCounts;
   routeCounts: SyncCounts;
+  aiGatewayCounts: SyncCounts;
   skippedRoutes: SkippedRoute[];
   skippedRegions: string[];
 }
@@ -695,6 +725,7 @@ export async function syncKonnect({ pat, organizationId, signal, onProgress }: S
     controlPlaneCounts: zeroCounts(),
     serviceCounts: zeroCounts(),
     routeCounts: zeroCounts(),
+    aiGatewayCounts: zeroCounts(),
     skippedRoutes: [],
     skippedRegions: [],
   };
@@ -703,10 +734,12 @@ export async function syncKonnect({ pat, organizationId, signal, onProgress }: S
     // Load all existing Konnect projects up front to avoid per Control Plane queries.
     // `konnectControlPlaneId` is an optional key, so regular projects omit it entirely and NeDB's
     // `$ne: null` alone would match them.
-    const existingProjects = await insoservices.project.list({
-      parentId: organizationId,
-      konnectControlPlaneId: { $exists: true, $ne: null },
-    });
+    const existingProjects = (
+      await insoservices.project.list({
+        parentId: organizationId,
+        konnectControlPlaneId: { $exists: true, $ne: null },
+      })
+    ).filter(p => !p.konnectAiGateway); // AI gateways are synced separately and must not be deleted as stale CPs
     const existingProjectsByKonnectId = new Map(existingProjects.map(p => [p.konnectControlPlaneId!, p]));
     const incomingControlPlaneIds = new Set<string>();
     const syncCtx: SyncContext = { pat, organizationId, existingProjectsByKonnectId, signal, onProgress };
@@ -742,6 +775,8 @@ export async function syncKonnect({ pat, organizationId, signal, onProgress }: S
       }
     }
 
+    await syncAiGateways(syncCtx, acc);
+
     const durationMs = Date.now() - startTime;
 
     return {
@@ -749,6 +784,7 @@ export async function syncKonnect({ pat, organizationId, signal, onProgress }: S
       controlPlanes: acc.controlPlaneCounts,
       services: acc.serviceCounts,
       routes: acc.routeCounts,
+      aiGateways: acc.aiGatewayCounts,
       skippedRoutes: acc.skippedRoutes,
       skippedRegions: acc.skippedRegions,
       durationMs,
@@ -762,10 +798,194 @@ export async function syncKonnect({ pat, organizationId, signal, onProgress }: S
       controlPlanes: acc.controlPlaneCounts,
       services: acc.serviceCounts,
       routes: acc.routeCounts,
+      aiGateways: acc.aiGatewayCounts,
       skippedRoutes: acc.skippedRoutes,
       skippedRegions: acc.skippedRegions,
       durationMs,
       error: errorMessage,
     };
+  }
+}
+
+// ─── AI Gateways (prototype, 3593AI) ──────────────────────────────────────────
+
+const AI_GATEWAY_FALLBACK_PROXY_HOST = 'localhost:8000';
+
+function toAiGatewayModel(model: KonnectAiGatewayModel): AiGatewayModel {
+  return {
+    id: model.id,
+    displayName: model.display_name || model.name,
+    targetModel: model.targets?.[0]?.name ?? '',
+    provider: model.targets?.[0]?.provider ?? '',
+    format: model.formats?.[0]?.type ?? '',
+    paths: model.config?.route?.paths ?? [],
+    routeModelValues: model.config?.route?.model?.values ?? [],
+    enabled: model.enabled,
+  };
+}
+
+function aiGatewayModelsChanged(a: AiGatewayModel[], b: AiGatewayModel[]): boolean {
+  return JSON.stringify(a) !== JSON.stringify(b);
+}
+
+/**
+ * Ensures the gateway folder tree exists: one root folder for the gateway, one folder per route (path), and
+ * one streaming chat request per route. Everything is create-only, matched by key — existing folders and
+ * requests are never edited or deleted, so user prompts and folder-level scripts survive every sync.
+ * The URL scheme is hardcoded to http (fine for local hybrid data planes) — prototype shortcut.
+ */
+async function ensureAiGatewayTree(
+  workspaceId: string,
+  gatewayId: string,
+  gatewayName: string,
+  gatewayModels: AiGatewayModel[],
+) {
+  // Create-only (no rename, unlike upsertRouteFolder) so a user renaming a folder isn't reverted.
+  const ensureFolder = async (parentId: string, name: string, konnectRouteId: string) =>
+    (await db.find<RequestGroup>(models.requestGroup.type, { parentId, konnectRouteId }))[0]?._id ??
+    (await insoservices.requestGroup.create({ parentId, name, konnectRouteId }))._id;
+
+  const rootFolderId = await ensureFolder(workspaceId, gatewayName, `ai:${gatewayId}:root`);
+
+  for (const [routePath, routeModels] of groupModelsByPath(gatewayModels)) {
+    const routeFolderId = await ensureFolder(rootFolderId, routePath, `ai:${gatewayId}:${routePath}`);
+    const key = `ai:${gatewayId}:${routePath}`;
+    const existing = (
+      await db.find<Request>(models.request.type, { parentId: routeFolderId, konnectRouteKey: key })
+    )[0];
+    if (existing) {
+      continue;
+    }
+    const spec = buildAiGatewayRequestSpec(routePath, routeModels);
+    await insoservices.request.create({
+      parentId: routeFolderId,
+      name: spec.name,
+      description: spec.description,
+      method: 'POST',
+      url: `http://{{ _.proxy_host }}${spec.path}`,
+      headers: [
+        { name: 'Content-Type', value: 'application/json' },
+        { name: 'Accept', value: 'text/event-stream' },
+      ],
+      ...(spec.body ? { body: { mimeType: 'application/json', text: spec.body } } : {}),
+      konnectRouteKey: key,
+    });
+  }
+}
+
+async function syncAiGateway(
+  gateway: KonnectAiGateway,
+  syncCtx: SyncContext,
+  existingProjects: Map<string, Project>,
+  acc: ControlPlaneSyncAccumulators,
+): Promise<void> {
+  const { pat, organizationId, signal, onProgress } = syncCtx;
+  acc.aiGatewayCounts.total++;
+  const name = gateway.display_name || gateway.name;
+
+  let project = existingProjects.get(gateway.id);
+  if (project) {
+    if (project.name !== name || project.konnectRegion !== gateway.region) {
+      project = await insoservices.project.update(project, { name, konnectRegion: gateway.region });
+      acc.aiGatewayCounts.updated++;
+    }
+  } else {
+    project = await insoservices.project.create({
+      parentId: organizationId,
+      name,
+      konnectControlPlaneId: gateway.id,
+      konnectAiGateway: true,
+      konnectDeploymentType: gateway.deployment_type === 'hybrid' ? 'selfManaged' : 'serverless',
+      konnectRegion: gateway.region,
+    });
+    existingProjects.set(gateway.id, project);
+    acc.aiGatewayCounts.created++;
+  }
+
+  const environmentId = await upsertProjectEnvVars(
+    { name, proxy_urls: gateway.proxy_urls },
+    project,
+    AI_GATEWAY_FALLBACK_PROXY_HOST,
+  );
+
+  onProgress?.(`Fetching models for ${name}...`);
+  const models = (await fetchAiGatewayModels(pat, gateway.id, gateway.region, signal)).map(toAiGatewayModel);
+
+  // One collection per gateway holds the model catalog. User requests in it are never touched.
+  // `$ne: null` also matches workspaces missing the key (e.g. the environment workspace), so filter in JS.
+  const existingWorkspace = (await insoservices.workspace.list({ parentId: project._id })).find(
+    w => w.konnectAiGatewayModels != null,
+  );
+  let workspace: Workspace;
+  if (existingWorkspace) {
+    workspace =
+      existingWorkspace.name !== name || aiGatewayModelsChanged(existingWorkspace.konnectAiGatewayModels ?? [], models)
+        ? await insoservices.workspace.update(existingWorkspace, { name, konnectAiGatewayModels: models })
+        : existingWorkspace;
+  } else {
+    workspace = await insoservices.workspace.create({
+      parentId: project._id,
+      name,
+      scope: 'collection',
+      konnectAiGatewayModels: models,
+    });
+  }
+  await ensureAiGatewayTree(workspace._id, gateway.id, name, models);
+
+  const workspaceMeta = await insoservices.workspaceMeta.getOrCreateByParentId(workspace._id);
+  if (workspaceMeta.activeGlobalEnvironmentId !== environmentId) {
+    await insoservices.workspaceMeta.update(workspaceMeta, { activeGlobalEnvironmentId: environmentId });
+  }
+  await insoservices.cookieJar.getOrCreateForParentId(workspace._id);
+  onProgress?.(`Synced AI Gateway ${name} (${models.length} models)`);
+}
+
+/** Syncs AI Gateways as projects. A failure here is reported as a skipped region and never fails the whole sync. */
+async function syncAiGateways(syncCtx: SyncContext, acc: ControlPlaneSyncAccumulators): Promise<void> {
+  const { pat, organizationId, signal } = syncCtx;
+  const existing = (
+    await insoservices.project.list({
+      parentId: organizationId,
+      konnectControlPlaneId: { $exists: true, $ne: null },
+    })
+  ).filter(p => p.konnectAiGateway);
+  const existingByGatewayId = new Map(existing.map(p => [p.konnectControlPlaneId!, p]));
+  const incomingIds = new Set<string>();
+  const failedRegions = new Set<string>();
+
+  for (const region of getActiveRegions()) {
+    try {
+      for await (const page of fetchAllAiGateways(pat, region, signal)) {
+        for (const gateway of page) {
+          incomingIds.add(gateway.id);
+          const bufferId = await db.bufferChanges();
+          try {
+            await syncAiGateway(gateway, syncCtx, existingByGatewayId, acc);
+          } finally {
+            await db.flushChanges(bufferId);
+          }
+        }
+      }
+    } catch (err) {
+      if (signal?.aborted) {
+        throw err;
+      }
+      failedRegions.add(region);
+      const errMessage = err instanceof Error ? err.message : String(err);
+      // 403/404 on the gateway *list* just means this org/region has no AI Gateway access or none exist.
+      // The same codes on the per-gateway models call are NOT swallowed: the `/models` path is still
+      // unconfirmed, so a 404 there should surface.
+      console.info('[konnect] AI gateway sync failed', region, errMessage);
+      if (!/ 40[34] fetching AI gateways$/.test(errMessage)) {
+        acc.skippedRegions.push(`${region} (AI Gateways): ${errMessage}`);
+      }
+    }
+  }
+
+  for (const [gatewayId, project] of existingByGatewayId) {
+    if (!incomingIds.has(gatewayId) && !failedRegions.has(project.konnectRegion ?? '')) {
+      await insoservices.project.remove(project);
+      acc.aiGatewayCounts.deleted++;
+    }
   }
 }

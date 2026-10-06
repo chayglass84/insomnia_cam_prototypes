@@ -12,6 +12,8 @@ interface Props {
   enableLegacyUnitTests: boolean;
   hasLegacyUnitTests: boolean;
   className?: string;
+  /** Overrides the first tab's label, e.g. 'Routes/Models' for synced AI Gateway collections. */
+  specTabLabel?: string;
 }
 
 export const CollectionTab = ({
@@ -22,6 +24,7 @@ export const CollectionTab = ({
   enableLegacyUnitTests,
   hasLegacyUnitTests,
   className,
+  specTabLabel,
 }: Props) => {
   const navigate = useNavigate();
   const base = `/organization/${organizationId}/project/${projectId}/workspace/${workspaceId}`;
@@ -30,7 +33,7 @@ export const CollectionTab = ({
   const showTestsTab = enableLegacyUnitTests || hasLegacyUnitTests;
 
   const items: { id: DocumentTabId; name: string; to: string }[] = [
-    { id: 'spec', name: 'Spec', to: `${base}/debug` },
+    { id: 'spec', name: specTabLabel ?? 'Spec', to: `${base}/debug` },
     ...(showTestsTab ? [{ id: 'test' as const, name: 'Tests', to: `${base}/test` }] : []),
   ];
 
