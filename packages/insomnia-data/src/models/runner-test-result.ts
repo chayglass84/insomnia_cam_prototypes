@@ -29,6 +29,8 @@ export interface AiGatewayRunInfo {
   alias: string;
   /** The actual model, as reported by the provider response when available, else the catalog target. */
   model: string;
+  /** True when the alias balances across several upstream models, so `model` is only known once a response arrives. */
+  rotating?: boolean;
   inputTokens?: number;
   outputTokens?: number;
   /** USD for this run, from the model's Konnect price at send time. Absent when no price is known. */

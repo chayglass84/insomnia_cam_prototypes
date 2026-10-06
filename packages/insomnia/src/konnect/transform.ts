@@ -1,4 +1,4 @@
-import type { AiGatewayModel, AiGatewayRunInfo, KonnectDeploymentType } from 'insomnia-data';
+import type { AiGatewayModel, AiGatewayRunInfo, AiGatewayTarget, KonnectDeploymentType } from 'insomnia-data';
 
 import { extractChatCompletion } from '../common/chat-completion';
 import { parseChatRequestBody } from '../common/chat-request';
@@ -586,6 +586,33 @@ export function applyAiGatewayModelOverride(
   };
 }
 
+/** The upstream models a catalog model balances across (one entry for older syncs that stored only the first). */
+export const modelTargets = (model: AiGatewayModel): AiGatewayTarget[] =>
+  model.targets?.length
+    ? model.targets
+    : [
+        {
+          name: model.targetModel,
+          provider: model.provider,
+          inputPerToken: model.inputPerToken,
+          outputPerToken: model.outputPerToken,
+        },
+      ];
+
+/** True when the gateway picks between several upstream models for this alias, so which one answers isn't known up front. */
+export const isRotatingModel = (model: AiGatewayModel): boolean => modelTargets(model).length > 1;
+
+const matchesTarget = (responseModel: string, target: AiGatewayTarget) =>
+  !!target.name && (responseModel === target.name || responseModel.startsWith(`${target.name}-`));
+
+/** The target a provider-reported model id (`gpt-4.1-nano-2025-04-14`) belongs to, preferring the longest name. */
+export const findTargetByResponseModel = (model: AiGatewayModel, responseModel: string | undefined) =>
+  responseModel
+    ? modelTargets(model)
+        .filter(target => matchesTarget(responseModel, target))
+        .sort((a, b) => b.name.length - a.name.length)[0]
+    : undefined;
+
 /**
  * Fills token usage and the provider-reported model into a runner row from the (non-streaming) response body.
  * The body can be a string, a Buffer, or a Uint8Array — over Electron IPC a Buffer arrives as a Uint8Array.
@@ -593,10 +620,12 @@ export function applyAiGatewayModelOverride(
 export function withUsageFromResponseBody(
   info: AiGatewayRunInfo,
   body: string | Uint8Array,
-  price?: { inputPerToken?: number; outputPerToken?: number },
+  price?: Partial<Pick<AiGatewayModel, 'inputPerToken' | 'outputPerToken' | 'targets' | 'targetModel' | 'provider'>>,
 ): AiGatewayRunInfo {
   const summary = extractChatCompletion(typeof body === 'string' ? body : bodyBufferToUtf8(body));
-  const costUsd = computeCostUsd(price, summary?.usage);
+  // A rotating alias is priced by whichever target actually answered, not by the first one.
+  const answered = price && info.rotating ? findTargetByResponseModel(price as AiGatewayModel, summary?.model) : undefined;
+  const costUsd = computeCostUsd(info.rotating ? answered : price, summary?.usage);
   return {
     ...info,
     model: summary?.model || info.model,
@@ -628,7 +657,11 @@ export function pickLlmPrice(
   return Number.isFinite(inputPerToken) && Number.isFinite(outputPerToken) ? { inputPerToken, outputPerToken } : null;
 }
 
-/** The catalog model whose upstream target the provider's reported model id starts with (`gpt-4.1-nano-2025-04-14`). */
+/**
+ * The catalog model one of whose upstream targets the provider's reported model id starts with
+ * (`gpt-4.1-nano-2025-04-14`). The result carries the matched target's name and prices, so callers can price a response
+ * from a rotating alias by the target that answered.
+ */
 export function findCatalogModelByResponseModel(
   responseModel: string | undefined,
   catalog: AiGatewayModel[],
@@ -637,7 +670,20 @@ export function findCatalogModelByResponseModel(
     return undefined;
   }
   return catalog
-    .filter(m => m.targetModel && (responseModel === m.targetModel || responseModel.startsWith(`${m.targetModel}-`)))
+    .flatMap(model => {
+      const target = findTargetByResponseModel(model, responseModel);
+      return target
+        ? [
+            {
+              ...model,
+              targetModel: target.name,
+              provider: target.provider,
+              inputPerToken: target.inputPerToken,
+              outputPerToken: target.outputPerToken,
+            },
+          ]
+        : [];
+    })
     .sort((a, b) => b.targetModel.length - a.targetModel.length)[0];
 }
 

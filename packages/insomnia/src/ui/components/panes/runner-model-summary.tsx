@@ -45,7 +45,15 @@ export const RunnerModelSummary: FC<{ summaries: ModelRunSummary[] }> = ({ summa
                 }
               >
                 <span className="font-semibold">{summary.alias}</span>{' '}
-                <span className="font-mono text-xs text-(--hl)">{summary.model}</span>
+                <span className="font-mono text-xs text-(--hl)">{summary.model || 'no response'}</span>
+                {summary.rotating && (
+                  <span
+                    className="ml-2 rounded-sm bg-(--hl-md) px-1.5 text-xs"
+                    title="This alias rotates between several upstream models; the gateway chose this one for these runs."
+                  >
+                    rotating
+                  </span>
+                )}
               </button>
             </td>
             <td className={numberCell}>{summary.inputTokens.toLocaleString()}</td>

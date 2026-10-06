@@ -8,6 +8,8 @@ import {
   findCatalogModelByResponseModel,
   getAiGatewayModelSuggestions,
   groupModelsByPath,
+  isRotatingModel,
+  modelTargets,
   pickLlmPrice,
   selectAppliedAiGatewayPolicies,
   withUsageFromResponseBody,
@@ -313,5 +315,47 @@ describe('selectAppliedAiGatewayPolicies', () => {
 
   it('returns only the global policies when the model is unknown', () => {
     expect(selectAppliedAiGatewayPolicies(policies).map(a => a.policy.id)).toEqual(['p-global']);
+  });
+});
+
+describe('rotating models (several targets behind one alias)', () => {
+  const rotating = model({
+    id: 'nano',
+    format: 'openai',
+    provider: 'openai',
+    targetModel: 'gpt-4.1-nano',
+    paths: ['/rotating-openAI'],
+    routeModelValues: ['nano4.1'],
+    targets: [
+      { name: 'gpt-4.1-nano', provider: 'openai', inputPerToken: 1, outputPerToken: 2 },
+      { name: 'gpt-5-nano', provider: 'openai', inputPerToken: 10, outputPerToken: 20 },
+    ],
+  });
+
+  it('is rotating only with more than one target', () => {
+    expect(isRotatingModel(rotating)).toBe(true);
+    expect(isRotatingModel(opus)).toBe(false);
+    expect(modelTargets(opus)).toEqual([expect.objectContaining({ name: 'target' })]);
+  });
+
+  it('prices a response by the target that answered, not the first one', () => {
+    const body = JSON.stringify({
+      model: 'gpt-5-nano-2025-08-07',
+      choices: [{ message: { role: 'assistant', content: 'hi' } }],
+      usage: { prompt_tokens: 3, completion_tokens: 4 },
+    });
+    const info = { alias: 'nano4.1', model: '', rotating: true };
+    expect(withUsageFromResponseBody(info, body, rotating)).toMatchObject({
+      model: 'gpt-5-nano-2025-08-07',
+      costUsd: 3 * 10 + 4 * 20,
+    });
+  });
+
+  it('finds the catalog model through any of its targets, carrying that target price', () => {
+    expect(findCatalogModelByResponseModel('gpt-5-nano-2025-08-07', [rotating])).toMatchObject({
+      id: 'nano',
+      targetModel: 'gpt-5-nano',
+      inputPerToken: 10,
+    });
   });
 });
