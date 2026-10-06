@@ -661,6 +661,15 @@ export function findCatalogModelByRequest(
     .sort((a, b) => longestPath(b) - longestPath(a))[0];
 }
 
+/** Every catalog model on the route a request URL hits: those sharing the longest matching route path. */
+export function findCatalogModelsByPath(requestUrl: string, catalog: AiGatewayModel[]): AiGatewayModel[] {
+  const pathname = requestUrl.replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]*/i, '').split('?')[0];
+  const matchLength = (m: AiGatewayModel) =>
+    Math.max(0, ...m.paths.filter(path => pathname === path || pathname.startsWith(`${path}/`)).map(p => p.length));
+  const longest = Math.max(0, ...catalog.map(matchLength));
+  return longest === 0 ? [] : catalog.filter(m => matchLength(m) === longest);
+}
+
 export interface AppliedAiGatewayPolicy {
   policy: KonnectAiGatewayPolicy;
   scope: 'Model' | 'Global';
