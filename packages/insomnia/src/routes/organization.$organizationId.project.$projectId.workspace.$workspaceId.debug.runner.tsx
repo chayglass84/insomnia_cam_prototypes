@@ -157,6 +157,7 @@ export interface RequestRow {
   /** Display only: the route's model value (`opus`) and the actual target model (`claude-opus-4-6`). */
   modelAlias?: string;
   modelTarget?: string;
+  modelRoute?: string;
 }
 
 const defaultAdvancedConfig = {
@@ -322,6 +323,7 @@ export const Runner: FC = () => {
             modelId: model.id,
             modelAlias: model.routeModelValues[0] ?? model.displayName,
             modelTarget: model.targetModel,
+            modelRoute: model.paths[0],
           })),
         )
       : selectedRequests;
@@ -1061,7 +1063,9 @@ export async function clientAction({ request, params }: Route.ClientActionArgs) 
         requestName: req.name,
         requestUrl: req.url,
         status: 'pending',
-        aiGateway: req.modelId ? { alias: req.modelAlias ?? '', model: req.modelTarget ?? '' } : undefined,
+        aiGateway: req.modelId
+          ? { route: req.modelRoute, alias: req.modelAlias ?? '', model: req.modelTarget ?? '' }
+          : undefined,
       });
     });
   }
@@ -1102,7 +1106,11 @@ export async function clientAction({ request, params }: Route.ClientActionArgs) 
               results: [],
               skipped: true,
               aiGateway: targetRequest.modelId
-                ? { alias: targetRequest.modelAlias ?? '', model: targetRequest.modelTarget ?? '' }
+                ? {
+                    route: targetRequest.modelRoute,
+                    alias: targetRequest.modelAlias ?? '',
+                    model: targetRequest.modelTarget ?? '',
+                  }
                 : undefined,
             },
           ];
@@ -1121,7 +1129,11 @@ export async function clientAction({ request, params }: Route.ClientActionArgs) 
           results: [],
           responseId: '',
           aiGateway: targetRequest.modelId
-            ? { alias: targetRequest.modelAlias ?? '', model: targetRequest.modelTarget ?? '' }
+            ? {
+                route: targetRequest.modelRoute,
+                alias: targetRequest.modelAlias ?? '',
+                model: targetRequest.modelTarget ?? '',
+              }
             : undefined,
         };
         const buildResult = () => ({

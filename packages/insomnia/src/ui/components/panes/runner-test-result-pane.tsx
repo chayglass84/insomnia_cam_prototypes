@@ -2,11 +2,13 @@ import type { BaseRunnerTestResult, RunnerResultPerRequest } from 'insomnia-data
 import React, { type FC, useState } from 'react';
 import { Toolbar } from 'react-aria-components';
 
+import { summarizeModelRuns } from '~/common/runner-feedback';
 import { useRootLoaderData } from '~/root';
 import { Hotkey } from '~/ui/components/hotkey';
 
 import { RequestResultCard } from './request-result-card';
 import { hasMatchingTestResults, type TargetTestType } from './request-test-result-pane';
+import { RunnerModelSummary } from './runner-model-summary';
 
 const filterClassnames =
   'mx-1 w-24 text-center rounded-md h-(--line-height-xxs) text-sm cursor-pointer outline-hidden select-none px-2 py-1 hover:bg-[rgba(var(--color-surprise-rgb),50%)] text-(--hl) aria-selected:text-(--color-font-surprise) hover:text-(--color-font-surprise) aria-selected:bg-[rgba(var(--color-surprise-rgb),40%)] transition-colors duration-300';
@@ -88,6 +90,7 @@ export const RunnerTestResultPane: FC<Props> = ({ result }) => {
   });
 
   const hasVisibleResults = resultsByIteration.some(Boolean);
+  const modelSummaries = summarizeModelRuns(result.iterationResults.flat());
 
   return (
     <>
@@ -120,6 +123,7 @@ export const RunnerTestResultPane: FC<Props> = ({ result }) => {
             </button>
           </Toolbar>
           <div className="h-[calc(100%-var(--line-height-sm))] w-auto overflow-x-auto overflow-y-auto">
+            {modelSummaries.length > 0 && <RunnerModelSummary summaries={modelSummaries} />}
             {hasVisibleResults ? (
               resultsByIteration
             ) : (

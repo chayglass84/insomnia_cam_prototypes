@@ -23,6 +23,8 @@ export interface RequestTestResult {
 
 /** Prototype (3593AI): which gateway model a runner row ran against, and what it used. */
 export interface AiGatewayRunInfo {
+  /** The route (path) this model is served on, e.g. `/anthropic`. */
+  route?: string;
   /** The route's model value from the request body, e.g. `opus`. */
   alias: string;
   /** The actual model, as reported by the provider response when available, else the catalog target. */

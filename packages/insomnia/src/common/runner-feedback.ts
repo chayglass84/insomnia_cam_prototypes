@@ -1,4 +1,4 @@
-import type { AiGatewayRunInfo, RequestTestResult } from 'insomnia-data';
+import type { AiGatewayRunInfo, RequestTestResult, RunnerResultPerRequest } from 'insomnia-data';
 
 import { RESPONSE_CODE_REASONS } from './constants';
 import { describeByteSize } from './misc';
@@ -82,3 +82,62 @@ export const sumTokenUsage = (rows: { aiGateway?: AiGatewayRunInfo }[]) => {
 
 export const formatTokenUsage = ({ inputTokens, outputTokens }: { inputTokens?: number; outputTokens?: number }) =>
   `${(inputTokens ?? 0).toLocaleString()} in, ${(outputTokens ?? 0).toLocaleString()} out`;
+
+export interface ModelRunSummary {
+  route: string;
+  alias: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  passedTests: number;
+  totalTests: number;
+  /** Share of tests passed, 0-1, or null when the model's runs had no tests. */
+  passRate: number | null;
+}
+
+/**
+ * One row per model (route + alias + actual model), totalled across every request and iteration in the run, ranked:
+ * highest test pass rate first, then fewest output tokens. Models whose runs had no tests rank after those that did.
+ * Skipped rows are ignored.
+ */
+export const summarizeModelRuns = (rows: RunnerResultPerRequest[]): ModelRunSummary[] => {
+  const byModel = new Map<string, ModelRunSummary>();
+  for (const row of rows) {
+    const info = row.aiGateway;
+    if (!info || row.skipped) {
+      continue;
+    }
+    const key = `${info.route ?? ''}\u0000${info.alias}\u0000${info.model}`;
+    const summary = byModel.get(key) ?? {
+      route: info.route ?? '',
+      alias: info.alias,
+      model: info.model,
+      inputTokens: 0,
+      outputTokens: 0,
+      passedTests: 0,
+      totalTests: 0,
+      passRate: null,
+    };
+    summary.inputTokens += info.inputTokens ?? 0;
+    summary.outputTokens += info.outputTokens ?? 0;
+    summary.passedTests += (row.results ?? []).filter(result => result.status === 'passed').length;
+    summary.totalTests += (row.results ?? []).length;
+    byModel.set(key, summary);
+  }
+  const summaries = [...byModel.values()].map(summary => ({
+    ...summary,
+    passRate: summary.totalTests > 0 ? summary.passedTests / summary.totalTests : null,
+  }));
+  return summaries.sort((a, b) => {
+    if (a.passRate !== b.passRate) {
+      if (a.passRate === null) {
+        return 1;
+      }
+      if (b.passRate === null) {
+        return -1;
+      }
+      return b.passRate - a.passRate;
+    }
+    return a.outputTokens - b.outputTokens;
+  });
+};
