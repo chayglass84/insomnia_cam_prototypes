@@ -65,5 +65,12 @@ export const RunnerModelSummary: FC<{ summaries: ModelRunSummary[] }> = ({ summa
         ))}
       </tbody>
     </table>
+    <p
+      className="border-t border-solid border-(--hl-md) px-3 py-1.5 text-xs text-(--hl)"
+      data-testid="runner-model-summary-note"
+    >
+      Ranked by tests passed, then cheapest, then fewest output tokens. Models without tests or prices rank after those
+      with them.
+    </p>
   </div>
 );

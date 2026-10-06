@@ -110,8 +110,9 @@ export interface ModelRunSummary {
 
 /**
  * One row per model (route + alias + actual model), totalled across every request and iteration in the run, ranked:
- * highest test pass rate first, then fewest output tokens. Models whose runs had no tests rank after those that did.
- * Skipped rows are ignored.
+ * highest test pass rate first, then cheapest, then fewest output tokens. Models with no tests rank after those with
+ * tests, and models with no known cost rank after priced ones within the same pass rate. Skipped rows are ignored.
+ * Keep the note in `RunnerModelSummary` in sync with this order.
  */
 export const summarizeModelRuns = (rows: RunnerResultPerRequest[]): ModelRunSummary[] => {
   const byModel = new Map<string, ModelRunSummary>();
@@ -147,18 +148,13 @@ export const summarizeModelRuns = (rows: RunnerResultPerRequest[]): ModelRunSumm
     ...summary,
     passRate: summary.totalTests > 0 ? summary.passedTests / summary.totalTests : null,
   }));
-  return summaries.sort((a, b) => {
-    if (a.passRate !== b.passRate) {
-      if (a.passRate === null) {
-        return 1;
-      }
-      if (b.passRate === null) {
-        return -1;
-      }
-      return b.passRate - a.passRate;
-    }
-    return a.outputTokens - b.outputTokens;
-  });
+  // Ascending-with-nulls-last / descending-with-nulls-last comparators for the two nullable keys.
+  const nullsLast = (a: number | null, b: number | null, direction: 1 | -1) =>
+    a === b ? 0 : a === null ? 1 : b === null ? -1 : direction * (a - b);
+  return summaries.sort(
+    (a, b) =>
+      nullsLast(a.passRate, b.passRate, -1) || nullsLast(a.costUsd, b.costUsd, 1) || a.outputTokens - b.outputTokens,
+  );
 };
 
 export interface ModelGroup<T> {
