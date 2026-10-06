@@ -55,7 +55,7 @@ describe('buildAiGatewayRequestSpec', () => {
 
   it('appends the openai endpoint', () => {
     const spec = buildAiGatewayRequestSpec('/openai', [model({ format: 'openai', paths: ['/openai'] })]);
-    expect(spec.path).toBe('/openai/v1/chat/completions');
+    expect(spec.path).toBe('/openai/chat/completions');
     const body = JSON.parse(spec.body!);
     expect(body.max_tokens).toBeUndefined();
     expect(body.messages.map((m: { role: string }) => m.role)).toEqual(['system', 'user']);
