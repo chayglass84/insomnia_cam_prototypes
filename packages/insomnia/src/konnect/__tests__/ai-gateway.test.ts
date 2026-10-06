@@ -9,6 +9,7 @@ import {
   getAiGatewayModelSuggestions,
   groupModelsByPath,
   pickLlmPrice,
+  selectAppliedAiGatewayPolicies,
   withUsageFromResponseBody,
 } from '../transform';
 
@@ -275,5 +276,42 @@ describe('withUsageFromResponseBody cost', () => {
 
   it('leaves costUsd out when there is no price', () => {
     expect('costUsd' in withUsageFromResponseBody({ alias: 'a', model: 'm' }, body)).toBe(false);
+  });
+});
+
+describe('selectAppliedAiGatewayPolicies', () => {
+  const policy = (id: string, name: string, global: boolean) => ({
+    id,
+    name,
+    display_name: name,
+    type: 'rate-limiting',
+    enabled: true,
+    global,
+    config: {},
+  });
+  const policies = [
+    policy('p-global', 'global-limit', true),
+    policy('p-model', 'opus-only', false),
+    policy('p-other', 'other', false),
+  ];
+
+  it('lists model-attached policies first, then global ones, and ignores policies attached to other models', () => {
+    const applied = selectAppliedAiGatewayPolicies(policies, ['p-model']);
+    expect(applied.map(a => [a.policy.name, a.scope])).toEqual([
+      ['opus-only', 'Model'],
+      ['global-limit', 'Global'],
+    ]);
+  });
+
+  it('matches attached policies by name as well as id, and lists a global+attached policy once, as global', () => {
+    expect(selectAppliedAiGatewayPolicies(policies, ['opus-only']).map(a => a.policy.id)).toEqual([
+      'p-model',
+      'p-global',
+    ]);
+    expect(selectAppliedAiGatewayPolicies(policies, ['p-global']).map(a => a.scope)).toEqual(['Global']);
+  });
+
+  it('returns only the global policies when the model is unknown', () => {
+    expect(selectAppliedAiGatewayPolicies(policies).map(a => a.policy.id)).toEqual(['p-global']);
   });
 });

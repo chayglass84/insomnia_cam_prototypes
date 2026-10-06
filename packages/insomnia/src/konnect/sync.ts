@@ -822,6 +822,13 @@ function toAiGatewayModel(model: KonnectAiGatewayModel): AiGatewayModel {
     targetModel: model.targets?.[0]?.name ?? '',
     provider: model.targets?.[0]?.provider ?? '',
     format: model.formats?.[0]?.type ?? '',
+    policyRefs: (model.policies ?? [])
+      .map(policy =>
+        typeof policy === 'string'
+          ? policy
+          : ((policy as { id?: string; name?: string })?.id ?? (policy as { name?: string })?.name),
+      )
+      .filter((ref): ref is string => typeof ref === 'string' && ref !== ''),
     paths: model.config?.route?.paths ?? [],
     routeModelValues: model.config?.route?.model?.values ?? [],
     enabled: model.enabled,

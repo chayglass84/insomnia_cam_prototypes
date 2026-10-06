@@ -4,7 +4,13 @@ import { extractChatCompletion } from '../common/chat-completion';
 import { parseChatRequestBody } from '../common/chat-request';
 import { computeCostUsd } from '../common/llm-cost';
 import { bodyBufferToUtf8 } from '../common/utils/utf8-bytes';
-import type { KonnectControlPlane, KonnectLlmCostPrice, KonnectProxyUrl, KonnectRoute } from './api';
+import type {
+  KonnectAiGatewayPolicy,
+  KonnectControlPlane,
+  KonnectLlmCostPrice,
+  KonnectProxyUrl,
+  KonnectRoute,
+} from './api';
 
 // ─── Template injection sanitisation ─────────────────────────────────────────
 
@@ -653,4 +659,25 @@ export function findCatalogModelByRequest(
         m.paths.some(path => pathname === path || pathname.startsWith(`${path}/`)),
     )
     .sort((a, b) => longestPath(b) - longestPath(a))[0];
+}
+
+export interface AppliedAiGatewayPolicy {
+  policy: KonnectAiGatewayPolicy;
+  scope: 'Model' | 'Global';
+}
+
+/**
+ * The policies that affect a model's traffic: those attached to the model (by id or name), then the gateway's global
+ * ones. A policy that is both global and attached is listed once, as global. No execution-order claim is made.
+ */
+export function selectAppliedAiGatewayPolicies(
+  policies: KonnectAiGatewayPolicy[],
+  modelPolicyRefs?: string[],
+): AppliedAiGatewayPolicy[] {
+  const refs = new Set(modelPolicyRefs);
+  const attached = policies.filter(p => !p.global && (refs.has(p.id) || refs.has(p.name)));
+  return [
+    ...attached.map(policy => ({ policy, scope: 'Model' as const })),
+    ...policies.filter(p => p.global).map(policy => ({ policy, scope: 'Global' as const })),
+  ];
 }
