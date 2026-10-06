@@ -38,6 +38,7 @@ import {
   sumTokenUsage,
 } from '~/common/runner-feedback';
 import { invariant } from '~/common/utils/invariant';
+import { isRotatingModel } from '~/konnect/transform';
 import { defaultSendActionRuntime } from '~/network/network';
 import { useRootLoaderData } from '~/root';
 import { useWorkspaceLoaderData } from '~/routes/organization.$organizationId.project.$projectId.workspace.$workspaceId';
@@ -158,6 +159,7 @@ export interface RequestRow {
   /** Display only: the route's model value (`opus`) and the actual target model (`claude-opus-4-6`). */
   modelAlias?: string;
   modelTarget?: string;
+  modelRotating?: boolean;
   modelRoute?: string;
 }
 
@@ -323,7 +325,9 @@ export const Runner: FC = () => {
             ...req,
             modelId: model.id,
             modelAlias: model.routeModelValues[0] ?? model.displayName,
-            modelTarget: model.targetModel,
+            // A rotating alias has no single upstream until a response says which one answered.
+            modelTarget: isRotatingModel(model) ? '' : model.targetModel,
+            modelRotating: isRotatingModel(model) || undefined,
             modelRoute: model.paths[0],
           })),
         )
@@ -1069,7 +1073,12 @@ export async function clientAction({ request, params }: Route.ClientActionArgs) 
         requestUrl: req.url,
         status: 'pending',
         aiGateway: req.modelId
-          ? { route: req.modelRoute, alias: req.modelAlias ?? '', model: req.modelTarget ?? '' }
+          ? {
+              route: req.modelRoute,
+              alias: req.modelAlias ?? '',
+              model: req.modelTarget ?? '',
+              rotating: req.modelRotating,
+            }
           : undefined,
       });
     });
@@ -1115,6 +1124,7 @@ export async function clientAction({ request, params }: Route.ClientActionArgs) 
                     route: targetRequest.modelRoute,
                     alias: targetRequest.modelAlias ?? '',
                     model: targetRequest.modelTarget ?? '',
+                    rotating: targetRequest.modelRotating,
                   }
                 : undefined,
             },
@@ -1138,6 +1148,7 @@ export async function clientAction({ request, params }: Route.ClientActionArgs) 
                 route: targetRequest.modelRoute,
                 alias: targetRequest.modelAlias ?? '',
                 model: targetRequest.modelTarget ?? '',
+                rotating: targetRequest.modelRotating,
               }
             : undefined,
         };

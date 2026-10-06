@@ -206,3 +206,28 @@ describe('summarizeModelRuns ranking with cost', () => {
     expect(ranked.map(s => s.alias)).toEqual(['priced-same-b', 'priced-same-a', 'priced-big', 'unpriced-small']);
   });
 });
+
+describe('summarizeModelRuns with a rotating alias', () => {
+  const row = (model: string, inputTokens: number, costUsd?: number) => ({
+    requestName: 'r',
+    requestUrl: 'u',
+    responseCode: 200,
+    results: [{ status: 'passed' }],
+    aiGateway: { route: '/rotating', alias: 'nano', rotating: true, model, inputTokens, outputTokens: 1, costUsd },
+  });
+
+  it('splits one alias into a row per model that actually answered', () => {
+    const summaries = summarizeModelRuns([
+      row('gpt-4.1-nano-2025-04-14', 10, 0.001),
+      row('gpt-5-nano-2025-08-07', 20, 0.002),
+      row('gpt-4.1-nano-2025-04-14', 30, 0.003),
+    ] as any);
+    expect(summaries.map(s => [s.model, s.inputTokens, s.rotating])).toEqual(
+      expect.arrayContaining([
+        ['gpt-4.1-nano-2025-04-14', 40, true],
+        ['gpt-5-nano-2025-08-07', 20, true],
+      ]),
+    );
+    expect(summaries).toHaveLength(2);
+  });
+});

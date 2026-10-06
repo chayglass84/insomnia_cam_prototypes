@@ -98,6 +98,8 @@ export interface ModelRunSummary {
   route: string;
   alias: string;
   model: string;
+  /** The alias balances across several upstream models; this row is only the runs one of them answered. */
+  rotating: boolean;
   inputTokens: number;
   outputTokens: number;
   /** Total USD for the model's runs, or null when none were priced. */
@@ -109,7 +111,7 @@ export interface ModelRunSummary {
 }
 
 /**
- * One row per model (route + alias + actual model), totalled across every request and iteration in the run, ranked:
+ * One row per model (route + alias, plus the actual model for rotating aliases), totalled across every request and iteration in the run, ranked:
  * highest test pass rate first, then cheapest, then fewest output tokens. Models with no tests rank after those with
  * tests, and models with no known cost rank after priced ones within the same pass rate. Skipped rows are ignored.
  * Keep the note in `RunnerModelSummary` in sync with this order.
@@ -121,11 +123,13 @@ export const summarizeModelRuns = (rows: RunnerResultPerRequest[]): ModelRunSumm
     if (!info || row.skipped) {
       continue;
     }
-    const key = `${info.route ?? ''}\u0000${info.alias}`;
+    // A rotating alias is split by the model that actually answered, since their cost and quality differ.
+    const key = `${info.route ?? ''}\u0000${info.alias}\u0000${info.rotating ? info.model : ''}`;
     const summary = byModel.get(key) ?? {
       route: info.route ?? '',
       alias: info.alias,
       model: info.model,
+      rotating: info.rotating === true,
       inputTokens: 0,
       outputTokens: 0,
       costUsd: null,

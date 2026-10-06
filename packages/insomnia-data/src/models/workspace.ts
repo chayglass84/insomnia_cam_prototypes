@@ -11,10 +11,19 @@ export const canSync = true;
 export const SCRATCHPAD_WORKSPACE_ID = 'wrk_scratchpad';
 
 /** One model exposed by a Konnect AI Gateway. Several models can share a path, told apart by `routeModelValues`. */
+/** One upstream a model balances across. A model with several targets is "rotating": the gateway picks one per request. */
+export interface AiGatewayTarget {
+  /** Upstream model, e.g. `gpt-4.1-nano`. */
+  name: string;
+  provider: string;
+  inputPerToken?: number;
+  outputPerToken?: number;
+}
+
 export interface AiGatewayModel {
   id: string;
   displayName: string;
-  /** Upstream model the gateway targets, e.g. `claude-opus-4-6`. */
+  /** First upstream model the gateway targets, e.g. `claude-opus-4-6`. See `targets` for all of them. */
   targetModel: string;
   provider: string;
   /** Konnect request/response format: anthropic, openai, gemini, bedrock, cohere, huggingface. */
@@ -28,6 +37,8 @@ export interface AiGatewayModel {
   outputPerToken?: number;
   /** Ids (or names) of the gateway policies attached to this model. Global policies are not listed here. */
   policyRefs?: string[];
+  /** Every upstream the model balances across (first one mirrors `targetModel`/`provider`/prices). Absent on older syncs. */
+  targets?: AiGatewayTarget[];
 }
 
 export interface BaseWorkspace {

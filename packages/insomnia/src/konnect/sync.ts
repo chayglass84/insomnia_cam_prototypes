@@ -821,6 +821,7 @@ function toAiGatewayModel(model: KonnectAiGatewayModel): AiGatewayModel {
     displayName: model.display_name || model.name,
     targetModel: model.targets?.[0]?.name ?? '',
     provider: model.targets?.[0]?.provider ?? '',
+    targets: (model.targets ?? []).map(({ name, provider }) => ({ name, provider })),
     format: model.formats?.[0]?.type ?? '',
     policyRefs: (model.policies ?? [])
       .map(policy =>
@@ -939,7 +940,11 @@ async function syncAiGateway(
   });
   const models = (await fetchAiGatewayModels(pat, gateway.id, gateway.region, signal))
     .map(toAiGatewayModel)
-    .map(model => ({ ...model, ...pickLlmPrice(prices, model.targetModel, model.provider) }));
+    .map(model => ({
+      ...model,
+      ...pickLlmPrice(prices, model.targetModel, model.provider),
+      targets: model.targets?.map(target => ({ ...target, ...pickLlmPrice(prices, target.name, target.provider) })),
+    }));
 
   // One collection per gateway holds the model catalog. User requests in it are never touched.
   // `$ne: null` also matches workspaces missing the key (e.g. the environment workspace), so filter in JS.

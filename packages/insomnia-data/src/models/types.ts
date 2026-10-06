@@ -88,7 +88,7 @@ export type { Stats } from './stats';
 export type { UserSession, AESMessage } from './user-session';
 export type { GrpcRequest, GrpcRequestBody, GrpcRequestHeader } from './grpc-request';
 export type { GrpcRequestMeta } from './grpc-request-meta';
-export type { AiGatewayModel, Workspace, WorkspaceScope } from './workspace';
+export type { AiGatewayModel, AiGatewayTarget, Workspace, WorkspaceScope } from './workspace';
 export type { WorkspaceMeta } from './workspace-meta';
 export type { MockRoute } from './mock-route';
 export type { MockServer } from './mock-server';
