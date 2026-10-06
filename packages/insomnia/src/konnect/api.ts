@@ -68,6 +68,8 @@ export interface KonnectAiGatewayModel {
   display_name: string;
   enabled: boolean;
   formats?: { type: string }[];
+  /** Policies attached to this model. Shape unverified (always empty so far): strings or `{ id, name }` objects. */
+  policies?: unknown[];
   targets: { name: string; provider: string }[];
   config: { route?: { paths?: string[]; model?: { values?: string[] } } };
 }
@@ -78,6 +80,19 @@ export interface KonnectLlmCostPrice {
   model: { id: string; name?: string };
   pricing: { input_per_token: string; output_per_token: string };
   source?: string;
+}
+
+/** A policy on an AI Gateway: Kong's plugins, exposed by Konnect as gateway- or model-scoped "policies". */
+export interface KonnectAiGatewayPolicy {
+  id: string;
+  name: string;
+  display_name: string;
+  /** The underlying plugin type, e.g. `rate-limiting`, `ai-prompt-guard`. */
+  type: string;
+  enabled: boolean;
+  /** True when the policy applies to every model on the gateway. */
+  global: boolean;
+  config: Record<string, unknown>;
 }
 
 export const getActiveRegions = getKonnectApiRegions;
@@ -322,6 +337,38 @@ export async function fetchAiGatewayModels(
   } while (after);
 
   return models;
+}
+
+/** All policies on an AI Gateway. The path is inferred from the MCP tool name, not yet confirmed live. */
+export async function fetchAiGatewayPolicies(
+  pat: string,
+  gatewayId: string,
+  region: string,
+  signal?: AbortSignal,
+): Promise<KonnectAiGatewayPolicy[]> {
+  const policies: KonnectAiGatewayPolicy[] = [];
+  let after: string | null = null;
+
+  do {
+    const base = `${regionalApiBase(region)}${AI_GATEWAYS_PATH}/${gatewayId}/policies?page[size]=${PAGE_SIZE}`;
+    const response = await fetchWithRetry(
+      after ? `${base}&page[after]=${encodeURIComponent(after)}` : base,
+      pat,
+      signal,
+    );
+
+    if (!response.ok) {
+      throw new Error(`Konnect API error ${response.status} fetching policies for AI gateway ${gatewayId}`);
+    }
+
+    const body = await response.json();
+    policies.push(...((body.data ?? []) as KonnectAiGatewayPolicy[]));
+    const next = body?.meta?.page?.next ?? null;
+    after =
+      typeof next === 'string' && next ? (new URL(next, 'https://x').searchParams.get('page[after]') ?? null) : null;
+  } while (after);
+
+  return policies;
 }
 
 // Documented as `GET /openmeter/llm-cost/prices` under the v3 API; the exact prefix is not yet confirmed live.

@@ -5,10 +5,11 @@ import { Button } from 'react-aria-components';
 import type { KonnectPlugin } from '../../../konnect/api';
 import { resolveKonnectRouteLink, useKonnectPlugins } from '../../hooks/use-konnect-plugins';
 import { DeckCommandModal } from '../modals/deck-command-modal';
+import { RequestAiPoliciesTab } from './request-ai-policies-tab';
 
 interface Props {
-  activeRequest: Pick<Request, 'konnectRouteKey'>;
-  activeWorkspace: Pick<Workspace, 'konnectServiceId'> | null | undefined;
+  activeRequest: Pick<Request, 'konnectRouteKey' | 'url' | 'body'>;
+  activeWorkspace: Pick<Workspace, 'konnectServiceId' | 'konnectAiGatewayModels'> | null | undefined;
   activeProject:
     | Pick<Project, 'konnectControlPlaneId' | 'konnectRegion' | 'name' | 'konnectAiGateway'>
     | null
@@ -120,22 +121,10 @@ function stubSuggestedPlugin(name: string): KonnectPlugin {
   };
 }
 
-export const RequestPluginsTab = ({ activeRequest, activeWorkspace, activeProject }: Props) => {
+const ControlPlanePluginsTab = ({ activeRequest, activeWorkspace, activeProject }: Props) => {
   const link = resolveKonnectRouteLink(activeRequest, activeWorkspace, activeProject);
   const { status, error, routePlugins } = useKonnectPlugins(link);
   const [deckModalPlugin, setDeckModalPlugin] = useState<{ plugin: KonnectPlugin; isNew: boolean } | null>(null);
-
-  if (status === 'not-linked' && activeProject?.konnectAiGateway) {
-    return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center text-(--hl)">
-        <span>This request belongs to a Konnect AI Gateway.</span>
-        <span className="text-xs">
-          AI Gateways manage plugins as policies (attached to the gateway or to individual models), which this tab
-          doesn't show yet.
-        </span>
-      </div>
-    );
-  }
 
   if (status === 'not-linked') {
     return (
@@ -238,3 +227,18 @@ export const RequestPluginsTab = ({ activeRequest, activeWorkspace, activeProjec
     </div>
   );
 };
+
+/**
+ * The request pane's Konnect tab. Control-plane (API Gateway) requests show Kong plugins; requests in a synced AI Gateway
+ * show that gateway's policies instead, since AI Gateways expose plugins as policies through a separate API.
+ */
+export const RequestPluginsTab = (props: Props) =>
+  props.activeProject?.konnectAiGateway ? (
+    <RequestAiPoliciesTab
+      activeRequest={props.activeRequest}
+      activeProject={props.activeProject}
+      catalog={props.activeWorkspace?.konnectAiGatewayModels ?? []}
+    />
+  ) : (
+    <ControlPlanePluginsTab {...props} />
+  );

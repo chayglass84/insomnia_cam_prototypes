@@ -26,6 +26,8 @@ export interface AiGatewayModel {
   /** USD per token from Konnect's LLM cost price list, when a price was found for `targetModel`. */
   inputPerToken?: number;
   outputPerToken?: number;
+  /** Ids (or names) of the gateway policies attached to this model. Global policies are not listed here. */
+  policyRefs?: string[];
 }
 
 export interface BaseWorkspace {

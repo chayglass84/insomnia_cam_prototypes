@@ -100,7 +100,9 @@ export const RequestPane: FC<Props> = ({ environmentId, settings, onPaste }) => 
   const isBodyEmpty = Boolean(typeof activeRequest.body.mimeType !== 'string' && !activeRequest.body.text);
   const requestAuth = getAuthObjectOrNull(activeRequest.authentication);
   const isNoneOrInherited = requestAuth?.type === 'none' || requestAuth === null;
-  const isKonnectLinked = Boolean(resolveKonnectRouteLink(activeRequest, activeWorkspace, activeProject));
+  const isKonnectLinked =
+    Boolean(resolveKonnectRouteLink(activeRequest, activeWorkspace, activeProject)) ||
+    Boolean(activeProject?.konnectAiGateway);
 
   return (
     <Pane type="request">
@@ -195,7 +197,7 @@ export const RequestPane: FC<Props> = ({ environmentId, settings, onPaste }) => 
             className="flex h-full shrink-0 cursor-pointer items-center justify-between gap-2 px-3 py-1 text-(--hl) outline-hidden transition-colors duration-300 select-none hover:bg-(--hl-sm) hover:text-(--color-font) focus:bg-(--hl-sm) aria-selected:bg-(--hl-xs) aria-selected:text-(--color-font) aria-selected:hover:bg-(--hl-sm) aria-selected:focus:bg-(--hl-sm) data-focus-visible:ring-2 data-focus-visible:ring-(--hl-md) data-focus-visible:ring-inset"
             id="plugins"
           >
-            <span>Konnect Plugins</span>
+            <span>{activeProject?.konnectAiGateway ? 'Konnect Policies' : 'Konnect Plugins'}</span>
             {isKonnectLinked && (
               <span className="flex h-6 min-w-6 items-center justify-center rounded-lg border border-solid border-(--hl) p-1 text-xs">
                 <span className="h-2 w-2 rounded-full bg-green-500" />

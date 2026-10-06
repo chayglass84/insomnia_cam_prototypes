@@ -157,6 +157,26 @@ describe('AI Gateway starter tests', () => {
   });
 });
 
+describe('AI Gateway model policies', () => {
+  it('stores the policies attached to a model as refs, accepting ids or { id } objects', async () => {
+    vi.stubGlobal(
+      'fetch',
+      mockFetch([
+        apiModel('opus', { policies: ['pol-1', { id: 'pol-2', name: 'two' }, { name: 'by-name' }, null] }),
+        apiModel('fable'),
+      ]),
+    );
+    await syncKonnect({ pat: 'kpat_test', organizationId: ORG_ID });
+
+    const project = (await insoservices.project.list({ parentId: ORG_ID })).find(p => p.konnectAiGateway);
+    const catalog = (await insoservices.workspace.list({ parentId: project._id })).find(
+      w => w.konnectAiGatewayModels,
+    )!.konnectAiGatewayModels!;
+    expect(catalog.find(m => m.routeModelValues.includes('opus'))!.policyRefs).toEqual(['pol-1', 'pol-2', 'by-name']);
+    expect(catalog.find(m => m.routeModelValues.includes('fable'))!.policyRefs).toEqual([]);
+  });
+});
+
 describe('AI Gateway prices', () => {
   const getCatalog = async () => {
     const project = (await insoservices.project.list({ parentId: ORG_ID })).find(p => p.konnectAiGateway);
