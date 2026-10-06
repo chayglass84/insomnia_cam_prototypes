@@ -410,12 +410,14 @@ function controlPlaneConfigToControlPlaneType<
 
 /**
  * Konnect reports a model's request `format` but not the endpoint path, so this map is hardcoded
- * (prototype shortcut). Paths match the ones chat streaming already recognises in common/stream-summary.ts.
+ * (prototype shortcut). The endpoint is whatever the gateway exposes for that format, which is not always the provider's own
+ * path: Anthropic keeps `/v1/messages` but OpenAI is `/chat/completions` with no `/v1`.
  * Formats not listed here (gemini, bedrock, cohere, huggingface) get a request at the bare route path.
  */
 const AI_FORMAT_ENDPOINTS: Record<string, string> = {
   anthropic: '/v1/messages',
-  openai: '/v1/chat/completions',
+  // No `/v1`, unlike Anthropic: confirmed against the gateway's own example cURL (a `/v1` path 404s "no Route matched").
+  openai: '/chat/completions',
 };
 
 /** Groups models by route path. A model listening on several paths appears under each. */

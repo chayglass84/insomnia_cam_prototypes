@@ -67,9 +67,7 @@ describe('computeStreamSummary', () => {
     const keyPath = '$.candidates[0].content.parts[0].text';
     // Each call simulates the accumulated wire text at a point in time as more of Gemini's
     // still-open array arrives; the array only closes on the last call.
-    const atFirstElement = candidateJsonPayloadsFromSseText(
-      '[{"candidates":[{"content":{"parts":[{"text":"Hel"}]}}]}',
-    );
+    const atFirstElement = candidateJsonPayloadsFromSseText('[{"candidates":[{"content":{"parts":[{"text":"Hel"}]}}]}');
     expect(computeStreamSummary(atFirstElement, keyPath)).toEqual({ fragmentCount: 1, summary: 'Hel' });
 
     const withSecondElementStillOpen = candidateJsonPayloadsFromSseText(
@@ -89,6 +87,12 @@ describe('inferStreamSummaryPath', () => {
     expect(inferStreamSummaryPath('https://api.openai.com/v1/chat/completions')).toBe('$.choices[0].delta.content');
   });
 
+  it('matches OpenAI chat completions on a gateway route without the /v1 prefix', () => {
+    expect(inferStreamSummaryPath('http://localhost:8500/might-be-openAI/chat/completions')).toBe(
+      '$.choices[0].delta.content',
+    );
+  });
+
   it('matches OpenAI responses API on a proxy host', () => {
     expect(inferStreamSummaryPath('https://my-proxy.example.com/v1/responses')).toBe('$.delta');
   });
@@ -103,7 +107,9 @@ describe('inferStreamSummaryPath', () => {
 
   it('matches Google Gemini streamGenerateContent', () => {
     expect(
-      inferStreamSummaryPath('https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:streamGenerateContent'),
+      inferStreamSummaryPath(
+        'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:streamGenerateContent',
+      ),
     ).toBe('$.candidates[0].content.parts[0].text');
   });
 
@@ -119,17 +125,12 @@ describe('inferStreamSummaryPath', () => {
 describe('candidateJsonPayloadsFromSseText', () => {
   it('extracts a single data frame', () => {
     const text = 'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n';
-    expect(candidateJsonPayloadsFromSseText(text)).toEqual([
-      '{"choices":[{"delta":{"content":"hi"}}]}',
-    ]);
+    expect(candidateJsonPayloadsFromSseText(text)).toEqual(['{"choices":[{"delta":{"content":"hi"}}]}']);
   });
 
   it('extracts multiple frames separated by blank lines', () => {
     const text = 'data: {"a":1}\n\ndata: {"b":2}\n\n';
-    expect(candidateJsonPayloadsFromSseText(text)).toEqual([
-      '{"a":1}',
-      '{"b":2}',
-    ]);
+    expect(candidateJsonPayloadsFromSseText(text)).toEqual(['{"a":1}', '{"b":2}']);
   });
 
   it('extracts a frame with event:/id: fields mixed in', () => {
@@ -150,7 +151,8 @@ describe('candidateJsonPayloadsFromSseText', () => {
   it('splits a bare top-level JSON array into one candidate per element (Gemini non-SSE streaming)', () => {
     // Gemini's default streamGenerateContent (no ?alt=sse) sends one top-level JSON array
     // with no blank lines between elements, not per-chunk `data:` frames.
-    const text = '[{"candidates":[{"content":{"parts":[{"text":"Hel"}]}}]}\n,\n{"candidates":[{"content":{"parts":[{"text":"lo"}]}}]}\n]';
+    const text =
+      '[{"candidates":[{"content":{"parts":[{"text":"Hel"}]}}]}\n,\n{"candidates":[{"content":{"parts":[{"text":"lo"}]}}]}\n]';
     expect(candidateJsonPayloadsFromSseText(text)).toEqual([
       JSON.stringify({ candidates: [{ content: { parts: [{ text: 'Hel' }] } }] }),
       JSON.stringify({ candidates: [{ content: { parts: [{ text: 'lo' }] } }] }),
@@ -160,7 +162,8 @@ describe('candidateJsonPayloadsFromSseText', () => {
   it('returns only the elements that have closed so far from a still-open, unterminated array (does not throw)', () => {
     // Same Gemini shape as above, but mid-stream: the array's closing `]` (and the second
     // element's closing `}`) haven't arrived yet.
-    const text = '[{"candidates":[{"content":{"parts":[{"text":"Hel"}]}}]}\n,\n{"candidates":[{"content":{"parts":[{"text":"lo';
+    const text =
+      '[{"candidates":[{"content":{"parts":[{"text":"Hel"}]}}]}\n,\n{"candidates":[{"content":{"parts":[{"text":"lo';
     expect(() => candidateJsonPayloadsFromSseText(text)).not.toThrow();
     expect(candidateJsonPayloadsFromSseText(text)).toEqual([
       JSON.stringify({ candidates: [{ content: { parts: [{ text: 'Hel' }] } }] }),

@@ -183,6 +183,8 @@ export function getCandidatePayloadsFromEvents(events: StreamMessageEvent[]): st
 const PATH_TO_JSONPATH: { pathname: string; jsonPath: string }[] = [
   // OpenAI: Chat Completions API
   { pathname: '/v1/chat/completions', jsonPath: '$.choices[0].delta.content' },
+  // OpenAI-format routes on Kong AI Gateway expose this without the `/v1` prefix (e.g. `/my-route/chat/completions`)
+  { pathname: '/chat/completions', jsonPath: '$.choices[0].delta.content' },
   // OpenAI: Completions API, Legacy
   { pathname: '/v1/completions', jsonPath: '$.choices[0].text' },
   // OpenAI Responses API
