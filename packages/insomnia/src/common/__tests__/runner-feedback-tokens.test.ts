@@ -51,6 +51,15 @@ describe('summarizeModelRuns', () => {
     expect(opus).toMatchObject({ inputTokens: 20, outputTokens: 150, passedTests: 3, totalTests: 4, passRate: 0.75 });
   });
 
+  it('treats a model as one row even if the provider reports different dated model ids', () => {
+    const ranked = summarizeModelRuns([
+      row('nano', 'gpt-4.1-nano-2025-04-14', 10, [pass]),
+      row('nano', 'gpt-4.1-nano-2025-04-15', 20, [pass]),
+    ]);
+    expect(ranked).toHaveLength(1);
+    expect(ranked[0]).toMatchObject({ outputTokens: 30, model: 'gpt-4.1-nano-2025-04-15' });
+  });
+
   it('ranks by pass rate, then fewest output tokens, with untested models last; ignores skipped rows', () => {
     const ranked = summarizeModelRuns([
       row('wordy', 'm1', 900, [pass, pass]),
@@ -81,6 +90,27 @@ describe('groupRowsByModel', () => {
     ]);
   });
 
+  it('keeps skipped and completed rows of one model in a single group even when the model string differs', () => {
+    const rows = [
+      { id: 'skipped', aiGateway: { route: '/r', alias: 'nano4.1', model: 'gpt-4.1-nano' } },
+      {
+        id: 'done',
+        aiGateway: {
+          route: '/r',
+          alias: 'nano4.1',
+          model: 'gpt-4.1-nano-2025-04-14',
+          inputTokens: 10,
+          outputTokens: 5,
+        },
+      },
+    ];
+    const groups = groupRowsByModel(rows);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].entries.map(e => e.row.id)).toEqual(['skipped', 'done']);
+    // The heading shows the model that actually ran.
+    expect(groups[0].info?.model).toBe('gpt-4.1-nano-2025-04-14');
+  });
+
   it('puts rows without gateway info in one headingless group', () => {
     const plainRows: { id: string; aiGateway?: { alias: string; model: string } }[] = [
       { id: 'plain' },
@@ -93,10 +123,10 @@ describe('groupRowsByModel', () => {
 });
 
 describe('modelAnchorId', () => {
-  it('is a DOM-safe id that differs per iteration and per model', () => {
-    const a = modelAnchorId({ route: '/might-be-openAI', alias: 'nano4.1', model: 'gpt-4.1-nano' }, 1);
+  it('is a DOM-safe id that differs per iteration and per model, and ignores the model string', () => {
+    const a = modelAnchorId({ route: '/might-be-openAI', alias: 'nano4.1' }, 1);
     expect(a).toMatch(/^[a-z0-9-]+$/);
-    expect(a).not.toBe(modelAnchorId({ route: '/might-be-openAI', alias: 'nano4.1', model: 'gpt-4.1-nano' }, 2));
-    expect(a).not.toBe(modelAnchorId({ route: '/might-be-openAI', alias: '4mini', model: 'gpt-4.1-mini' }, 1));
+    expect(a).not.toBe(modelAnchorId({ route: '/might-be-openAI', alias: 'nano4.1' }, 2));
+    expect(a).not.toBe(modelAnchorId({ route: '/might-be-openAI', alias: '4mini' }, 1));
   });
 });

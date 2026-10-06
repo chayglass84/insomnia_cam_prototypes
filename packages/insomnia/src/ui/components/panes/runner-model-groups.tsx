@@ -36,11 +36,16 @@ export function RunnerModelGroups<T extends { aiGateway?: AiGatewayRunInfo }>({
         const tokens = sumTokenUsage(entries.map(entry => entry.row));
         return (
           <section key={group.key} id={modelAnchorId(group.info, iteration)} className="scroll-mt-2">
-            <h3 className="mx-3 mt-4 flex flex-wrap items-baseline gap-x-2 border-b border-solid border-(--hl-md) pb-1 text-base">
-              <span className="font-semibold">{group.info.alias}</span>
-              <span className="font-mono text-sm text-neutral-400">{group.info.model}</span>
-              {group.info.route && <span className="font-mono text-xs text-neutral-400">{group.info.route}</span>}
-              {tokens && <span className="ml-auto text-sm tabular-nums">{`Tokens: ${formatTokenUsage(tokens)}`}</span>}
+            <h3 className="mx-3 mt-6 mb-1 flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-sm border-l-4 border-solid border-(--color-surprise) bg-(--hl-xs) px-3 py-2 text-lg">
+              <span className="font-bold">{group.info.alias}</span>
+              <span className="font-mono text-sm text-(--hl)">{group.info.model}</span>
+              {group.info.route && <span className="font-mono text-xs text-(--hl)">{group.info.route}</span>}
+              {tokens && (
+                <span className="ml-auto text-sm tabular-nums">
+                  {'Total Tokens: '}
+                  <strong>{formatTokenUsage(tokens)}</strong>
+                </span>
+              )}
             </h3>
             {body}
           </section>
