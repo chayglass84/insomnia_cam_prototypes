@@ -546,20 +546,26 @@ export function applyAiGatewayModelOverride(
     .filter(path => pathname === path || pathname.startsWith(`${path}/`))
     .sort((a, b) => b.length - a.length)[0];
   if (!currentRoute) {
-    return { skipReason: 'Request URL does not match a gateway route' };
+    return {
+      skipReason: "This request's URL doesn't match any route on the gateway, so it can't be pointed at another model.",
+    };
   }
 
   const parsed = request.body?.text ? parseChatRequestBody(request.body.text) : null;
   if (!parsed) {
-    return { skipReason: 'Request body is not a chat request' };
+    return { skipReason: "This request's body isn't a chat request, so it can't be pointed at another model." };
   }
   if (parsed.format !== target.format) {
-    return { skipReason: `${parsed.format} request cannot run on a ${target.format}-format model` };
+    return {
+      skipReason: `This request uses the ${parsed.format} format, but ${target.routeModelValues[0] ?? target.displayName} (${target.targetModel}) uses the ${target.format} format, and the two request bodies aren't compatible.`,
+    };
   }
   const targetPath = target.paths[0];
   const modelValue = target.routeModelValues[0];
   if (!targetPath || !modelValue) {
-    return { skipReason: `${target.displayName} has no route path or model value` };
+    return {
+      skipReason: `${target.targetModel || target.displayName} has no route path or model value on the gateway, so it can't be targeted.`,
+    };
   }
 
   const body = { ...JSON.parse(request.body!.text!), model: modelValue, stream: false };

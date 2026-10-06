@@ -3,6 +3,7 @@ import { Button } from 'react-aria-components';
 
 import { isFinished, type RunnerLiveItem } from '../../../common/runner-feedback';
 import { RequestResultCard } from './request-result-card';
+import { RunnerModelGroups } from './runner-model-groups';
 
 interface Props {
   items: RunnerLiveItem[];
@@ -33,18 +34,21 @@ export const RunnerLiveProgressPane: FC<Props> = ({ items, isRunning, handleCanc
       </div>
       {iterations.map(iteration => (
         <div key={`live-iteration-${iteration}`}>
-          <div className="mb-1 pl-3 leading-10 font-bold uppercase">{`Iteration ${iteration}`}</div>
-          {items
-            .filter(item => item.iteration === iteration)
-            .map(item => (
+          <h2 className="mb-1 pl-3 text-base leading-10 font-bold uppercase">{`Iteration ${iteration}`}</h2>
+          <RunnerModelGroups
+            rows={items.filter(item => item.iteration === iteration)}
+            iteration={iteration}
+            renderRow={item => (
               <RequestResultCard
                 key={`${item.key}-${isRunning}`}
                 item={item}
                 testId={`runner-live-item-${item.requestName}`}
                 onSkip={() => handleSkip(item.key)}
                 defaultExpanded={!isRunning}
+                showModelLabel={!item.aiGateway}
               />
-            ))}
+            )}
+          />
         </div>
       ))}
     </div>

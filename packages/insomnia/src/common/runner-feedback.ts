@@ -141,3 +141,32 @@ export const summarizeModelRuns = (rows: RunnerResultPerRequest[]): ModelRunSumm
     return a.outputTokens - b.outputTokens;
   });
 };
+
+export interface ModelGroup<T> {
+  /** Stable key for the group; empty for rows that didn't run against a gateway model. */
+  key: string;
+  info: AiGatewayRunInfo | null;
+  /** The rows in this group with their position in the original list (for stable test ids). */
+  entries: { row: T; index: number }[];
+}
+
+const modelKey = (info: AiGatewayRunInfo) => `${info.route ?? ''}\u0000${info.alias}\u0000${info.model}`;
+
+/**
+ * Groups runner rows by the gateway model they ran against, in order of first appearance, so a run reads as
+ * "model -> its requests". Rows without gateway info (a normal collection run) form one headingless group.
+ */
+export const groupRowsByModel = <T extends { aiGateway?: AiGatewayRunInfo }>(rows: T[]): ModelGroup<T>[] => {
+  const groups = new Map<string, ModelGroup<T>>();
+  rows.forEach((row, index) => {
+    const key = row.aiGateway ? modelKey(row.aiGateway) : '';
+    const group = groups.get(key) ?? { key, info: row.aiGateway ?? null, entries: [] };
+    group.entries.push({ row, index });
+    groups.set(key, group);
+  });
+  return [...groups.values()];
+};
+
+/** DOM id for a model's section within an iteration, so the summary table can scroll to it. */
+export const modelAnchorId = (info: Pick<AiGatewayRunInfo, 'route' | 'alias' | 'model'>, iteration: number) =>
+  `runner-model-${iteration}-${`${info.route ?? ''}-${info.alias}-${info.model}`.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-')}`;

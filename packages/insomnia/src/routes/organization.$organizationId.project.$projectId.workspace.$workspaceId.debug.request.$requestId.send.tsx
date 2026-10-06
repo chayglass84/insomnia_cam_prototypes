@@ -142,7 +142,7 @@ export const sendActionImplementation = async (options: {
     const target = catalog.find(model => model.id === aiGatewayModelId);
     const override = target
       ? applyAiGatewayModelOverride(fetchedRequestData.request, target, catalog)
-      : { skipReason: 'Model is no longer in the gateway catalog' };
+      : { skipReason: 'This model is no longer in the gateway catalog, so it was skipped.' };
     if ('skipReason' in override) {
       // Reuse the runner's existing "skipped" handling and surface the reason on the result row.
       if (testResultCollector) {

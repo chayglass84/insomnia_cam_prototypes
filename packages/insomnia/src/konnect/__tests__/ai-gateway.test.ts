@@ -136,18 +136,17 @@ describe('applyAiGatewayModelOverride', () => {
 
   it('skips when the target has a different format', () => {
     const gpt = model({ id: 'gpt', format: 'openai', paths: ['/openai'], routeModelValues: ['gpt'] });
-    expect(applyAiGatewayModelOverride(request, gpt, [...catalog, gpt])).toEqual({
-      skipReason: 'anthropic request cannot run on a openai-format model',
-    });
+    const result = applyAiGatewayModelOverride(request, gpt, [...catalog, gpt]);
+    expect('skipReason' in result && result.skipReason).toBe(
+      "This request uses the anthropic format, but gpt (target) uses the openai format, and the two request bodies aren't compatible.",
+    );
   });
 
   it('skips when the URL matches no route or the body is not a chat request', () => {
-    expect(applyAiGatewayModelOverride({ ...request, url: 'http://localhost:8000/elsewhere' }, opus, catalog)).toEqual({
-      skipReason: 'Request URL does not match a gateway route',
-    });
-    expect(applyAiGatewayModelOverride({ ...request, body: { text: '{"hello":1}' } }, opus, catalog)).toEqual({
-      skipReason: 'Request body is not a chat request',
-    });
+    const noRoute = applyAiGatewayModelOverride({ ...request, url: 'http://localhost:8000/elsewhere' }, opus, catalog);
+    expect('skipReason' in noRoute && noRoute.skipReason).toContain("URL doesn't match any route");
+    const notChat = applyAiGatewayModelOverride({ ...request, body: { text: '{"hello":1}' } }, opus, catalog);
+    expect('skipReason' in notChat && notChat.skipReason).toContain("body isn't a chat request");
   });
 });
 

@@ -21,6 +21,8 @@ interface Props {
   onSkip?: () => void;
   testId?: string;
   defaultExpanded?: boolean;
+  /** Show the model alias / actual model / tokens line. Turn off when a model heading already names the model. */
+  showModelLabel?: boolean;
 }
 
 export const RequestResultCard: FC<Props> = ({
@@ -30,6 +32,7 @@ export const RequestResultCard: FC<Props> = ({
   onSkip,
   testId,
   defaultExpanded = false,
+  showModelLabel = true,
 }) => {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
   const status: RunnerItemStatus =
@@ -65,7 +68,7 @@ export const RequestResultCard: FC<Props> = ({
           {tag.label}
         </div>
         <div className="min-w-0 flex-1">
-          {aiGateway && (
+          {aiGateway && showModelLabel && (
             <div className="flex flex-wrap items-baseline gap-x-2" data-testid="runner-model-label">
               <span className="font-semibold">{aiGateway.alias}</span>
               <span className="font-mono text-sm text-neutral-400">{aiGateway.model}</span>
@@ -74,7 +77,10 @@ export const RequestResultCard: FC<Props> = ({
               )}
             </div>
           )}
-          <div className={aiGateway ? 'text-sm' : undefined}>
+          <div className={aiGateway && showModelLabel ? 'text-sm' : undefined}>
+            {aiGateway && !showModelLabel && !isSkipped && hasTokenUsage && (
+              <span className="float-right ml-2 text-sm tabular-nums">{`Tokens: ${formatTokenUsage(aiGateway)}`}</span>
+            )}
             <span>{item.requestName}</span>
             <span className="text-sm text-neutral-400">
               {' - '}
@@ -90,6 +96,7 @@ export const RequestResultCard: FC<Props> = ({
               </span>
             )}
           </div>
+          {isSkipped && statusMessage && <div className="text-sm text-neutral-400">{statusMessage}</div>}
           {showInlineStats && <div className="text-sm text-neutral-400">{stats}</div>}
           {showError && <div className="text-sm text-red-500">{errorMessage}</div>}
         </div>

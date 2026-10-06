@@ -45,10 +45,15 @@ export const AiGatewayModelsPane: FC<{ models: AiGatewayModel[] }> = ({ models }
               {pathModels.length} {pathModels.length === 1 ? 'model' : 'models'}
             </span>
           </header>
-          <table className="w-full text-left text-sm">
+          <table className="w-full table-fixed text-left text-sm">
+            <colgroup>
+              <col className="w-[30%]" />
+              <col className="w-[45%]" />
+              <col className="w-[25%]" />
+            </colgroup>
             <thead className="text-xs text-(--hl)">
               <tr>
-                <th className="px-3 py-1 font-normal">Model alias (request body `model`)</th>
+                <th className="px-3 py-1 font-normal">Model alias</th>
                 <th className="px-3 py-1 font-normal">Actual model</th>
                 <th className="px-3 py-1 font-normal">Provider</th>
               </tr>
@@ -56,8 +61,8 @@ export const AiGatewayModelsPane: FC<{ models: AiGatewayModel[] }> = ({ models }
             <tbody>
               {pathModels.map(model => (
                 <tr key={model.id} className={model.enabled ? '' : 'opacity-50'}>
-                  <td className="px-3 py-1 font-semibold">{model.routeModelValues.join(', ') || '—'}</td>
-                  <td className="px-3 py-1 font-mono">{model.targetModel}</td>
+                  <td className="px-3 py-1 font-semibold break-words">{model.routeModelValues.join(', ') || '—'}</td>
+                  <td className="px-3 py-1 font-mono break-all">{model.targetModel}</td>
                   <td className="px-3 py-1">{model.provider}</td>
                 </tr>
               ))}
