@@ -15,7 +15,7 @@ const { isRequest } = models.request;
 const { isRequestGroup } = models.requestGroup;
 
 export const useRunnerRequestList = (organizationId: string, targetFolderId: string, runnerId: string) => {
-  const { collection } = useWorkspaceLoaderData()!;
+  const { collection, activeWorkspace } = useWorkspaceLoaderData()!;
   const entityMapRef = useRef(new Map<string, Child>());
 
   const requestRows: RequestRow[] = useMemo(() => {
@@ -60,10 +60,18 @@ export const useRunnerRequestList = (organizationId: string, targetFolderId: str
     if (!runnerStateRef?.current?.[organizationId]?.[runnerId]) {
       updateRunnerState(organizationId, runnerId, {
         reqList: requestRows,
-        selectedKeys: 'all',
+        // AI Gateway collections start with no requests picked, so the default isn't requests x models runs.
+        selectedKeys: activeWorkspace.konnectAiGatewayModels ? new Set() : 'all',
       });
     }
-  }, [organizationId, requestRows, runnerId, runnerStateRef, updateRunnerState]);
+  }, [
+    organizationId,
+    requestRows,
+    runnerId,
+    runnerStateRef,
+    updateRunnerState,
+    activeWorkspace.konnectAiGatewayModels,
+  ]);
 
   return {
     reqList: runnerStateMap[organizationId]?.[runnerId]?.reqList || [],

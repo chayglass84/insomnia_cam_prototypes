@@ -55,8 +55,8 @@ import { AlertModal } from '~/ui/components/modals/alert-modal';
 import { CLIPreviewModal } from '~/ui/components/modals/cli-preview-modal';
 import { UploadDataModal, type UploadDataType } from '~/ui/components/modals/upload-runner-data-modal';
 import { Pane, PaneBody, PaneHeader } from '~/ui/components/panes/pane';
+import { RunnerEvaluatePanel } from '~/ui/components/panes/runner-evaluate-panel';
 import { RunnerLiveProgressPane } from '~/ui/components/panes/runner-live-progress-pane';
-import { RunnerModelsPanel } from '~/ui/components/panes/runner-models-panel';
 import { RunnerResultHistoryPane } from '~/ui/components/panes/runner-result-history-pane';
 import { RunnerTestResultPane } from '~/ui/components/panes/runner-test-result-pane';
 import { getTimeAndUnit } from '~/ui/components/tags/time-tag';
@@ -196,12 +196,19 @@ export const Runner: FC = () => {
 
   const { updateTabById } = useInsomniaTabContext();
   const { runnerStateMap, updateRunnerState } = useRunnerContext();
+  // AI Gateway collections (3593AI): the Evaluate tab picks requests and models; every selected request runs on every selected model.
+  const { activeWorkspace } = useWorkspaceLoaderData()!;
+  const gatewayModels = activeWorkspace.konnectAiGatewayModels?.filter(model => model.enabled) ?? null;
+  const [selectedModelIds, setSelectedModelIds] = useState<string[] | null>(null);
+  const chosenModels = gatewayModels?.filter(model => !selectedModelIds || selectedModelIds.includes(model.id)) ?? [];
+
   const [zeroableIterationCount, setZeroableIterationCount] = useState<string>('1');
   const [clearableDelay, setClearableDelay] = useState<string>('0');
   const {
     iterationCount = 1,
     delay = 0,
-    selectedKeys = 'all',
+    // AI Gateway collections start with no requests picked (see use-runner-request-list).
+    selectedKeys = gatewayModels ? new Set<Key>() : 'all',
     advancedConfig = defaultAdvancedConfig,
     uploadData = [],
     file,
@@ -218,12 +225,6 @@ export const Runner: FC = () => {
   }, [delay]);
 
   const { reqList, requestRows, entityMap } = useRunnerRequestList(organizationId, targetFolderId, runnerId);
-
-  // AI Gateway collections (3593AI): each selected request also fans out across the selected catalog models.
-  const { activeWorkspace } = useWorkspaceLoaderData()!;
-  const gatewayModels = activeWorkspace.konnectAiGatewayModels?.filter(model => model.enabled) ?? null;
-  const [selectedModelIds, setSelectedModelIds] = useState<string[] | null>(null);
-  const chosenModels = gatewayModels?.filter(model => !selectedModelIds || selectedModelIds.includes(model.id)) ?? [];
 
   useEffect(() => {
     if (settings.forceVerticalLayout) {
@@ -680,12 +681,21 @@ export const Runner: FC = () => {
             <Tabs
               aria-label="Request group tabs"
               className="flex h-full w-full flex-1 flex-col"
-              defaultSelectedKey={gatewayModels ? 'models' : undefined}
+              defaultSelectedKey={gatewayModels ? 'evaluate' : undefined}
             >
               <TabList
                 className="flex h-(--line-height-sm) w-full shrink-0 items-center overflow-x-auto border-b border-solid border-b-(--hl-md) bg-(--color-bg)"
                 aria-label="Request pane tabs"
               >
+                {gatewayModels ? (
+                  <Tab
+                    className="flex h-full shrink-0 cursor-pointer items-center justify-between gap-2 px-3 py-1 text-(--hl) outline-hidden transition-colors duration-300 select-none hover:bg-(--hl-sm) hover:text-(--color-font) focus:bg-(--hl-sm) aria-selected:bg-(--hl-xs) aria-selected:text-(--color-font) aria-selected:hover:bg-(--hl-sm) aria-selected:focus:bg-(--hl-sm)"
+                    id="evaluate"
+                  >
+                    <i className="fa fa-robot fa-1x mr-2 h-4" />
+                    Evaluate
+                  </Tab>
+                ) : (
                 <Tab
                   className="flex h-full shrink-0 cursor-pointer items-center justify-between gap-2 px-3 py-1 text-(--hl) outline-hidden transition-colors duration-300 select-none hover:bg-(--hl-sm) hover:text-(--color-font) focus:bg-(--hl-sm) aria-selected:bg-(--hl-xs) aria-selected:text-(--color-font) aria-selected:hover:bg-(--hl-sm) aria-selected:focus:bg-(--hl-sm)"
                   id="request-order"
@@ -693,6 +703,7 @@ export const Runner: FC = () => {
                   <i className="fa fa-sort fa-1x mr-2 h-4" />
                   Request Order
                 </Tab>
+                )}
                 <Tab
                   className="flex h-full shrink-0 cursor-pointer items-center justify-between gap-2 px-3 py-1 text-(--hl) outline-hidden transition-colors duration-300 select-none hover:bg-(--hl-sm) hover:text-(--color-font) focus:bg-(--hl-sm) aria-selected:bg-(--hl-xs) aria-selected:text-(--color-font) aria-selected:hover:bg-(--hl-sm) aria-selected:focus:bg-(--hl-sm)"
                   id="advanced"
@@ -700,16 +711,8 @@ export const Runner: FC = () => {
                   <i className="fa fa-gear fa-1x mr-2 h-4" />
                   Advanced
                 </Tab>
-                {gatewayModels && (
-                  <Tab
-                    className="flex h-full shrink-0 cursor-pointer items-center justify-between gap-2 px-3 py-1 text-(--hl) outline-hidden transition-colors duration-300 select-none hover:bg-(--hl-sm) hover:text-(--color-font) focus:bg-(--hl-sm) aria-selected:bg-(--hl-xs) aria-selected:text-(--color-font) aria-selected:hover:bg-(--hl-sm) aria-selected:focus:bg-(--hl-sm)"
-                    id="models"
-                  >
-                    <i className="fa fa-robot fa-1x mr-2 h-4" />
-                    Models
-                  </Tab>
-                )}
               </TabList>
+              {!gatewayModels && (
               <TabPanel className="flex w-full flex-1 flex-col overflow-hidden" id="request-order">
                 <Toolbar className="flex h-(--line-height-sm) w-full shrink-0 items-center border-b border-solid border-(--hl-md) px-2">
                   <span className="mr-2">
@@ -799,6 +802,7 @@ export const Runner: FC = () => {
                   </GridList>
                 </PaneBody>
               </TabPanel>
+              )}
               <TabPanel className="align-center flex w-full flex-1 overflow-y-auto" id="advanced">
                 <div className="w-full p-4">
                   <div>
@@ -854,11 +858,19 @@ export const Runner: FC = () => {
                 </div>
               </TabPanel>
               {gatewayModels && (
-                <TabPanel className="flex w-full flex-1 flex-col overflow-hidden" id="models">
-                  <RunnerModelsPanel
+                <TabPanel className="flex w-full flex-1 flex-col overflow-y-auto" id="evaluate">
+                  <RunnerEvaluatePanel
+                    requests={reqList}
+                    selectedRequestIds={
+                      selectedKeys === 'all'
+                        ? reqList.map(item => item.id)
+                        : reqList.map(item => item.id).filter(id => selectedKeys.has(id))
+                    }
+                    onRequestsChange={ids => updateRunnerState(organizationId, runnerId, { selectedKeys: new Set(ids) })}
                     models={gatewayModels}
-                    selectedIds={selectedModelIds}
-                    onChange={setSelectedModelIds}
+                    selectedModelIds={selectedModelIds}
+                    onModelsChange={setSelectedModelIds}
+                    iterations={iterationCount}
                     disabled={isRunning}
                   />
                 </TabPanel>
