@@ -2,8 +2,9 @@ import type { AiGatewayModel, AiGatewayRunInfo, KonnectDeploymentType } from 'in
 
 import { extractChatCompletion } from '../common/chat-completion';
 import { parseChatRequestBody } from '../common/chat-request';
+import { computeCostUsd } from '../common/llm-cost';
 import { bodyBufferToUtf8 } from '../common/utils/utf8-bytes';
-import type { KonnectControlPlane, KonnectProxyUrl, KonnectRoute } from './api';
+import type { KonnectControlPlane, KonnectLlmCostPrice, KonnectProxyUrl, KonnectRoute } from './api';
 
 // ─── Template injection sanitisation ─────────────────────────────────────────
 
@@ -583,12 +584,73 @@ export function applyAiGatewayModelOverride(
  * Fills token usage and the provider-reported model into a runner row from the (non-streaming) response body.
  * The body can be a string, a Buffer, or a Uint8Array — over Electron IPC a Buffer arrives as a Uint8Array.
  */
-export function withUsageFromResponseBody(info: AiGatewayRunInfo, body: string | Uint8Array): AiGatewayRunInfo {
+export function withUsageFromResponseBody(
+  info: AiGatewayRunInfo,
+  body: string | Uint8Array,
+  price?: { inputPerToken?: number; outputPerToken?: number },
+): AiGatewayRunInfo {
   const summary = extractChatCompletion(typeof body === 'string' ? body : bodyBufferToUtf8(body));
+  const costUsd = computeCostUsd(price, summary?.usage);
   return {
     ...info,
     model: summary?.model || info.model,
     inputTokens: summary?.usage?.inputTokens,
     outputTokens: summary?.usage?.outputTokens,
+    ...(costUsd === null ? {} : { costUsd }),
   };
+}
+
+/**
+ * Picks the price for a catalog model's upstream target (e.g. `claude-opus-4-6`) from Konnect's price list. Matches the
+ * model id exactly; regional/cloud variants (`anthropic.claude-opus-4-6-v1`) have different ids and so don't match.
+ * If several providers list the same id, prefers the provider named like the gateway's provider entity (`openai`),
+ * then the first. Returns null when there is no exact match. Prototype: provider *type* is not consulted.
+ */
+export function pickLlmPrice(
+  prices: KonnectLlmCostPrice[],
+  targetModel: string,
+  providerName: string,
+): { inputPerToken: number; outputPerToken: number } | null {
+  const candidates = prices.filter(price => price.model.id === targetModel);
+  const chosen =
+    candidates.find(price => price.provider.id.toLowerCase() === providerName.toLowerCase()) ?? candidates[0];
+  if (!chosen) {
+    return null;
+  }
+  const inputPerToken = Number.parseFloat(chosen.pricing.input_per_token);
+  const outputPerToken = Number.parseFloat(chosen.pricing.output_per_token);
+  return Number.isFinite(inputPerToken) && Number.isFinite(outputPerToken) ? { inputPerToken, outputPerToken } : null;
+}
+
+/** The catalog model whose upstream target the provider's reported model id starts with (`gpt-4.1-nano-2025-04-14`). */
+export function findCatalogModelByResponseModel(
+  responseModel: string | undefined,
+  catalog: AiGatewayModel[],
+): AiGatewayModel | undefined {
+  if (!responseModel) {
+    return undefined;
+  }
+  return catalog
+    .filter(m => m.targetModel && (responseModel === m.targetModel || responseModel.startsWith(`${m.targetModel}-`)))
+    .sort((a, b) => b.targetModel.length - a.targetModel.length)[0];
+}
+
+/** The catalog model a request would hit: the longest matching route path whose model values include the body alias. */
+export function findCatalogModelByRequest(
+  requestUrl: string,
+  alias: string | undefined,
+  catalog: AiGatewayModel[],
+): AiGatewayModel | undefined {
+  if (!alias) {
+    return undefined;
+  }
+  const pathname = requestUrl.replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]*/i, '').split('?')[0];
+  const longestPath = (m: AiGatewayModel) => Math.max(0, ...m.paths.map(path => path.length));
+  return catalog
+    .filter(
+      m =>
+        m.routeModelValues.includes(alias) &&
+        m.paths.some(path => pathname === path || pathname.startsWith(`${path}/`)),
+    )
+    .sort((a, b) => longestPath(b) - longestPath(a))[0];
 }

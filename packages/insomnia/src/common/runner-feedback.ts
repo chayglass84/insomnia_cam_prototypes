@@ -1,6 +1,7 @@
 import type { AiGatewayRunInfo, RequestTestResult, RunnerResultPerRequest } from 'insomnia-data';
 
 import { RESPONSE_CODE_REASONS } from './constants';
+import { formatUsd } from './llm-cost';
 import { describeByteSize } from './misc';
 
 export type RunnerItemStatus = 'pending' | 'running' | 'completed' | 'failed' | 'canceled' | 'skipped';
@@ -65,23 +66,33 @@ export const getRunnerStatusTag = (item: { status: RunnerItemStatus; statusCode?
 export const isFinished = (status: RunnerItemStatus) =>
   status === 'completed' || status === 'failed' || status === 'canceled' || status === 'skipped';
 
-/** Sums token usage across runner rows. Returns null when no row reported any usage. */
+/** Sums token usage (and cost, where priced) across runner rows. Returns null when no row reported any usage. */
 export const sumTokenUsage = (rows: { aiGateway?: AiGatewayRunInfo }[]) => {
   let inputTokens = 0;
   let outputTokens = 0;
+  let costUsd = 0;
   let hasUsage = false;
+  let hasCost = false;
   for (const { aiGateway } of rows) {
     if (aiGateway && (aiGateway.inputTokens !== undefined || aiGateway.outputTokens !== undefined)) {
       hasUsage = true;
       inputTokens += aiGateway.inputTokens ?? 0;
       outputTokens += aiGateway.outputTokens ?? 0;
     }
+    if (aiGateway?.costUsd !== undefined) {
+      hasCost = true;
+      costUsd += aiGateway.costUsd;
+    }
   }
-  return hasUsage ? { inputTokens, outputTokens } : null;
+  return hasUsage ? { inputTokens, outputTokens, costUsd: hasCost ? costUsd : null } : null;
 };
 
 export const formatTokenUsage = ({ inputTokens, outputTokens }: { inputTokens?: number; outputTokens?: number }) =>
   `${(inputTokens ?? 0).toLocaleString()} in, ${(outputTokens ?? 0).toLocaleString()} out`;
+
+/** `Cost: $0.0053`, or an empty string when there's no cost to show. */
+export const formatCost = (costUsd: number | null | undefined) =>
+  costUsd === null || costUsd === undefined ? '' : `Cost: ${formatUsd(costUsd)}`;
 
 export interface ModelRunSummary {
   route: string;
@@ -89,6 +100,8 @@ export interface ModelRunSummary {
   model: string;
   inputTokens: number;
   outputTokens: number;
+  /** Total USD for the model's runs, or null when none were priced. */
+  costUsd: number | null;
   passedTests: number;
   totalTests: number;
   /** Share of tests passed, 0-1, or null when the model's runs had no tests. */
@@ -114,6 +127,7 @@ export const summarizeModelRuns = (rows: RunnerResultPerRequest[]): ModelRunSumm
       model: info.model,
       inputTokens: 0,
       outputTokens: 0,
+      costUsd: null,
       passedTests: 0,
       totalTests: 0,
       passRate: null,
@@ -122,6 +136,9 @@ export const summarizeModelRuns = (rows: RunnerResultPerRequest[]): ModelRunSumm
     summary.model = info.model || summary.model;
     summary.inputTokens += info.inputTokens ?? 0;
     summary.outputTokens += info.outputTokens ?? 0;
+    if (info.costUsd !== undefined) {
+      summary.costUsd = (summary.costUsd ?? 0) + info.costUsd;
+    }
     summary.passedTests += (row.results ?? []).filter(result => result.status === 'passed').length;
     summary.totalTests += (row.results ?? []).length;
     byModel.set(key, summary);

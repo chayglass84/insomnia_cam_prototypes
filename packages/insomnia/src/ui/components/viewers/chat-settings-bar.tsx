@@ -3,7 +3,8 @@ import { Button, ComboBox, Group, Input, ListBox, ListBoxItem, Popover } from 'r
 
 import { Icon } from '~/ui/components/icon';
 
-import { getAiGatewayModelSuggestions } from '../../../konnect/transform';
+import { computeCostUsd, formatUsd } from '../../../common/llm-cost';
+import { findCatalogModelByRequest, getAiGatewayModelSuggestions } from '../../../konnect/transform';
 import { useWorkspaceLoaderData } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId';
 import { useRequestLoaderData } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request.$requestId';
 
@@ -63,6 +64,10 @@ export const ChatSettingsBar: FC<Props> = ({
   // (e.g. `opus`) instead of the generic provider model names, which the gateway would 404 on.
   const gatewayModels = useWorkspaceLoaderData()?.activeWorkspace.konnectAiGatewayModels;
   const requestUrl = useRequestLoaderData()?.activeRequest?.url;
+  // Konnect's per-token price for the model this request targets (gateway workspaces only).
+  const pricedModel =
+    gatewayModels && requestUrl ? findCatalogModelByRequest(requestUrl, values.model, gatewayModels) : undefined;
+  const costUsd = computeCostUsd(pricedModel, usage);
   const modelSuggestions =
     (gatewayModels && requestUrl ? getAiGatewayModelSuggestions(requestUrl, gatewayModels) : null) ??
     MODEL_SUGGESTIONS[format];
@@ -132,6 +137,7 @@ export const ChatSettingsBar: FC<Props> = ({
               <Icon icon="coins" />
               {usage.inputTokens ?? '?'} in / {usage.outputTokens ?? '?'} out
               {totalTokens !== undefined && <span className="text-(--hl)">({totalTokens} total)</span>}
+              {costUsd !== null && <span className="font-semibold text-(--color-font)">{formatUsd(costUsd)}</span>}
             </span>
           )}
           {stopReason && (
@@ -202,6 +208,7 @@ export const ChatSettingsBar: FC<Props> = ({
             <Icon icon="coins" />
             {usage.inputTokens ?? '?'} in / {usage.outputTokens ?? '?'} out
             {totalTokens !== undefined && <span className="text-(--hl)">({totalTokens} total)</span>}
+            {costUsd !== null && <span className="font-semibold text-(--color-font)">{formatUsd(costUsd)}</span>}
           </span>
         )}
       </div>

@@ -3,10 +3,17 @@ import type { FC } from 'react';
 import { Button } from 'react-aria-components';
 import { useParams } from 'react-router';
 
+import { formatUsdPerMillion } from '../../../common/llm-cost';
 import { groupModelsByPath } from '../../../konnect/transform';
 import { useWorkspaceLoaderData } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId';
 import { useTabNavigate } from '../../hooks/use-insomnia-tab';
 import { Icon } from '../icon';
+
+/** `$5.00 / $25.00` per 1M tokens, or an em dash when Konnect has no price for the model. */
+const formatPricePerMillion = (model: AiGatewayModel) =>
+  model.inputPerToken === undefined || model.outputPerToken === undefined
+    ? '—'
+    : `${formatUsdPerMillion(model.inputPerToken)} / ${formatUsdPerMillion(model.outputPerToken)}`;
 
 /** Read-only catalog of the models an AI Gateway exposes, grouped by route (path). Prototype (3593AI). */
 export const AiGatewayModelsPane: FC<{ models: AiGatewayModel[] }> = ({ models }) => {
@@ -47,15 +54,17 @@ export const AiGatewayModelsPane: FC<{ models: AiGatewayModel[] }> = ({ models }
           </header>
           <table className="w-full table-fixed text-left text-sm">
             <colgroup>
-              <col className="w-[30%]" />
-              <col className="w-[45%]" />
-              <col className="w-[25%]" />
+              <col className="w-[20%]" />
+              <col className="w-[32%]" />
+              <col className="w-[16%]" />
+              <col className="w-[32%]" />
             </colgroup>
             <thead className="text-xs text-(--hl)">
               <tr>
                 <th className="px-3 py-1 font-normal">Model alias</th>
                 <th className="px-3 py-1 font-normal">Actual model</th>
                 <th className="px-3 py-1 font-normal">Provider</th>
+                <th className="px-3 py-1 text-right font-normal">Price per 1M tokens (in / out)</th>
               </tr>
             </thead>
             <tbody>
@@ -64,6 +73,7 @@ export const AiGatewayModelsPane: FC<{ models: AiGatewayModel[] }> = ({ models }
                   <td className="px-3 py-1 font-semibold break-words">{model.routeModelValues.join(', ') || '—'}</td>
                   <td className="px-3 py-1 font-mono break-all">{model.targetModel}</td>
                   <td className="px-3 py-1">{model.provider}</td>
+                  <td className="px-3 py-1 text-right tabular-nums">{formatPricePerMillion(model)}</td>
                 </tr>
               ))}
             </tbody>

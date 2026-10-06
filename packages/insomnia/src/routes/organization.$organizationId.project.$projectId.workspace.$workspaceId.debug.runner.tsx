@@ -31,6 +31,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { JSON_ORDER_PREFIX, JSON_ORDER_SEPARATOR } from '~/common/constants';
 import {
   buildRunnerItemKey,
+  formatCost,
   formatTokenUsage,
   type RunnerItemStatus,
   type RunnerLiveItem,
@@ -898,7 +899,11 @@ export const Runner: FC = () => {
             <Heading className="flex h-(--line-height-sm) w-full items-center gap-2 border-b border-solid border-b-(--hl-md) pl-3">
               {totalTokens && (
                 <div className="bg-info tag" title="Total tokens across all runs">
-                  <strong>{`Tokens: ${formatTokenUsage(totalTokens)}`}</strong>
+                  <strong>
+                    {[`Tokens: ${formatTokenUsage(totalTokens)}`, formatCost(totalTokens.costUsd)]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </strong>
                 </div>
               )}
               <div className={`tag ${testResultCountTagColor}`} style={{ color: 'white' }} title="Tests passed">

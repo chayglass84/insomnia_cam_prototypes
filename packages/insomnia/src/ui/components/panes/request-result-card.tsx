@@ -5,6 +5,7 @@ import { Button } from 'react-aria-components';
 import { Icon } from '~/ui/components/icon';
 
 import {
+  formatCost,
   formatResponseStats,
   formatTokenUsage,
   getRunnerStatusTag,
@@ -54,6 +55,9 @@ export const RequestResultCard: FC<Props> = ({
   const requestId = 'requestId' in item ? item.requestId : undefined;
   const aiGateway = item.aiGateway;
   const hasTokenUsage = aiGateway?.inputTokens !== undefined || aiGateway?.outputTokens !== undefined;
+  const usageText = aiGateway
+    ? [`Tokens: ${formatTokenUsage(aiGateway)}`, formatCost(aiGateway.costUsd)].filter(Boolean).join(' · ')
+    : '';
 
   if (!hasMatchingTestResults(results, targetTests, resultFilter)) {
     return null;
@@ -72,14 +76,12 @@ export const RequestResultCard: FC<Props> = ({
             <div className="flex flex-wrap items-baseline gap-x-2" data-testid="runner-model-label">
               <span className="font-semibold">{aiGateway.alias}</span>
               <span className="font-mono text-sm text-neutral-400">{aiGateway.model}</span>
-              {!isSkipped && hasTokenUsage && (
-                <span className="ml-auto text-sm tabular-nums">{`Tokens: ${formatTokenUsage(aiGateway)}`}</span>
-              )}
+              {!isSkipped && hasTokenUsage && <span className="ml-auto text-sm tabular-nums">{usageText}</span>}
             </div>
           )}
           <div className={aiGateway && showModelLabel ? 'text-sm' : undefined}>
             {aiGateway && !showModelLabel && !isSkipped && hasTokenUsage && (
-              <span className="float-right ml-2 text-sm tabular-nums">{`Tokens: ${formatTokenUsage(aiGateway)}`}</span>
+              <span className="float-right ml-2 text-sm tabular-nums">{usageText}</span>
             )}
             <span>{item.requestName}</span>
             <span className="text-sm text-neutral-400">

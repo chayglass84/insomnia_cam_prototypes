@@ -1,6 +1,10 @@
+import type { AiGatewayModel } from 'insomnia-data';
 import React, { type FC, useEffect, useRef } from 'react';
 
 import type { ChatCompletionSummary, ChatMessage } from '~/common/chat-completion';
+import { computeCostUsd, formatUsd } from '~/common/llm-cost';
+import { findCatalogModelByResponseModel } from '~/konnect/transform';
+import { useWorkspaceLoaderData } from '~/routes/organization.$organizationId.project.$projectId.workspace.$workspaceId';
 import { getChatTurnMeta } from '~/ui/utils/chat-turn-meta-cache';
 
 import { Icon } from '../icon';
@@ -30,13 +34,21 @@ const roleBubbleStyle: Record<ChatMessage['role'], string> = {
   system: 'bg-transparent text-(--hl) text-xs italic',
 };
 
-const formatTurnFooter = (turnMeta: { model?: string; usage?: { inputTokens?: number; outputTokens?: number } }) => {
+const formatTurnFooter = (
+  turnMeta: { model?: string; usage?: { inputTokens?: number; outputTokens?: number } },
+  // In a synced AI Gateway workspace, the catalog carries Konnect's per-token price for each model.
+  catalog: AiGatewayModel[] = [],
+) => {
   const parts: string[] = [];
   if (turnMeta.model) {
     parts.push(turnMeta.model);
   }
   if (turnMeta.usage) {
     parts.push(`${turnMeta.usage.inputTokens ?? '?'} tokens in, ${turnMeta.usage.outputTokens ?? '?'} out`);
+    const cost = computeCostUsd(findCatalogModelByResponseModel(turnMeta.model, catalog), turnMeta.usage);
+    if (cost !== null) {
+      parts.push(formatUsd(cost));
+    }
   }
   return parts.join(' / ');
 };
@@ -47,6 +59,7 @@ const ChatBubble: FC<{ message: ChatMessage; isLast: boolean; summary: ChatCompl
   summary,
 }) => {
   const isAssistant = message.role === 'assistant';
+  const catalog = useWorkspaceLoaderData()?.activeWorkspace.konnectAiGatewayModels ?? undefined;
   // The live/current turn's model+usage comes from the response's own summary; any earlier
   // turn's only exists in the in-memory turn-meta cache (see chat-turn-meta-cache.ts) — past
   // turns' content is never persisted with structure, only as plain text.
@@ -55,7 +68,7 @@ const ChatBubble: FC<{ message: ChatMessage; isLast: boolean; summary: ChatCompl
       ? { model: summary.model, usage: summary.usage }
       : getChatTurnMeta(message.content)
     : undefined;
-  const footer = turnMeta ? formatTurnFooter(turnMeta) : '';
+  const footer = turnMeta ? formatTurnFooter(turnMeta, catalog) : '';
 
   return (
     <div className={`flex w-full flex-col gap-1 ${roleAlignment[message.role]}`}>

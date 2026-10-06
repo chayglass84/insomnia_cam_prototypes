@@ -23,6 +23,9 @@ export interface AiGatewayModel {
   /** Values of the request body `model` field that the route matches on, e.g. `["opus"]`. */
   routeModelValues: string[];
   enabled: boolean;
+  /** USD per token from Konnect's LLM cost price list, when a price was found for `targetModel`. */
+  inputPerToken?: number;
+  outputPerToken?: number;
 }
 
 export interface BaseWorkspace {

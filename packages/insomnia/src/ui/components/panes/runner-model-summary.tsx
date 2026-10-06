@@ -1,6 +1,7 @@
 import type { FC } from 'react';
 
-import { modelAnchorId,type ModelRunSummary } from '../../../common/runner-feedback';
+import { formatUsd } from '../../../common/llm-cost';
+import { modelAnchorId, type ModelRunSummary } from '../../../common/runner-feedback';
 
 const cell = 'px-3 py-1';
 const numberCell = `${cell} text-right tabular-nums`;
@@ -21,6 +22,7 @@ export const RunnerModelSummary: FC<{ summaries: ModelRunSummary[] }> = ({ summa
           <th className={`${cell} font-normal`}>Model</th>
           <th className={`${numberCell} font-normal`}>In</th>
           <th className={`${numberCell} font-normal`}>Out</th>
+          <th className={`${numberCell} font-normal`}>Cost</th>
           <th className={`${numberCell} font-normal`}>Tests passed</th>
         </tr>
       </thead>
@@ -48,6 +50,7 @@ export const RunnerModelSummary: FC<{ summaries: ModelRunSummary[] }> = ({ summa
             </td>
             <td className={numberCell}>{summary.inputTokens.toLocaleString()}</td>
             <td className={numberCell}>{summary.outputTokens.toLocaleString()}</td>
+            <td className={numberCell}>{summary.costUsd === null ? '—' : formatUsd(summary.costUsd)}</td>
             <td className={`${numberCell} ${passRateClassName(summary.passRate)}`}>
               {summary.passRate === null ? (
                 '—'

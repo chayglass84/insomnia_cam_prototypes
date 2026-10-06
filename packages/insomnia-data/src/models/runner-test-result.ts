@@ -31,6 +31,8 @@ export interface AiGatewayRunInfo {
   model: string;
   inputTokens?: number;
   outputTokens?: number;
+  /** USD for this run, from the model's Konnect price at send time. Absent when no price is known. */
+  costUsd?: number;
 }
 
 export interface RunnerResultPerRequest {
