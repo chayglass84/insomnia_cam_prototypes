@@ -6,6 +6,7 @@ import {
   buildAiGatewayRequestSpec,
   getAiGatewayModelSuggestions,
   groupModelsByPath,
+  withUsageFromResponseBody,
 } from '../transform';
 
 const model = (overrides: Partial<AiGatewayModel>): AiGatewayModel => ({
@@ -146,6 +147,44 @@ describe('applyAiGatewayModelOverride', () => {
     });
     expect(applyAiGatewayModelOverride({ ...request, body: { text: '{"hello":1}' } }, opus, catalog)).toEqual({
       skipReason: 'Request body is not a chat request',
+    });
+  });
+});
+
+describe('withUsageFromResponseBody', () => {
+  const info = { alias: 'fable', model: 'claude-fable-5' };
+  const body = JSON.stringify({
+    id: 'msg_1',
+    type: 'message',
+    role: 'assistant',
+    model: 'claude-fable-5-20260101',
+    content: [
+      { type: 'thinking', thinking: 'hmm' },
+      { type: 'text', text: 'Hello' },
+    ],
+    usage: { input_tokens: 44, output_tokens: 379 },
+  });
+
+  it('reads usage and the provider-reported model from a string body', () => {
+    expect(withUsageFromResponseBody(info, body)).toEqual({
+      alias: 'fable',
+      model: 'claude-fable-5-20260101',
+      inputTokens: 44,
+      outputTokens: 379,
+    });
+  });
+
+  it('reads a Uint8Array body, which is what a Buffer becomes over IPC', () => {
+    const result = withUsageFromResponseBody(info, new TextEncoder().encode(body));
+    expect(result).toMatchObject({ inputTokens: 44, outputTokens: 379 });
+  });
+
+  it('keeps the catalog model and reports no usage when the body is not a chat completion', () => {
+    expect(withUsageFromResponseBody(info, '{"error":"nope"}')).toEqual({
+      alias: 'fable',
+      model: 'claude-fable-5',
+      inputTokens: undefined,
+      outputTokens: undefined,
     });
   });
 });

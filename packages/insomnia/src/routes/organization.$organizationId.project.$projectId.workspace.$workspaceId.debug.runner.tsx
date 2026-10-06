@@ -29,7 +29,13 @@ import * as reactUse from 'react-use';
 import { v4 as uuidv4 } from 'uuid';
 
 import { JSON_ORDER_PREFIX, JSON_ORDER_SEPARATOR } from '~/common/constants';
-import { buildRunnerItemKey, type RunnerItemStatus, type RunnerLiveItem } from '~/common/runner-feedback';
+import {
+  buildRunnerItemKey,
+  formatTokenUsage,
+  type RunnerItemStatus,
+  type RunnerLiveItem,
+  sumTokenUsage,
+} from '~/common/runner-feedback';
 import { invariant } from '~/common/utils/invariant';
 import { defaultSendActionRuntime } from '~/network/network';
 import { useRootLoaderData } from '~/root';
@@ -148,6 +154,9 @@ export interface RequestRow {
   parentId: string;
   /** AI Gateway collections: run this request against this catalog model (see applyAiGatewayModelOverride). */
   modelId?: string;
+  /** Display only: the route's model value (`opus`) and the actual target model (`claude-opus-4-6`). */
+  modelAlias?: string;
+  modelTarget?: string;
 }
 
 const defaultAdvancedConfig = {
@@ -308,7 +317,12 @@ export const Runner: FC = () => {
       selectedKeys === 'all' ? reqList : reqList.filter(item => (selectedKeys as Set<Key>).has(item.id));
     const requests = gatewayModels
       ? selectedRequests.flatMap(req =>
-          chosenModels.map(model => ({ ...req, name: `${req.name} · ${model.displayName}`, modelId: model.id })),
+          chosenModels.map(model => ({
+            ...req,
+            modelId: model.id,
+            modelAlias: model.routeModelValues[0] ?? model.displayName,
+            modelTarget: model.targetModel,
+          })),
         )
       : selectedRequests;
 
@@ -499,6 +513,11 @@ export const Runner: FC = () => {
 
     return { passedTestCount, totalTestCount, testResultCountTagColor };
   }, [executionResult, isRunning]);
+
+  const totalTokens = useMemo(
+    () => (isRunning || !executionResult ? null : sumTokenUsage(executionResult.iterationResults.flat())),
+    [executionResult, isRunning],
+  );
 
   const [selectedTab, setSelectedTab] = React.useState<Key>('results');
   const activeTab = isRunning ? 'results' : selectedTab;
@@ -834,7 +853,6 @@ export const Runner: FC = () => {
                     selectedIds={selectedModelIds}
                     onChange={setSelectedModelIds}
                     disabled={isRunning}
-                    requestCount={selectedKeys === 'all' ? reqList.length : Array.from(selectedKeys).length}
                   />
                 </TabPanel>
               )}
@@ -875,9 +893,17 @@ export const Runner: FC = () => {
       <Panel id="pane-two" className="pane-two theme--pane">
         {executionResult?.duration ? (
           <PaneHeader className="row-spaced">
-            <Heading className="flex h-(--line-height-sm) w-full items-center border-b border-solid border-b-(--hl-md) pl-3">
-              <div className="bg-info tag">
-                <strong>{`${totalTime.duration} ${totalTime.unit}`}</strong>
+            <Heading className="flex h-(--line-height-sm) w-full items-center gap-2 border-b border-solid border-b-(--hl-md) pl-3">
+              {totalTokens && (
+                <div className="bg-info tag" title="Total tokens across all runs">
+                  <strong>{`Tokens: ${formatTokenUsage(totalTokens)}`}</strong>
+                </div>
+              )}
+              <div className={`tag ${testResultCountTagColor}`} style={{ color: 'white' }} title="Tests passed">
+                <strong>{`Tests ${passedTestCount} / ${totalTestCount}`}</strong>
+              </div>
+              <div className="bg-info tag" title="Total time">
+                <strong>{`Time ${totalTime.duration} ${totalTime.unit}`}</strong>
               </div>
             </Heading>
           </PaneHeader>
@@ -1035,6 +1061,7 @@ export async function clientAction({ request, params }: Route.ClientActionArgs) 
         requestName: req.name,
         requestUrl: req.url,
         status: 'pending',
+        aiGateway: req.modelId ? { alias: req.modelAlias ?? '', model: req.modelTarget ?? '' } : undefined,
       });
     });
   }
@@ -1074,6 +1101,9 @@ export async function clientAction({ request, params }: Route.ClientActionArgs) 
               responseCode: 0,
               results: [],
               skipped: true,
+              aiGateway: targetRequest.modelId
+                ? { alias: targetRequest.modelAlias ?? '', model: targetRequest.modelTarget ?? '' }
+                : undefined,
             },
           ];
           j++;
@@ -1090,6 +1120,9 @@ export async function clientAction({ request, params }: Route.ClientActionArgs) 
           size: 0,
           results: [],
           responseId: '',
+          aiGateway: targetRequest.modelId
+            ? { alias: targetRequest.modelAlias ?? '', model: targetRequest.modelTarget ?? '' }
+            : undefined,
         };
         const buildResult = () => ({
           requestName: targetRequest.name,
@@ -1099,6 +1132,7 @@ export async function clientAction({ request, params }: Route.ClientActionArgs) 
           responseTime: resultCollector.duration,
           responseSize: resultCollector.size,
           results: resultCollector.results,
+          aiGateway: resultCollector.aiGateway,
         });
         const buildLivePatch = (status: RunnerLiveItem['status']) => ({
           status,
@@ -1108,6 +1142,7 @@ export async function clientAction({ request, params }: Route.ClientActionArgs) 
           responseTime: resultCollector.duration,
           responseSize: resultCollector.size,
           results: resultCollector.results,
+          aiGateway: resultCollector.aiGateway,
         });
 
         const isNextRequest = (targetRequest: RequestRow, nextRequestIdOrName: string) => {

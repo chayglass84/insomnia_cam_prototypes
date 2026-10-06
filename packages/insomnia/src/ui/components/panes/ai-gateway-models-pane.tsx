@@ -48,17 +48,15 @@ export const AiGatewayModelsPane: FC<{ models: AiGatewayModel[] }> = ({ models }
           <table className="w-full text-left text-sm">
             <thead className="text-xs text-(--hl)">
               <tr>
-                <th className="px-3 py-1 font-normal">Model</th>
-                <th className="px-3 py-1 font-normal">Request body `model`</th>
-                <th className="px-3 py-1 font-normal">Target</th>
+                <th className="px-3 py-1 font-normal">Model alias (request body `model`)</th>
+                <th className="px-3 py-1 font-normal">Actual model</th>
                 <th className="px-3 py-1 font-normal">Provider</th>
               </tr>
             </thead>
             <tbody>
               {pathModels.map(model => (
                 <tr key={model.id} className={model.enabled ? '' : 'opacity-50'}>
-                  <td className="px-3 py-1">{model.displayName}</td>
-                  <td className="px-3 py-1 font-mono">{model.routeModelValues.join(', ') || '—'}</td>
+                  <td className="px-3 py-1 font-semibold">{model.routeModelValues.join(', ') || '—'}</td>
                   <td className="px-3 py-1 font-mono">{model.targetModel}</td>
                   <td className="px-3 py-1">{model.provider}</td>
                 </tr>

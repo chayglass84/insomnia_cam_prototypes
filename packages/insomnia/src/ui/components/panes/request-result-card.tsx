@@ -6,6 +6,7 @@ import { Icon } from '~/ui/components/icon';
 
 import {
   formatResponseStats,
+  formatTokenUsage,
   getRunnerStatusTag,
   type RunnerItemStatus,
   type RunnerLiveItem,
@@ -48,6 +49,8 @@ export const RequestResultCard: FC<Props> = ({
   const showInlineStats = isExpanded && !isSkipped && stats;
 
   const requestId = 'requestId' in item ? item.requestId : undefined;
+  const aiGateway = item.aiGateway;
+  const hasTokenUsage = aiGateway?.inputTokens !== undefined || aiGateway?.outputTokens !== undefined;
 
   if (!hasMatchingTestResults(results, targetTests, resultFilter)) {
     return null;
@@ -62,7 +65,16 @@ export const RequestResultCard: FC<Props> = ({
           {tag.label}
         </div>
         <div className="min-w-0 flex-1">
-          <div>
+          {aiGateway && (
+            <div className="flex flex-wrap items-baseline gap-x-2" data-testid="runner-model-label">
+              <span className="font-semibold">{aiGateway.alias}</span>
+              <span className="font-mono text-sm text-neutral-400">{aiGateway.model}</span>
+              {!isSkipped && hasTokenUsage && (
+                <span className="ml-auto text-sm tabular-nums">{`Tokens: ${formatTokenUsage(aiGateway)}`}</span>
+              )}
+            </div>
+          )}
+          <div className={aiGateway ? 'text-sm' : undefined}>
             <span>{item.requestName}</span>
             <span className="text-sm text-neutral-400">
               {' - '}

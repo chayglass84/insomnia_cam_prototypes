@@ -21,6 +21,16 @@ export interface RequestTestResult {
   category: TestCategory;
 }
 
+/** Prototype (3593AI): which gateway model a runner row ran against, and what it used. */
+export interface AiGatewayRunInfo {
+  /** The route's model value from the request body, e.g. `opus`. */
+  alias: string;
+  /** The actual model, as reported by the provider response when available, else the catalog target. */
+  model: string;
+  inputTokens?: number;
+  outputTokens?: number;
+}
+
 export interface RunnerResultPerRequest {
   results: RequestTestResult[];
   requestName: string;
@@ -30,6 +40,7 @@ export interface RunnerResultPerRequest {
   responseTime?: number;
   responseSize?: number;
   skipped?: boolean;
+  aiGateway?: AiGatewayRunInfo;
 }
 
 export interface ResponseInfo {

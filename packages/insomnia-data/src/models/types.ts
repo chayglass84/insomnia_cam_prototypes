@@ -76,6 +76,7 @@ export type {
   RequestTestResult,
   RunnerTestResult,
   BaseRunnerTestResult,
+  AiGatewayRunInfo,
   RunnerResultPerRequest,
   ResponseInfo,
   RunnerResultPerRequestPerIteration,
