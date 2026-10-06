@@ -1,5 +1,6 @@
 import contentDisposition from 'content-disposition';
 import type {
+  AiGatewayRunInfo,
   Environment,
   Request,
   RequestGroup,
@@ -17,7 +18,7 @@ import { CONTENT_TYPE_GRAPHQL } from '~/common/constants';
 import { getContentDispositionHeader } from '~/common/misc';
 import { parseGraphQLReqeustBody } from '~/common/utils/graph-ql';
 import { invariant } from '~/common/utils/invariant';
-import { applyAiGatewayModelOverride } from '~/konnect/transform';
+import { applyAiGatewayModelOverride, withUsageFromResponseBody } from '~/konnect/transform';
 import type { ResponsePatch } from '~/main/network/libcurl-promise';
 import type { TimingStep } from '~/main/network/request-timing';
 import {
@@ -69,6 +70,8 @@ export interface RunnerContextForRequest {
   size: number;
   results: RequestTestResult[];
   responseId: string;
+  /** AI Gateway runner rows: model alias/actual model, filled with token usage once the response is in. */
+  aiGateway?: AiGatewayRunInfo;
 }
 
 const writeToDownloadPath = async (
@@ -329,6 +332,11 @@ export const sendActionImplementation = async (options: {
     testResultCollector.statusCode = baseResponsePatch.statusCode || 0;
     testResultCollector.statusMessage = baseResponsePatch.statusMessage || '';
     testResultCollector.size = baseResponsePatch.bytesRead || 0;
+    if (aiGatewayModelId && testResultCollector.aiGateway) {
+      // Non-streaming (the override turns streaming off), so the body is plain JSON with `usage` and the real model.
+      const bodyBuffer = await services.helpers.getResponseBodyBuffer(baseResponsePatch, '');
+      testResultCollector.aiGateway = withUsageFromResponseBody(testResultCollector.aiGateway, bodyBuffer);
+    }
   }
   const responsePatch = postMutatedContext
     ? {

@@ -1,6 +1,8 @@
-import type { AiGatewayModel, KonnectDeploymentType } from 'insomnia-data';
+import type { AiGatewayModel, AiGatewayRunInfo, KonnectDeploymentType } from 'insomnia-data';
 
+import { extractChatCompletion } from '../common/chat-completion';
 import { parseChatRequestBody } from '../common/chat-request';
+import { bodyBufferToUtf8 } from '../common/utils/utf8-bytes';
 import type { KonnectControlPlane, KonnectProxyUrl, KonnectRoute } from './api';
 
 // ─── Template injection sanitisation ─────────────────────────────────────────
@@ -541,5 +543,19 @@ export function applyAiGatewayModelOverride(
     headers: (request.headers ?? []).map(h =>
       h.name.toLowerCase() === 'accept' ? { ...h, value: 'application/json' } : h,
     ),
+  };
+}
+
+/**
+ * Fills token usage and the provider-reported model into a runner row from the (non-streaming) response body.
+ * The body can be a string, a Buffer, or a Uint8Array — over Electron IPC a Buffer arrives as a Uint8Array.
+ */
+export function withUsageFromResponseBody(info: AiGatewayRunInfo, body: string | Uint8Array): AiGatewayRunInfo {
+  const summary = extractChatCompletion(typeof body === 'string' ? body : bodyBufferToUtf8(body));
+  return {
+    ...info,
+    model: summary?.model || info.model,
+    inputTokens: summary?.usage?.inputTokens,
+    outputTokens: summary?.usage?.outputTokens,
   };
 }

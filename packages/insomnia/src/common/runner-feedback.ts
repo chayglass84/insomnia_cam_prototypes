@@ -1,4 +1,4 @@
-import type { RequestTestResult } from 'insomnia-data';
+import type { AiGatewayRunInfo, RequestTestResult } from 'insomnia-data';
 
 import { RESPONSE_CODE_REASONS } from './constants';
 import { describeByteSize } from './misc';
@@ -18,6 +18,7 @@ export interface RunnerLiveItem {
   responseSize?: number;
   errorMessage?: string;
   results?: RequestTestResult[];
+  aiGateway?: AiGatewayRunInfo;
 }
 
 export const buildRunnerItemKey = (iteration: number, index: number, requestId: string) =>
@@ -63,3 +64,21 @@ export const getRunnerStatusTag = (item: { status: RunnerItemStatus; statusCode?
 
 export const isFinished = (status: RunnerItemStatus) =>
   status === 'completed' || status === 'failed' || status === 'canceled' || status === 'skipped';
+
+/** Sums token usage across runner rows. Returns null when no row reported any usage. */
+export const sumTokenUsage = (rows: { aiGateway?: AiGatewayRunInfo }[]) => {
+  let inputTokens = 0;
+  let outputTokens = 0;
+  let hasUsage = false;
+  for (const { aiGateway } of rows) {
+    if (aiGateway && (aiGateway.inputTokens !== undefined || aiGateway.outputTokens !== undefined)) {
+      hasUsage = true;
+      inputTokens += aiGateway.inputTokens ?? 0;
+      outputTokens += aiGateway.outputTokens ?? 0;
+    }
+  }
+  return hasUsage ? { inputTokens, outputTokens } : null;
+};
+
+export const formatTokenUsage = ({ inputTokens, outputTokens }: { inputTokens?: number; outputTokens?: number }) =>
+  `${(inputTokens ?? 0).toLocaleString()} in, ${(outputTokens ?? 0).toLocaleString()} out`;
