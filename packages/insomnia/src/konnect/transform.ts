@@ -707,6 +707,31 @@ export function findCatalogModelByRequest(
     .sort((a, b) => longestPath(b) - longestPath(a))[0];
 }
 
+/**
+ * Prices one chat reply however the model is defined. Prefers the target the provider says answered (its response
+ * `model`); otherwise falls back to the model the request's URL + body alias point at, unless that alias rotates between
+ * several targets, in which case the price is unknowable without the response model.
+ */
+export function priceChatTurn(
+  turn: { model?: string; usage?: { inputTokens?: number; outputTokens?: number } },
+  request: { url?: string; alias?: string },
+  catalog: AiGatewayModel[],
+): { costUsd: number | null; costNote?: 'rotating' | 'no-price' } {
+  if (!turn.usage || catalog.length === 0) {
+    return { costUsd: null };
+  }
+  const answered = computeCostUsd(findCatalogModelByResponseModel(turn.model, catalog), turn.usage);
+  if (answered !== null) {
+    return { costUsd: answered };
+  }
+  const routed = request.url ? findCatalogModelByRequest(request.url, request.alias, catalog) : undefined;
+  if (routed && isRotatingModel(routed)) {
+    return { costUsd: null, costNote: 'rotating' };
+  }
+  const cost = computeCostUsd(routed, turn.usage);
+  return cost === null ? { costUsd: null, costNote: 'no-price' } : { costUsd: cost };
+}
+
 /** Every catalog model on the route a request URL hits: those sharing the longest matching route path. */
 export function findCatalogModelsByPath(requestUrl: string, catalog: AiGatewayModel[]): AiGatewayModel[] {
   const pathname = requestUrl.replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]*/i, '').split('?')[0];

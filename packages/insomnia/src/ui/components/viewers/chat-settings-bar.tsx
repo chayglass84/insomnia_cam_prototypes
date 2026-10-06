@@ -3,8 +3,9 @@ import { Button, ComboBox, Group, Input, ListBox, ListBoxItem, Popover } from 'r
 
 import { Icon } from '~/ui/components/icon';
 
-import { computeCostUsd, formatUsd } from '../../../common/llm-cost';
-import { findCatalogModelByRequest, getAiGatewayModelSuggestions } from '../../../konnect/transform';
+import type { ChatTotals } from '../../../common/chat-totals';
+import { formatUsd } from '../../../common/llm-cost';
+import { getAiGatewayModelSuggestions } from '../../../konnect/transform';
 import { useWorkspaceLoaderData } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId';
 import { useRequestLoaderData } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request.$requestId';
 
@@ -36,7 +37,8 @@ interface Props {
   // Omit for a plain read-only summary (no editing, no pending-change warning) — used where there's
   // no obvious "apply this" action to wire up to yet (the one-shot non-streaming response pane).
   onApply?: (next: ChatSettingsValues) => void;
-  usage?: { inputTokens?: number; outputTokens?: number };
+  /** Whole-conversation totals (every reply, each already counting the prompt/history it was sent with). */
+  totals?: ChatTotals | null;
   stopReason?: string;
   isStreaming?: boolean;
   pendingNotice?: { message: string; actionLabel: string; onAction: () => void } | null;
@@ -45,12 +47,45 @@ interface Props {
 const fieldClassName =
   'rounded-xs border border-solid border-(--hl-sm) bg-(--color-bg) px-2 py-1 text-xs text-(--color-font) outline-hidden focus:border-(--hl)';
 
+/** The conversation's running totals, kept prominent in the bar: tokens in/out (prompt and replies) and cost. */
+const TotalsBadge: FC<{ totals: ChatTotals; showCost: boolean }> = ({ totals, showCost }) => (
+  <span
+    className="flex flex-wrap items-center gap-x-1.5 rounded-sm bg-(--hl-sm) px-2 py-0.5 text-(--color-font)"
+    data-testid="chat-totals"
+    title="Summed over every reply. Each reply's input already includes the initial prompt and earlier turns, which is what the provider bills."
+  >
+    <Icon icon="coins" />
+    <span className="font-semibold">{totals.replies > 1 ? `Total (${totals.replies} replies):` : 'Total:'}</span>
+    <span className="tabular-nums">
+      {totals.inputTokens.toLocaleString()} in / {totals.outputTokens.toLocaleString()} out
+    </span>
+    <span className="text-(--hl) tabular-nums">({(totals.inputTokens + totals.outputTokens).toLocaleString()})</span>
+    {showCost &&
+      (totals.costUsd === null ? (
+        <span className="text-(--hl)">· cost n/a</span>
+      ) : (
+        <span className="font-semibold">
+          · {formatUsd(totals.costUsd)}
+          {totals.unpricedReplies > 0 && (
+            <span className="font-normal text-(--hl)"> + {totals.unpricedReplies} unpriced</span>
+          )}
+        </span>
+      ))}
+    {totals.missingReplies > 0 && (
+      <span className="text-yellow-500">
+        · {totals.missingReplies} earlier {totals.missingReplies === 1 ? 'reply' : 'replies'} not counted (usage
+        unknown)
+      </span>
+    )}
+  </span>
+);
+
 export const ChatSettingsBar: FC<Props> = ({
   requestKey,
   format,
   values,
   onApply,
-  usage,
+  totals,
   stopReason,
   isStreaming,
   pendingNotice,
@@ -64,10 +99,6 @@ export const ChatSettingsBar: FC<Props> = ({
   // (e.g. `opus`) instead of the generic provider model names, which the gateway would 404 on.
   const gatewayModels = useWorkspaceLoaderData()?.activeWorkspace.konnectAiGatewayModels;
   const requestUrl = useRequestLoaderData()?.activeRequest?.url;
-  // Konnect's per-token price for the model this request targets (gateway workspaces only).
-  const pricedModel =
-    gatewayModels && requestUrl ? findCatalogModelByRequest(requestUrl, values.model, gatewayModels) : undefined;
-  const costUsd = computeCostUsd(pricedModel, usage);
   const modelSuggestions =
     (gatewayModels && requestUrl ? getAiGatewayModelSuggestions(requestUrl, gatewayModels) : null) ??
     MODEL_SUGGESTIONS[format];
@@ -105,13 +136,10 @@ export const ChatSettingsBar: FC<Props> = ({
     }
   };
 
-  const totalTokens =
-    usage?.inputTokens !== undefined && usage?.outputTokens !== undefined
-      ? usage.inputTokens + usage.outputTokens
-      : undefined;
+  const totalsBadge = totals ? <TotalsBadge totals={totals} showCost={Boolean(gatewayModels?.length)} /> : null;
 
   if (!onApply) {
-    if (!values.model && !values.systemPrompt && !usage && !stopReason && !isStreaming) {
+    if (!values.model && !values.systemPrompt && !totals && !stopReason && !isStreaming) {
       return null;
     }
     return (
@@ -132,14 +160,7 @@ export const ChatSettingsBar: FC<Props> = ({
               {values.model}
             </span>
           )}
-          {usage && (
-            <span className="flex items-center gap-1">
-              <Icon icon="coins" />
-              {usage.inputTokens ?? '?'} in / {usage.outputTokens ?? '?'} out
-              {totalTokens !== undefined && <span className="text-(--hl)">({totalTokens} total)</span>}
-              {costUsd !== null && <span className="font-semibold text-(--color-font)">{formatUsd(costUsd)}</span>}
-            </span>
-          )}
+          {totalsBadge}
           {stopReason && (
             <span className="flex items-center gap-1">
               <Icon icon="stop" />
@@ -203,14 +224,7 @@ export const ChatSettingsBar: FC<Props> = ({
             </ListBox>
           </Popover>
         </ComboBox>
-        {usage && (
-          <span className="flex items-center gap-1">
-            <Icon icon="coins" />
-            {usage.inputTokens ?? '?'} in / {usage.outputTokens ?? '?'} out
-            {totalTokens !== undefined && <span className="text-(--hl)">({totalTokens} total)</span>}
-            {costUsd !== null && <span className="font-semibold text-(--color-font)">{formatUsd(costUsd)}</span>}
-          </span>
-        )}
+        {totalsBadge}
       </div>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
         {isStreaming && (

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { ensureEventStreamAcceptHeader, ensureStreamingBodyFlag, hasStreamingBodyFlag } from './chat-streaming';
+import {
+  ensureEventStreamAcceptHeader,
+  ensureIncludeUsageFlag,
+  ensureStreamingBodyFlag,
+  hasIncludeUsageFlag,
+  hasStreamingBodyFlag,
+} from './chat-streaming';
 
 describe('hasStreamingBodyFlag', () => {
   it('returns true when stream is true', () => {
@@ -54,5 +60,23 @@ describe('ensureEventStreamAcceptHeader', () => {
   it('reports no change when the header is already correct', () => {
     const headers = [{ name: 'Accept', value: 'text/event-stream' }];
     expect(ensureEventStreamAcceptHeader(headers)).toEqual({ headers, changed: false });
+  });
+});
+
+describe('include_usage flag', () => {
+  it('detects and adds stream_options.include_usage, keeping other options and indentation', () => {
+    expect(hasIncludeUsageFlag('{"stream":true}')).toBe(false);
+    expect(hasIncludeUsageFlag('{"stream_options":{"include_usage":true}}')).toBe(true);
+    expect(ensureIncludeUsageFlag('{"stream":true,"stream_options":{"x":1}}')).toBe(
+      '{"stream":true,"stream_options":{"x":1,"include_usage":true}}',
+    );
+    expect(ensureIncludeUsageFlag('{\n  "stream": true\n}')).toBe(
+      '{\n  "stream": true,\n  "stream_options": {\n    "include_usage": true\n  }\n}',
+    );
+  });
+
+  it('does nothing when already set or the body is not JSON', () => {
+    expect(ensureIncludeUsageFlag('{"stream_options":{"include_usage":true}}')).toBeNull();
+    expect(ensureIncludeUsageFlag('not json')).toBeNull();
   });
 });
