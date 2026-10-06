@@ -107,7 +107,7 @@ export const summarizeModelRuns = (rows: RunnerResultPerRequest[]): ModelRunSumm
     if (!info || row.skipped) {
       continue;
     }
-    const key = `${info.route ?? ''}\u0000${info.alias}\u0000${info.model}`;
+    const key = `${info.route ?? ''}\u0000${info.alias}`;
     const summary = byModel.get(key) ?? {
       route: info.route ?? '',
       alias: info.alias,
@@ -118,6 +118,8 @@ export const summarizeModelRuns = (rows: RunnerResultPerRequest[]): ModelRunSumm
       totalTests: 0,
       passRate: null,
     };
+    // Rows that ran report the provider's actual (often dated) model; prefer that over the catalog name.
+    summary.model = info.model || summary.model;
     summary.inputTokens += info.inputTokens ?? 0;
     summary.outputTokens += info.outputTokens ?? 0;
     summary.passedTests += (row.results ?? []).filter(result => result.status === 'passed').length;
@@ -150,7 +152,9 @@ export interface ModelGroup<T> {
   entries: { row: T; index: number }[];
 }
 
-const modelKey = (info: AiGatewayRunInfo) => `${info.route ?? ''}\u0000${info.alias}\u0000${info.model}`;
+// Route + alias identify a model. The `model` string is NOT part of the key: a skipped row keeps the catalog name
+// (`gpt-4.1-nano`) while a completed row carries the provider's dated one (`gpt-4.1-nano-2025-04-14`).
+const modelKey = (info: AiGatewayRunInfo) => `${info.route ?? ''}\u0000${info.alias}`;
 
 /**
  * Groups runner rows by the gateway model they ran against, in order of first appearance, so a run reads as
@@ -164,9 +168,16 @@ export const groupRowsByModel = <T extends { aiGateway?: AiGatewayRunInfo }>(row
     group.entries.push({ row, index });
     groups.set(key, group);
   });
-  return [...groups.values()];
+  // Show the actual model from a row that ran (it has usage); skipped/pending rows only know the catalog name.
+  return [...groups.values()].map(group => ({
+    ...group,
+    info:
+      group.entries
+        .map(entry => entry.row.aiGateway)
+        .find(info => info && (info.inputTokens !== undefined || info.outputTokens !== undefined)) ?? group.info,
+  }));
 };
 
 /** DOM id for a model's section within an iteration, so the summary table can scroll to it. */
-export const modelAnchorId = (info: Pick<AiGatewayRunInfo, 'route' | 'alias' | 'model'>, iteration: number) =>
-  `runner-model-${iteration}-${`${info.route ?? ''}-${info.alias}-${info.model}`.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-')}`;
+export const modelAnchorId = (info: Pick<AiGatewayRunInfo, 'route' | 'alias'>, iteration: number) =>
+  `runner-model-${iteration}-${`${info.route ?? ''}-${info.alias}`.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-')}`;
