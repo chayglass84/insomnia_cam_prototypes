@@ -72,6 +72,14 @@ export interface KonnectAiGatewayModel {
   config: { route?: { paths?: string[]; model?: { values?: string[] } } };
 }
 
+/** One entry of Konnect's (beta) global LLM cost price list. Prices are USD per token, as strings. */
+export interface KonnectLlmCostPrice {
+  provider: { id: string; name?: string };
+  model: { id: string; name?: string };
+  pricing: { input_per_token: string; output_per_token: string };
+  source?: string;
+}
+
 export const getActiveRegions = getKonnectApiRegions;
 
 // Boundary normalizers — coerce any missing nullable field to `null` so the
@@ -314,6 +322,39 @@ export async function fetchAiGatewayModels(
   } while (after);
 
   return models;
+}
+
+// Documented as `GET /openmeter/llm-cost/prices` under the v3 API; the exact prefix is not yet confirmed live.
+const LLM_COST_PRICES_PATH = '/v3/openmeter/llm-cost/prices';
+
+/** All of Konnect's global LLM cost prices (several hundred entries, paged). */
+export async function fetchLlmCostPrices(
+  pat: string,
+  region: string,
+  signal?: AbortSignal,
+): Promise<KonnectLlmCostPrice[]> {
+  const prices: KonnectLlmCostPrice[] = [];
+  let page = 1;
+  let total = 0;
+
+  do {
+    const url = `${regionalApiBase(region)}${LLM_COST_PRICES_PATH}?page[size]=100&page[number]=${page}`;
+    const response = await fetchWithRetry(url, pat, signal);
+
+    if (!response.ok) {
+      throw new Error(`Konnect API error ${response.status} fetching LLM cost prices`);
+    }
+
+    const body = await response.json();
+    total = body?.meta?.page?.total ?? 0;
+    prices.push(...((body.data ?? []) as KonnectLlmCostPrice[]));
+    page++;
+    if (!body.data?.length) {
+      break;
+    }
+  } while (prices.length < total);
+
+  return prices;
 }
 
 function regionalApiBase(region: string): string {

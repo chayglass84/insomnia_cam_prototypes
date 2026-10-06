@@ -16,11 +16,45 @@ describe('sumTokenUsage', () => {
       { aiGateway: { alias: 'sonnet', model: 'claude-sonnet-5' } }, // skipped / no usage
       {}, // a normal, non-gateway row
     ];
-    expect(sumTokenUsage(rows)).toEqual({ inputTokens: 22, outputTokens: 500 });
+    expect(sumTokenUsage(rows)).toEqual({ inputTokens: 22, outputTokens: 500, costUsd: null });
   });
 
   it('returns null when nothing reported usage', () => {
     expect(sumTokenUsage([{}, { aiGateway: { alias: 'opus', model: 'm' } }])).toBeNull();
+  });
+});
+
+describe('cost totals', () => {
+  it('sums cost only across rows that have one, and summarizes it per model', () => {
+    const rows = [
+      {
+        requestName: 'a',
+        requestUrl: 'u',
+        responseCode: 200,
+        results: [],
+        aiGateway: { route: '/r', alias: 'opus', model: 'm', inputTokens: 10, outputTokens: 100, costUsd: 0.003 },
+      },
+      {
+        requestName: 'b',
+        requestUrl: 'u',
+        responseCode: 200,
+        results: [],
+        aiGateway: { route: '/r', alias: 'opus', model: 'm', inputTokens: 10, outputTokens: 100, costUsd: 0.002 },
+      },
+      {
+        requestName: 'c',
+        requestUrl: 'u',
+        responseCode: 200,
+        results: [],
+        aiGateway: { route: '/r', alias: 'unpriced', model: 'x', inputTokens: 5, outputTokens: 5 },
+      },
+    ];
+    expect(sumTokenUsage(rows)?.costUsd).toBeCloseTo(0.005, 9);
+    const summaries = summarizeModelRuns(rows);
+    const opus = summaries.find(s => s.alias === 'opus')!;
+    const unpriced = summaries.find(s => s.alias === 'unpriced')!;
+    expect(opus.costUsd).toBeCloseTo(0.005, 9);
+    expect(unpriced.costUsd).toBeNull();
   });
 });
 

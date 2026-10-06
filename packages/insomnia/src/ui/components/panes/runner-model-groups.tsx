@@ -1,6 +1,7 @@
 import type { AiGatewayRunInfo } from 'insomnia-data';
 import type { ReactNode } from 'react';
 
+import { formatUsd } from '../../../common/llm-cost';
 import { formatTokenUsage, groupRowsByModel, modelAnchorId, sumTokenUsage } from '../../../common/runner-feedback';
 
 interface Props<T extends { aiGateway?: AiGatewayRunInfo }> {
@@ -44,6 +45,12 @@ export function RunnerModelGroups<T extends { aiGateway?: AiGatewayRunInfo }>({
                 <span className="ml-auto text-sm tabular-nums">
                   {'Total Tokens: '}
                   <strong>{formatTokenUsage(tokens)}</strong>
+                  {tokens.costUsd !== null && (
+                    <>
+                      {' · Total Cost: '}
+                      <strong>{formatUsd(tokens.costUsd)}</strong>
+                    </>
+                  )}
                 </span>
               )}
             </h3>

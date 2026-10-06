@@ -16,11 +16,13 @@ import {
   fetchAllAiGateways,
   fetchAllControlPlanes,
   fetchAllServices,
+  fetchLlmCostPrices,
   fetchRoutesForService,
   getActiveRegions,
   type KonnectAiGateway,
   type KonnectAiGatewayModel,
   type KonnectControlPlane,
+  type KonnectLlmCostPrice,
   type KonnectRoute,
   type KonnectService,
 } from './api';
@@ -37,6 +39,7 @@ import {
   mergeHeaders,
   mergePathParameters,
   pathParametersChanged,
+  pickLlmPrice,
   resolvePath,
   routeDisplayName,
   sanitizeRoute,
@@ -919,7 +922,17 @@ async function syncAiGateway(
   );
 
   onProgress?.(`Fetching models for ${name}...`);
-  const models = (await fetchAiGatewayModels(pat, gateway.id, gateway.region, signal)).map(toAiGatewayModel);
+  // Best effort: without prices the UI simply shows tokens and no cost.
+  const prices: KonnectLlmCostPrice[] = await fetchLlmCostPrices(pat, gateway.region, signal).catch(err => {
+    if (signal?.aborted) {
+      throw err;
+    }
+    console.info('[konnect] LLM cost prices unavailable', err instanceof Error ? err.message : String(err));
+    return [];
+  });
+  const models = (await fetchAiGatewayModels(pat, gateway.id, gateway.region, signal))
+    .map(toAiGatewayModel)
+    .map(model => ({ ...model, ...pickLlmPrice(prices, model.targetModel, model.provider) }));
 
   // One collection per gateway holds the model catalog. User requests in it are never touched.
   // `$ne: null` also matches workspaces missing the key (e.g. the environment workspace), so filter in JS.

@@ -1,5 +1,6 @@
 import contentDisposition from 'content-disposition';
 import type {
+  AiGatewayModel,
   AiGatewayRunInfo,
   Environment,
   Request,
@@ -137,9 +138,11 @@ export const sendActionImplementation = async (options: {
   window.main.startExecution({ requestId });
   const fetchedRequestData = await fetchRequestData(requestId);
   let requestData = fetchedRequestData;
+  let aiGatewayTarget: AiGatewayModel | undefined;
   if (aiGatewayModelId) {
     const catalog = fetchedRequestData.workspace.konnectAiGatewayModels ?? [];
     const target = catalog.find(model => model.id === aiGatewayModelId);
+    aiGatewayTarget = target;
     const override = target
       ? applyAiGatewayModelOverride(fetchedRequestData.request, target, catalog)
       : { skipReason: 'This model is no longer in the gateway catalog, so it was skipped.' };
@@ -335,7 +338,11 @@ export const sendActionImplementation = async (options: {
     if (aiGatewayModelId && testResultCollector.aiGateway) {
       // Non-streaming (the override turns streaming off), so the body is plain JSON with `usage` and the real model.
       const bodyBuffer = await services.helpers.getResponseBodyBuffer(baseResponsePatch, '');
-      testResultCollector.aiGateway = withUsageFromResponseBody(testResultCollector.aiGateway, bodyBuffer);
+      testResultCollector.aiGateway = withUsageFromResponseBody(
+        testResultCollector.aiGateway,
+        bodyBuffer,
+        aiGatewayTarget,
+      );
     }
   }
   const responsePatch = postMutatedContext
