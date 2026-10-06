@@ -68,7 +68,7 @@ export interface KonnectAiGatewayModel {
   display_name: string;
   enabled: boolean;
   formats?: { type: string }[];
-  /** Policies attached to this model. Shape unverified (always empty so far): strings or `{ id, name }` objects. */
+  /** Policies attached to this model: policy **names** (strings), confirmed live 2026-10-06. Ids are rejected on update. */
   policies?: unknown[];
   targets: { name: string; provider: string }[];
   config: { route?: { paths?: string[]; model?: { values?: string[] } } };
