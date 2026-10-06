@@ -27,6 +27,7 @@ import {
 import { applyExpressionFields } from './expression-parser';
 import { getKonnectDeploymentType } from './transform';
 import {
+  AI_GATEWAY_STARTER_AFTER_RESPONSE_SCRIPT,
   buildAiGatewayRequestSpec,
   buildRequestName,
   deriveProxyVarDefaults,
@@ -841,11 +842,20 @@ async function ensureAiGatewayTree(
   gatewayModels: AiGatewayModel[],
 ) {
   // Create-only (no rename, unlike upsertRouteFolder) so a user renaming a folder isn't reverted.
-  const ensureFolder = async (parentId: string, name: string, konnectRouteId: string) =>
+  const ensureFolder = async (
+    parentId: string,
+    name: string,
+    konnectRouteId: string,
+    extraFields: Partial<RequestGroup> = {},
+  ) =>
     (await db.find<RequestGroup>(models.requestGroup.type, { parentId, konnectRouteId }))[0]?._id ??
-    (await insoservices.requestGroup.create({ parentId, name, konnectRouteId }))._id;
+    (await insoservices.requestGroup.create({ parentId, name, konnectRouteId, ...extraFields }))._id;
 
-  const rootFolderId = await ensureFolder(workspaceId, gatewayName, `ai:${gatewayId}:root`);
+  // Prototype convenience: starter tests on the root folder (applies to every route beneath it), set only when
+  // the folder is first created so edits survive re-sync, and a delete + re-add of the gateway brings them back.
+  const rootFolderId = await ensureFolder(workspaceId, gatewayName, `ai:${gatewayId}:root`, {
+    afterResponseScript: AI_GATEWAY_STARTER_AFTER_RESPONSE_SCRIPT,
+  });
 
   for (const [routePath, routeModels] of groupModelsByPath(gatewayModels)) {
     const routeFolderId = await ensureFolder(rootFolderId, routePath, `ai:${gatewayId}:${routePath}`);
