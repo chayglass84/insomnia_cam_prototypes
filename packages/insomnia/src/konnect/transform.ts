@@ -429,6 +429,31 @@ export function groupModelsByPath(models: AiGatewayModel[]): [string, AiGatewayM
   return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b));
 }
 
+/**
+ * Starter after-response tests put on a gateway's root folder: a valid, non-empty reply and a total-token cap.
+ * Reads usage straight from the response JSON, handling both Anthropic and OpenAI field names.
+ */
+export const AI_GATEWAY_STARTER_AFTER_RESPONSE_SCRIPT = `insomnia.test('Got a valid response', () => {
+  insomnia.expect(insomnia.response.code).to.equal(200);
+
+  // Anthropic-format models return content blocks; OpenAI-format models return choices.
+  const body = insomnia.response.json();
+  const text = body.content
+    ? body.content.filter(b => b.type === 'text').map(b => b.text).join('')
+    : body.choices?.[0]?.message?.content;
+
+  insomnia.expect(text).to.be.a('string').and.not.be.empty;
+});
+
+insomnia.test('Uses under 500 tokens', () => {
+  const usage = insomnia.response.json().usage;
+  const tokensIn = usage.input_tokens ?? usage.prompt_tokens ?? 0;
+  const tokensOut = usage.output_tokens ?? usage.completion_tokens ?? 0;
+
+  insomnia.expect(tokensIn + tokensOut, \`used \${tokensIn} in + \${tokensOut} out\`).to.be.below(500);
+});
+`;
+
 const AI_DEFAULT_MAX_TOKENS = 4096;
 const AI_DEFAULT_SYSTEM_PROMPT = 'Be a helpful assistant.';
 const AI_DEFAULT_FIRST_PROMPT = 'Tell me how Kong AI Gateway can help me, in five concise bullet points.';

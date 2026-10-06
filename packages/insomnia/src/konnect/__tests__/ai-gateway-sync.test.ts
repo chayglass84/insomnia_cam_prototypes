@@ -114,3 +114,32 @@ describe('AI Gateway environment', () => {
     expect(after.data.my_api_key).toBe('secret');
   });
 });
+
+describe('AI Gateway starter tests', () => {
+  const getRootFolder = async () => {
+    const folders = await db.find(models.requestGroup.type, { konnectRouteId: 'ai:gw-1:root' });
+    return folders[0];
+  };
+
+  it('puts starter after-response tests on the root folder on first sync', async () => {
+    vi.stubGlobal('fetch', mockFetch());
+    await syncKonnect({ pat: 'kpat_test', organizationId: ORG_ID });
+
+    const script = (await getRootFolder()).afterResponseScript;
+    expect(script).toContain("insomnia.test('Got a valid response'");
+    expect(script).toContain("insomnia.test('Uses under 500 tokens'");
+    // The generated script must be valid JavaScript, not just text that looks right.
+    expect(() => new Function(script)).not.toThrow();
+  });
+
+  it('does not overwrite an edited script on re-sync', async () => {
+    vi.stubGlobal('fetch', mockFetch());
+    await syncKonnect({ pat: 'kpat_test', organizationId: ORG_ID });
+
+    const folder = await getRootFolder();
+    await insoservices.requestGroup.update(folder, { afterResponseScript: '// mine' });
+
+    await syncKonnect({ pat: 'kpat_test', organizationId: ORG_ID });
+    expect((await getRootFolder()).afterResponseScript).toBe('// mine');
+  });
+});
