@@ -869,7 +869,7 @@ async function ensureAiGatewayTree(
   });
 
   for (const [routePath, routeModels] of groupModelsByPath(gatewayModels)) {
-    const routeFolderId = await ensureFolder(rootFolderId, routePath, `ai:${gatewayId}:${routePath}`);
+    const routeFolderId = await ensureFolder(rootFolderId, `Route: ${routePath}`, `ai:${gatewayId}:${routePath}`);
     const key = `ai:${gatewayId}:${routePath}`;
     const existing = (
       await db.find<Request>(models.request.type, { parentId: routeFolderId, konnectRouteKey: key })

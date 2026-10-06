@@ -305,7 +305,28 @@ export const Runner: FC = () => {
   });
 
   const submit = useSubmit();
+  // Past this many total runs (requests x models x iterations) an AI Gateway evaluation asks first; it can still proceed.
+  const AI_GATEWAY_RUN_WARNING_THRESHOLD = 20;
   const onRun = () => {
+    if (isRunning) {
+      return;
+    }
+    const requestCount =
+      selectedKeys === 'all' ? reqList.length : reqList.filter(item => selectedKeys.has(item.id)).length;
+    const totalRuns = requestCount * chosenModels.length * iterationCount;
+    if (gatewayModels && totalRuns > AI_GATEWAY_RUN_WARNING_THRESHOLD) {
+      showModal(AlertModal, {
+        title: `Start ${totalRuns} runs?`,
+        message: `${requestCount} ${requestCount === 1 ? 'request' : 'requests'} × ${chosenModels.length} ${chosenModels.length === 1 ? 'model' : 'models'}${iterationCount > 1 ? ` × ${iterationCount} iterations` : ''} makes ${totalRuns} runs, which can take a while and cost real money. Do you want to continue?`,
+        addCancel: true,
+        okLabel: 'Run anyway',
+        onConfirm: startRun,
+      });
+      return;
+    }
+    startRun();
+  };
+  const startRun = () => {
     if (isRunning) {
       return;
     }
@@ -870,7 +891,6 @@ export const Runner: FC = () => {
                     models={gatewayModels}
                     selectedModelIds={selectedModelIds}
                     onModelsChange={setSelectedModelIds}
-                    iterations={iterationCount}
                     disabled={isRunning}
                   />
                 </TabPanel>

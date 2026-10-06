@@ -42,7 +42,10 @@ export const RequestResultCard: FC<Props> = ({
   const statusCode = 'status' in item ? item.statusCode : item.responseCode;
   const statusMessage = 'status' in item ? item.statusMessage : item.responseMessage;
   const errorMessage = 'status' in item ? item.errorMessage : undefined;
-  const tag = getRunnerStatusTag({ status, statusCode, statusMessage });
+  const baseTag = getRunnerStatusTag({ status, statusCode, statusMessage });
+  // A gateway declining a cross-format pair is its configuration, not a failure, so don't paint it red.
+  const gatewayNote = item.aiGateway?.gatewayNote;
+  const tag = gatewayNote ? { ...baseTag, className: 'bg-amber-600' } : baseTag;
   const stats = formatResponseStats(item);
   const results = item.results ?? [];
   const passedTests = results.filter(result => result.status === 'passed').length;
@@ -101,6 +104,11 @@ export const RequestResultCard: FC<Props> = ({
           {isSkipped && statusMessage && <div className="text-sm text-neutral-400">{statusMessage}</div>}
           {showInlineStats && <div className="text-sm text-neutral-400">{stats}</div>}
           {showError && <div className="text-sm text-red-500">{errorMessage}</div>}
+          {gatewayNote && (
+            <div className="text-sm text-amber-500" data-testid="runner-gateway-note">
+              {gatewayNote}
+            </div>
+          )}
         </div>
         {showSkip && (
           <Button

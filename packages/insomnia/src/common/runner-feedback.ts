@@ -104,6 +104,8 @@ export interface ModelRunSummary {
   outputTokens: number;
   /** Total USD for the model's runs, or null when none were priced. */
   costUsd: number | null;
+  /** Runs the gateway declined (a configuration choice); they have no tests and are left out of the pass rate. */
+  gatewayDeclined: number;
   passedTests: number;
   totalTests: number;
   /** Share of tests passed, 0-1, or null when the model's runs had no tests. */
@@ -133,6 +135,7 @@ export const summarizeModelRuns = (rows: RunnerResultPerRequest[]): ModelRunSumm
       inputTokens: 0,
       outputTokens: 0,
       costUsd: null,
+      gatewayDeclined: 0,
       passedTests: 0,
       totalTests: 0,
       passRate: null,
@@ -143,6 +146,9 @@ export const summarizeModelRuns = (rows: RunnerResultPerRequest[]): ModelRunSumm
     summary.outputTokens += info.outputTokens ?? 0;
     if (info.costUsd !== undefined) {
       summary.costUsd = (summary.costUsd ?? 0) + info.costUsd;
+    }
+    if (info.gatewayNote) {
+      summary.gatewayDeclined += 1;
     }
     summary.passedTests += (row.results ?? []).filter(result => result.status === 'passed').length;
     summary.totalTests += (row.results ?? []).length;
