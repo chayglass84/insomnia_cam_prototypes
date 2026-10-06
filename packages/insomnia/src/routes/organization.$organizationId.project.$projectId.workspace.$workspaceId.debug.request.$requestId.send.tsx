@@ -17,6 +17,7 @@ import { CONTENT_TYPE_GRAPHQL } from '~/common/constants';
 import { getContentDispositionHeader } from '~/common/misc';
 import { parseGraphQLReqeustBody } from '~/common/utils/graph-ql';
 import { invariant } from '~/common/utils/invariant';
+import { applyAiGatewayModelOverride } from '~/konnect/transform';
 import type { ResponsePatch } from '~/main/network/libcurl-promise';
 import type { TimingStep } from '~/main/network/request-timing';
 import {
@@ -114,6 +115,8 @@ export const sendActionImplementation = async (options: {
   userUploadEnvironment?: UserUploadEnvironment;
   transientVariables?: Environment;
   runtime?: SendActionRuntime;
+  /** Collection runner only: retarget this gateway chat request at another catalog model for this send. */
+  aiGatewayModelId?: string;
 }): Promise<{ nextRequestIdOrName: string | undefined; skipped?: boolean } | undefined> => {
   const {
     requestId,
@@ -125,10 +128,36 @@ export const sendActionImplementation = async (options: {
     iterationCount,
     transientVariables: nullableTransientVariables,
     runtime = defaultSendActionRuntime,
+    aiGatewayModelId,
   } = options;
 
   window.main.startExecution({ requestId });
-  const requestData = await fetchRequestData(requestId);
+  const fetchedRequestData = await fetchRequestData(requestId);
+  let requestData = fetchedRequestData;
+  if (aiGatewayModelId) {
+    const catalog = fetchedRequestData.workspace.konnectAiGatewayModels ?? [];
+    const target = catalog.find(model => model.id === aiGatewayModelId);
+    const override = target
+      ? applyAiGatewayModelOverride(fetchedRequestData.request, target, catalog)
+      : { skipReason: 'Model is no longer in the gateway catalog' };
+    if ('skipReason' in override) {
+      // Reuse the runner's existing "skipped" handling and surface the reason on the result row.
+      if (testResultCollector) {
+        testResultCollector.statusMessage = override.skipReason;
+      }
+      window.main.completeExecutionStep({ requestId });
+      return { nextRequestIdOrName: undefined, skipped: true };
+    }
+    requestData = {
+      ...fetchedRequestData,
+      request: {
+        ...fetchedRequestData.request,
+        url: override.url,
+        headers: override.headers,
+        body: { ...fetchedRequestData.request.body, text: override.bodyText },
+      },
+    };
+  }
   const requestMeta = await services.requestMeta.getOrCreateByParentId(requestId);
   const transientVariables = nullableTransientVariables || {
     ...models.environment.init(),

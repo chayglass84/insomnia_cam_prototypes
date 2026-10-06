@@ -1,5 +1,6 @@
 import type { AiGatewayModel, KonnectDeploymentType } from 'insomnia-data';
 
+import { parseChatRequestBody } from '../common/chat-request';
 import type { KonnectControlPlane, KonnectProxyUrl, KonnectRoute } from './api';
 
 // ─── Template injection sanitisation ─────────────────────────────────────────
@@ -490,4 +491,55 @@ export function getAiGatewayModelSuggestions(requestUrl: string, models: AiGatew
     return null;
   }
   return [...new Set(matches.flatMap(m => m.routeModelValues))];
+}
+
+export type AiGatewayModelOverride =
+  | { url: string; bodyText: string; headers: { name: string; value: string }[] }
+  | { skipReason: string };
+
+/**
+ * Rewrites a gateway chat request so it runs against `target` (used by the collection runner to compare
+ * models): swaps the route path, sets the body `model` to the route's model value, and turns streaming off so
+ * the response is plain JSON with `usage`. Returns a skip reason when the request can't be retargeted —
+ * unknown route, non-chat body, or a different request format (the body shapes differ per format).
+ */
+export function applyAiGatewayModelOverride(
+  request: { url: string; headers?: { name: string; value: string; disabled?: boolean }[]; body?: { text?: string } },
+  target: AiGatewayModel,
+  catalog: AiGatewayModel[],
+): AiGatewayModelOverride {
+  // Strip scheme + host; a templated host like `{{ _.proxy_host }}` contains no `/`.
+  const rest = request.url.replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]*/i, '');
+  const hostPart = request.url.slice(0, request.url.length - rest.length);
+  const pathname = rest.split('?')[0];
+  const currentRoute = catalog
+    .flatMap(m => m.paths)
+    .filter(path => pathname === path || pathname.startsWith(`${path}/`))
+    .sort((a, b) => b.length - a.length)[0];
+  if (!currentRoute) {
+    return { skipReason: 'Request URL does not match a gateway route' };
+  }
+
+  const parsed = request.body?.text ? parseChatRequestBody(request.body.text) : null;
+  if (!parsed) {
+    return { skipReason: 'Request body is not a chat request' };
+  }
+  if (parsed.format !== target.format) {
+    return { skipReason: `${parsed.format} request cannot run on a ${target.format}-format model` };
+  }
+  const targetPath = target.paths[0];
+  const modelValue = target.routeModelValues[0];
+  if (!targetPath || !modelValue) {
+    return { skipReason: `${target.displayName} has no route path or model value` };
+  }
+
+  const body = { ...JSON.parse(request.body!.text!), model: modelValue, stream: false };
+  return {
+    url: `${hostPart}${targetPath}${rest.slice(currentRoute.length)}`,
+    bodyText: JSON.stringify(body, null, 2),
+    // Streaming is off, so don't ask for an event stream back.
+    headers: (request.headers ?? []).map(h =>
+      h.name.toLowerCase() === 'accept' ? { ...h, value: 'application/json' } : h,
+    ),
+  };
 }

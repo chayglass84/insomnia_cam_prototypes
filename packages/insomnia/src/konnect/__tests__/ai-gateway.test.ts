@@ -1,7 +1,12 @@
 import type { AiGatewayModel } from 'insomnia-data';
 import { describe, expect, it } from 'vitest';
 
-import { buildAiGatewayRequestSpec, getAiGatewayModelSuggestions, groupModelsByPath } from '../transform';
+import {
+  applyAiGatewayModelOverride,
+  buildAiGatewayRequestSpec,
+  getAiGatewayModelSuggestions,
+  groupModelsByPath,
+} from '../transform';
 
 const model = (overrides: Partial<AiGatewayModel>): AiGatewayModel => ({
   id: 'm',
@@ -81,5 +86,66 @@ describe('getAiGatewayModelSuggestions', () => {
 
   it('returns null when no route matches', () => {
     expect(getAiGatewayModelSuggestions('http://localhost:8000/elsewhere', models)).toBeNull();
+  });
+});
+
+describe('applyAiGatewayModelOverride', () => {
+  const catalog = [opus, fable, sonnet];
+  const request = {
+    url: 'http://{{ _.proxy_host }}/anthropic/v1/messages?x=1',
+    headers: [
+      { name: 'Content-Type', value: 'application/json' },
+      { name: 'Accept', value: 'text/event-stream' },
+    ],
+    body: {
+      text: JSON.stringify({
+        model: 'opus',
+        stream: true,
+        max_tokens: 4096,
+        system: 'Hi',
+        messages: [{ role: 'user', content: 'Q' }],
+      }),
+    },
+  };
+
+  it('retargets path and model, turns streaming off, keeps the rest of the body and the query', () => {
+    const result = applyAiGatewayModelOverride(request, sonnet, catalog);
+    expect('skipReason' in result).toBe(false);
+    if ('skipReason' in result) {
+      return;
+    }
+    expect(result.url).toBe('http://{{ _.proxy_host }}/other-anthropic/v1/messages?x=1');
+    expect(JSON.parse(result.bodyText)).toMatchObject({
+      model: 'sonnet',
+      stream: false,
+      max_tokens: 4096,
+      system: 'Hi',
+    });
+    expect(result.headers.find(h => h.name === 'Accept')?.value).toBe('application/json');
+  });
+
+  it('keeps the same route when the target shares it', () => {
+    const result = applyAiGatewayModelOverride(request, fable, catalog);
+    if ('skipReason' in result) {
+      throw new Error(result.skipReason);
+    }
+    expect(result.url).toBe('http://{{ _.proxy_host }}/anthropic/v1/messages?x=1');
+    expect(JSON.parse(result.bodyText).model).toBe('fable');
+  });
+
+  it('skips when the target has a different format', () => {
+    const gpt = model({ id: 'gpt', format: 'openai', paths: ['/openai'], routeModelValues: ['gpt'] });
+    expect(applyAiGatewayModelOverride(request, gpt, [...catalog, gpt])).toEqual({
+      skipReason: 'anthropic request cannot run on a openai-format model',
+    });
+  });
+
+  it('skips when the URL matches no route or the body is not a chat request', () => {
+    expect(applyAiGatewayModelOverride({ ...request, url: 'http://localhost:8000/elsewhere' }, opus, catalog)).toEqual({
+      skipReason: 'Request URL does not match a gateway route',
+    });
+    expect(applyAiGatewayModelOverride({ ...request, body: { text: '{"hello":1}' } }, opus, catalog)).toEqual({
+      skipReason: 'Request body is not a chat request',
+    });
   });
 });

@@ -33,6 +33,7 @@ import { buildRunnerItemKey, type RunnerItemStatus, type RunnerLiveItem } from '
 import { invariant } from '~/common/utils/invariant';
 import { defaultSendActionRuntime } from '~/network/network';
 import { useRootLoaderData } from '~/root';
+import { useWorkspaceLoaderData } from '~/routes/organization.$organizationId.project.$projectId.workspace.$workspaceId';
 import type { CollectionRunnerContext } from '~/routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request.$requestId.send';
 import { sendActionImplementation } from '~/routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request.$requestId.send';
 import { AnalyticsEvent } from '~/ui/analytics';
@@ -47,6 +48,7 @@ import { CLIPreviewModal } from '~/ui/components/modals/cli-preview-modal';
 import { UploadDataModal, type UploadDataType } from '~/ui/components/modals/upload-runner-data-modal';
 import { Pane, PaneBody, PaneHeader } from '~/ui/components/panes/pane';
 import { RunnerLiveProgressPane } from '~/ui/components/panes/runner-live-progress-pane';
+import { RunnerModelsPanel } from '~/ui/components/panes/runner-models-panel';
 import { RunnerResultHistoryPane } from '~/ui/components/panes/runner-result-history-pane';
 import { RunnerTestResultPane } from '~/ui/components/panes/runner-test-result-pane';
 import { getTimeAndUnit } from '~/ui/components/tags/time-tag';
@@ -144,6 +146,8 @@ export interface RequestRow {
   method: string;
   url: string;
   parentId: string;
+  /** AI Gateway collections: run this request against this catalog model (see applyAiGatewayModelOverride). */
+  modelId?: string;
 }
 
 const defaultAdvancedConfig = {
@@ -201,6 +205,12 @@ export const Runner: FC = () => {
   }, [delay]);
 
   const { reqList, requestRows, entityMap } = useRunnerRequestList(organizationId, targetFolderId, runnerId);
+
+  // AI Gateway collections (3593AI): each selected request also fans out across the selected catalog models.
+  const { activeWorkspace } = useWorkspaceLoaderData()!;
+  const gatewayModels = activeWorkspace.konnectAiGatewayModels?.filter(model => model.enabled) ?? null;
+  const [selectedModelIds, setSelectedModelIds] = useState<string[] | null>(null);
+  const chosenModels = gatewayModels?.filter(model => !selectedModelIds || selectedModelIds.includes(model.id)) ?? [];
 
   useEffect(() => {
     if (settings.forceVerticalLayout) {
@@ -294,7 +304,13 @@ export const Runner: FC = () => {
     });
 
     updateTabById?.(buildRunnerTabId(workspaceId, targetFolderId), { temporary: false });
-    const requests = selectedKeys === 'all' ? reqList : reqList.filter(item => (selectedKeys as Set<Key>).has(item.id));
+    const selectedRequests =
+      selectedKeys === 'all' ? reqList : reqList.filter(item => (selectedKeys as Set<Key>).has(item.id));
+    const requests = gatewayModels
+      ? selectedRequests.flatMap(req =>
+          chosenModels.map(model => ({ ...req, name: `${req.name} · ${model.displayName}`, modelId: model.id })),
+        )
+      : selectedRequests;
 
     // convert uploadData to environment data
     const userUploadEnvs = uploadData.map(data => {
@@ -491,7 +507,10 @@ export const Runner: FC = () => {
   const disabledKeys = useMemo(() => {
     return isRunning ? allKeys : [];
   }, [isRunning, allKeys]);
-  const isDisabled = isRunning || (selectedKeys !== 'all' && Array.from(selectedKeys).length === 0);
+  const isDisabled =
+    isRunning ||
+    (selectedKeys !== 'all' && Array.from(selectedKeys).length === 0) ||
+    (gatewayModels !== null && chosenModels.length === 0);
 
   useDocBodyKeyboardShortcuts({
     request_send: () => {
@@ -632,7 +651,11 @@ export const Runner: FC = () => {
                 </div>
               </Heading>
             </PaneHeader>
-            <Tabs aria-label="Request group tabs" className="flex h-full w-full flex-1 flex-col">
+            <Tabs
+              aria-label="Request group tabs"
+              className="flex h-full w-full flex-1 flex-col"
+              defaultSelectedKey={gatewayModels ? 'models' : undefined}
+            >
               <TabList
                 className="flex h-(--line-height-sm) w-full shrink-0 items-center overflow-x-auto border-b border-solid border-b-(--hl-md) bg-(--color-bg)"
                 aria-label="Request pane tabs"
@@ -651,6 +674,15 @@ export const Runner: FC = () => {
                   <i className="fa fa-gear fa-1x mr-2 h-4" />
                   Advanced
                 </Tab>
+                {gatewayModels && (
+                  <Tab
+                    className="flex h-full shrink-0 cursor-pointer items-center justify-between gap-2 px-3 py-1 text-(--hl) outline-hidden transition-colors duration-300 select-none hover:bg-(--hl-sm) hover:text-(--color-font) focus:bg-(--hl-sm) aria-selected:bg-(--hl-xs) aria-selected:text-(--color-font) aria-selected:hover:bg-(--hl-sm) aria-selected:focus:bg-(--hl-sm)"
+                    id="models"
+                  >
+                    <i className="fa fa-robot fa-1x mr-2 h-4" />
+                    Models
+                  </Tab>
+                )}
               </TabList>
               <TabPanel className="flex w-full flex-1 flex-col overflow-hidden" id="request-order">
                 <Toolbar className="flex h-(--line-height-sm) w-full shrink-0 items-center border-b border-solid border-(--hl-md) px-2">
@@ -795,6 +827,17 @@ export const Runner: FC = () => {
                   </div>
                 </div>
               </TabPanel>
+              {gatewayModels && (
+                <TabPanel className="flex w-full flex-1 flex-col overflow-hidden" id="models">
+                  <RunnerModelsPanel
+                    models={gatewayModels}
+                    selectedIds={selectedModelIds}
+                    onChange={setSelectedModelIds}
+                    disabled={isRunning}
+                    requestCount={selectedKeys === 'all' ? reqList.length : Array.from(selectedKeys).length}
+                  />
+                </TabPanel>
+              )}
             </Tabs>
             {showCLIModal && (
               <CLIPreviewModal
@@ -1121,6 +1164,7 @@ export async function clientAction({ request, params }: Route.ClientActionArgs) 
             testResultCollector: resultCollector,
             runtime,
             transientVariables: testCtx.transientVariables,
+            aiGatewayModelId: targetRequest.modelId,
           });
           if (execution?.nextRequestIdOrName) {
             nextRequestIdOrName = execution.nextRequestIdOrName || '';
