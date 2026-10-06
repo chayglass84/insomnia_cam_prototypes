@@ -6,6 +6,8 @@ import {
   buildAiGatewayRequestSpec,
   findCatalogModelByRequest,
   findCatalogModelByResponseModel,
+  formatMismatchNote,
+  gatewayErrorText,
   getAiGatewayModelSuggestions,
   groupModelsByPath,
   isRotatingModel,
@@ -141,12 +143,14 @@ describe('applyAiGatewayModelOverride', () => {
     expect(JSON.parse(result.bodyText).model).toBe('fable');
   });
 
-  it('skips when the target has a different format', () => {
+  it('sends a request of a different format anyway and flags the mismatch for the caller', () => {
     const gpt = model({ id: 'gpt', format: 'openai', paths: ['/openai'], routeModelValues: ['gpt'] });
     const result = applyAiGatewayModelOverride(request, gpt, [...catalog, gpt]);
-    expect('skipReason' in result && result.skipReason).toBe(
-      "This request uses the anthropic format, but gpt (target) uses the openai format, and the two request bodies aren't compatible.",
-    );
+    expect('skipReason' in result).toBe(false);
+    expect(result).toMatchObject({
+      url: 'http://{{ _.proxy_host }}/openai/v1/messages?x=1',
+      formatMismatch: { from: 'anthropic', to: 'openai' },
+    });
   });
 
   it('skips when the URL matches no route or the body is not a chat request', () => {
@@ -410,5 +414,20 @@ describe('priceChatTurn', () => {
   it('reports no price rather than zero, and nothing outside a gateway workspace', () => {
     expect(priceChatTurn({ model: 'mystery', usage }, {}, [priced])).toEqual({ costUsd: null, costNote: 'no-price' });
     expect(priceChatTurn({ model: 'x', usage }, {}, [])).toEqual({ costUsd: null });
+  });
+});
+
+describe('gateway rejection notes', () => {
+  it('pulls the gateway message out of common error body shapes, trimmed', () => {
+    expect(gatewayErrorText('{"error":{"message":"bad format"}}')).toBe('bad format');
+    expect(gatewayErrorText('{"message":"no Route matched"}')).toBe('no Route matched');
+    expect(gatewayErrorText('plain text')).toBe('plain text');
+    expect(gatewayErrorText(new TextEncoder().encode(`{"message":"${'x'.repeat(400)}"}`))).toHaveLength(301);
+  });
+
+  it('frames a rejection as a gateway configuration choice', () => {
+    const note = formatMismatchNote({ from: 'anthropic', to: 'openai' }, 400, 'bad format');
+    expect(note).toContain('anthropic-format request for a model that uses the openai format (HTTP 400: bad format)');
+    expect(note).toContain('gateway configuration choice');
   });
 });

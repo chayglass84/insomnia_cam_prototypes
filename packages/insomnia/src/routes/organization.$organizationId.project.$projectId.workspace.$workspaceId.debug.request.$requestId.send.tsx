@@ -19,7 +19,12 @@ import { CONTENT_TYPE_GRAPHQL } from '~/common/constants';
 import { getContentDispositionHeader } from '~/common/misc';
 import { parseGraphQLReqeustBody } from '~/common/utils/graph-ql';
 import { invariant } from '~/common/utils/invariant';
-import { applyAiGatewayModelOverride, withUsageFromResponseBody } from '~/konnect/transform';
+import {
+  applyAiGatewayModelOverride,
+  formatMismatchNote,
+  gatewayErrorText,
+  withUsageFromResponseBody,
+} from '~/konnect/transform';
 import type { ResponsePatch } from '~/main/network/libcurl-promise';
 import type { TimingStep } from '~/main/network/request-timing';
 import {
@@ -139,6 +144,7 @@ export const sendActionImplementation = async (options: {
   const fetchedRequestData = await fetchRequestData(requestId);
   let requestData = fetchedRequestData;
   let aiGatewayTarget: AiGatewayModel | undefined;
+  let aiGatewayFormatMismatch: { from: string; to: string } | undefined;
   if (aiGatewayModelId) {
     const catalog = fetchedRequestData.workspace.konnectAiGatewayModels ?? [];
     const target = catalog.find(model => model.id === aiGatewayModelId);
@@ -154,6 +160,7 @@ export const sendActionImplementation = async (options: {
       window.main.completeExecutionStep({ requestId });
       return { nextRequestIdOrName: undefined, skipped: true };
     }
+    aiGatewayFormatMismatch = override.formatMismatch;
     requestData = {
       ...fetchedRequestData,
       request: {
@@ -343,6 +350,16 @@ export const sendActionImplementation = async (options: {
         bodyBuffer,
         aiGatewayTarget,
       );
+      const rejectedStatus = testResultCollector.statusCode;
+      if (aiGatewayFormatMismatch && rejectedStatus >= 300 && rejectedStatus < 600) {
+        // The gateway declined a cross-format pair. That's its configuration, so show its reason and don't count the
+        // request's tests (written for a successful reply) against the model.
+        testResultCollector.aiGateway = {
+          ...testResultCollector.aiGateway,
+          gatewayNote: formatMismatchNote(aiGatewayFormatMismatch, rejectedStatus, gatewayErrorText(bodyBuffer)),
+        };
+        testResultCollector.results = [];
+      }
     }
   }
   const responsePatch = postMutatedContext

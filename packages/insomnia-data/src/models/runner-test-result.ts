@@ -33,6 +33,8 @@ export interface AiGatewayRunInfo {
   rotating?: boolean;
   inputTokens?: number;
   outputTokens?: number;
+  /** Set when the gateway rejected a request whose format differs from the target model's: a gateway configuration choice, not a failure. */
+  gatewayNote?: string;
   /** USD for this run, from the model's Konnect price at send time. Absent when no price is known. */
   costUsd?: number;
 }

@@ -1,9 +1,10 @@
 import type { AiGatewayModel } from 'insomnia-data';
-import type { FC } from 'react';
+import React, { type FC } from 'react';
 import { Button } from 'react-aria-components';
 
 import type { RequestRow } from '~/routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.runner';
 
+import { Tooltip } from '../tooltip';
 import { RunnerModelsPanel } from './runner-models-panel';
 
 interface Props {
@@ -14,7 +15,6 @@ interface Props {
   /** null means every model is selected. */
   selectedModelIds: string[] | null;
   onModelsChange: (ids: string[]) => void;
-  iterations: number;
   disabled?: boolean;
 }
 
@@ -29,7 +29,7 @@ const SectionHeader: FC<{
   disabled?: boolean;
 }> = ({ title, selected, total, onSelectAll, onDeselectAll, disabled }) => (
   <div className="flex items-baseline gap-3">
-    <h3 className="text-xs font-bold text-(--hl) uppercase">{title}</h3>
+    <h3 className="text-sm font-bold text-(--hl) uppercase">{title}</h3>
     <span className="text-xs text-(--hl)">
       {selected} of {total} selected
     </span>
@@ -55,46 +55,31 @@ export const RunnerEvaluatePanel: FC<Props> = ({
   models,
   selectedModelIds,
   onModelsChange,
-  iterations,
   disabled,
 }) => {
   const requestIds = requests.map(request => request.id);
+  // Grouped by where they live (collection, then folders), keeping the collection's own order within a folder.
+  const folderPath = (request: RequestRow) => request.ancestors.map(ancestor => ancestor.name).join('\u0000');
+  const sortedRequests = requests
+    .map((request, index) => ({ request, index }))
+    .sort((a, b) => folderPath(a.request).localeCompare(folderPath(b.request)) || a.index - b.index)
+    .map(({ request }) => request);
   const selectedRequests = new Set(selectedRequestIds);
   const modelCount = selectedModelIds
     ? models.filter(model => selectedModelIds.includes(model.id)).length
     : models.length;
   const requestCount = requests.filter(request => selectedRequests.has(request.id)).length;
-  const runs = requestCount * modelCount * iterations;
 
   const toggleRequest = (id: string) =>
     onRequestsChange(requestIds.filter(requestId => (requestId === id) !== selectedRequests.has(requestId)));
 
   return (
     <div className="flex flex-col gap-5 overflow-y-auto p-4 text-sm">
-      <div className="flex flex-col gap-1">
-        <p className="text-(--hl)">
-          Pick the requests (prompts) to run and the models to run them against. Every selected request runs once on
-          every selected model, so choose requests with different prompts. A rotating alias appears once; the gateway
-          chooses which upstream model answers.
-        </p>
-        <p data-testid="runner-run-count">
-          {requestCount === 0 ? (
-            <span className="font-semibold text-(--color-warning)">Pick at least one request to run.</span>
-          ) : modelCount === 0 ? (
-            <span className="font-semibold text-(--color-warning)">Pick at least one model.</span>
-          ) : (
-            <>
-              <strong>{runs}</strong> {runs === 1 ? 'run' : 'runs'}
-              <span className="text-(--hl)">
-                {' '}
-                = {requestCount} {requestCount === 1 ? 'request' : 'requests'} × {modelCount}{' '}
-                {modelCount === 1 ? 'model' : 'models'}
-                {iterations > 1 ? ` × ${iterations} iterations` : ''}
-              </span>
-            </>
-          )}
-        </p>
-      </div>
+      <p className="text-(--hl)">
+        Pick the requests (prompts) to run and the models to run them against. Every selected request runs once on every
+        selected model, so choose requests with different prompts. A rotating alias appears once; the gateway chooses
+        which upstream model answers.
+      </p>
 
       <section className="flex flex-col gap-2">
         <SectionHeader
@@ -105,24 +90,48 @@ export const RunnerEvaluatePanel: FC<Props> = ({
           onDeselectAll={() => onRequestsChange([])}
           disabled={disabled}
         />
-        {requests.length === 0 && <span className="text-(--hl)">This collection has no requests.</span>}
-        {requests.map(request => (
-          <label key={request.id} className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              disabled={disabled}
-              checked={selectedRequests.has(request.id)}
-              onChange={() => toggleRequest(request.id)}
-            />
-            <span className={`text-xs uppercase http-method-${request.method}`}>{request.method}</span>
-            <span className="font-semibold">{request.name}</span>
-            {request.ancestors.length > 0 && (
-              <span className="text-xs text-(--hl)">
-                {request.ancestors.map(ancestor => ancestor.name).join(' / ')}
-              </span>
-            )}
-          </label>
-        ))}
+        <div className="flex flex-col gap-2 pl-4">
+          {requests.length === 0 && <span className="text-(--hl)">This collection has no requests.</span>}
+          {sortedRequests.map(request => {
+            const [collection, ...folders] = request.ancestors;
+            const row = (
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  disabled={disabled}
+                  checked={selectedRequests.has(request.id)}
+                  onChange={() => toggleRequest(request.id)}
+                />
+                <span className={`text-xs uppercase http-method-${request.method}`}>{request.method}</span>
+                <span className="font-semibold">{request.name}</span>
+              </label>
+            );
+            // Where the request lives is a hover detail, one labelled line per level, so names containing slashes
+            // (routes) don't clutter the row.
+            return collection ? (
+              <Tooltip
+                key={request.id}
+                followCursor
+                message={
+                  <div className="flex flex-col gap-0.5 text-left">
+                    <span>
+                      <strong>Collection:</strong> {collection.name}
+                    </span>
+                    {folders.map(folder => (
+                      <span key={folder.id}>
+                        <strong>Folder:</strong> {folder.name}
+                      </span>
+                    ))}
+                  </div>
+                }
+              >
+                {row}
+              </Tooltip>
+            ) : (
+              <React.Fragment key={request.id}>{row}</React.Fragment>
+            );
+          })}
+        </div>
       </section>
 
       <section className="flex flex-col gap-2">
@@ -134,12 +143,14 @@ export const RunnerEvaluatePanel: FC<Props> = ({
           onDeselectAll={() => onModelsChange([])}
           disabled={disabled}
         />
-        <RunnerModelsPanel
-          models={models}
-          selectedIds={selectedModelIds}
-          onChange={onModelsChange}
-          disabled={disabled}
-        />
+        <div className="pl-4">
+          <RunnerModelsPanel
+            models={models}
+            selectedIds={selectedModelIds}
+            onChange={onModelsChange}
+            disabled={disabled}
+          />
+        </div>
       </section>
     </div>
   );

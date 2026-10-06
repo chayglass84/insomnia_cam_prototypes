@@ -479,7 +479,7 @@ export interface AiGatewayRequestSpec {
 export function buildAiGatewayRequestSpec(routePath: string, models: AiGatewayModel[]): AiGatewayRequestSpec {
   const model = models.find(m => m.routeModelValues.length > 0) ?? models[0];
   const endpoint = AI_FORMAT_ENDPOINTS[model.format];
-  const name = `Chat — ${routePath}`;
+  const name = routePath;
   if (!endpoint) {
     return {
       name,
@@ -530,14 +530,21 @@ export function getAiGatewayModelSuggestions(requestUrl: string, models: AiGatew
 }
 
 export type AiGatewayModelOverride =
-  | { url: string; bodyText: string; headers: { name: string; value: string }[] }
+  | {
+      url: string;
+      bodyText: string;
+      headers: { name: string; value: string }[];
+      /** The request's body format differs from the target's. Sent anyway: translating is the gateway's job. */
+      formatMismatch?: { from: string; to: string };
+    }
   | { skipReason: string };
 
 /**
  * Rewrites a gateway chat request so it runs against `target` (used by the collection runner to compare
  * models): swaps the route path, sets the body `model` to the route's model value, and turns streaming off so
  * the response is plain JSON with `usage`. Returns a skip reason when the request can't be retargeted —
- * unknown route, non-chat body, or a different request format (the body shapes differ per format).
+ * unknown route or non-chat body. A different request format is NOT a reason to skip: the gateway is expected to
+ * translate, so the request is sent as is and `formatMismatch` lets the caller explain a rejection.
  */
 export function applyAiGatewayModelOverride(
   request: { url: string; headers?: { name: string; value: string; disabled?: boolean }[]; body?: { text?: string } },
@@ -562,11 +569,6 @@ export function applyAiGatewayModelOverride(
   if (!parsed) {
     return { skipReason: "This request's body isn't a chat request, so it can't be pointed at another model." };
   }
-  if (parsed.format !== target.format) {
-    return {
-      skipReason: `This request uses the ${parsed.format} format, but ${target.routeModelValues[0] ?? target.displayName} (${target.targetModel}) uses the ${target.format} format, and the two request bodies aren't compatible.`,
-    };
-  }
   const targetPath = target.paths[0];
   const modelValue = target.routeModelValues[0];
   if (!targetPath || !modelValue) {
@@ -577,6 +579,7 @@ export function applyAiGatewayModelOverride(
 
   const body = { ...JSON.parse(request.body!.text!), model: modelValue, stream: false };
   return {
+    ...(parsed.format !== target.format ? { formatMismatch: { from: parsed.format, to: target.format } } : {}),
     url: `${hostPart}${targetPath}${rest.slice(currentRoute.length)}`,
     bodyText: JSON.stringify(body, null, 2),
     // Streaming is off, so don't ask for an event stream back.
@@ -612,6 +615,33 @@ export const findTargetByResponseModel = (model: AiGatewayModel, responseModel: 
         .filter(target => matchesTarget(responseModel, target))
         .sort((a, b) => b.name.length - a.name.length)[0]
     : undefined;
+
+/** The gateway's own error text from a non-2xx response body (JSON `error.message` / `message`, else the raw start). */
+export function gatewayErrorText(body: string | Uint8Array): string {
+  const text = (typeof body === 'string' ? body : bodyBufferToUtf8(body)).trim();
+  let message = text;
+  try {
+    const parsed = JSON.parse(text);
+    const candidate = parsed?.error?.message ?? parsed?.message ?? parsed?.error;
+    if (typeof candidate === 'string' && candidate) {
+      message = candidate;
+    }
+  } catch {}
+  return message.length > 300 ? `${message.slice(0, 300)}…` : message;
+}
+
+/**
+ * The note shown for a gateway-rejected run of a request whose format differs from the target model's. Phrased as a
+ * gateway configuration outcome, since whether the gateway translates between formats is its setting, not a failure.
+ */
+export const formatMismatchNote = (
+  mismatch: { from: string; to: string },
+  statusCode: number,
+  gatewayMessage: string,
+): string =>
+  `The gateway didn't accept this ${mismatch.from}-format request for a model that uses the ${mismatch.to} format (HTTP ${statusCode}${
+    gatewayMessage ? `: ${gatewayMessage}` : ''
+  }). Whether it translates between formats is a gateway configuration choice, not a failure of the model or request.`;
 
 /**
  * Fills token usage and the provider-reported model into a runner row from the (non-streaming) response body.

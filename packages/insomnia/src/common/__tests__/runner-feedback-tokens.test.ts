@@ -231,3 +231,19 @@ describe('summarizeModelRuns with a rotating alias', () => {
     expect(summaries).toHaveLength(2);
   });
 });
+
+describe('summarizeModelRuns with gateway-declined runs', () => {
+  it('counts declined runs separately and keeps them out of the pass rate', () => {
+    const base = { requestName: 'r', requestUrl: 'u', responseCode: 400 };
+    const summaries = summarizeModelRuns([
+      { ...base, results: [], aiGateway: { route: '/o', alias: 'gpt', model: 'g', gatewayNote: 'declined' } },
+      {
+        ...base,
+        responseCode: 200,
+        results: [{ status: 'passed' }],
+        aiGateway: { route: '/o', alias: 'gpt', model: 'g' },
+      },
+    ] as any);
+    expect(summaries[0]).toMatchObject({ gatewayDeclined: 1, passedTests: 1, totalTests: 1, passRate: 1 });
+  });
+});

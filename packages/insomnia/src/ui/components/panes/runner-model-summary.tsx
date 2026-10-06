@@ -46,6 +46,14 @@ export const RunnerModelSummary: FC<{ summaries: ModelRunSummary[] }> = ({ summa
               >
                 <span className="font-semibold">{summary.alias}</span>{' '}
                 <span className="font-mono text-xs text-(--hl)">{summary.model || 'no response'}</span>
+                {summary.gatewayDeclined > 0 && (
+                  <span
+                    className="ml-2 rounded-sm bg-amber-600/20 px-1.5 text-xs text-amber-500"
+                    title="The gateway declined these requests (e.g. a format it doesn't translate). That's a gateway configuration choice, not a model failure."
+                  >
+                    {summary.gatewayDeclined} declined by gateway
+                  </span>
+                )}
                 {summary.rotating && (
                   <span
                     className="ml-2 rounded-sm bg-(--hl-md) px-1.5 text-xs"
