@@ -94,7 +94,7 @@ describe('summarizeModelRuns', () => {
     expect(ranked[0]).toMatchObject({ outputTokens: 30, model: 'gpt-4.1-nano-2025-04-15' });
   });
 
-  it('ranks by pass rate, then fewest output tokens, with untested models last; ignores skipped rows', () => {
+  it('ranks by pass rate, then fewest output tokens when unpriced, with untested models last; ignores skipped rows', () => {
     const ranked = summarizeModelRuns([
       row('wordy', 'm1', 900, [pass, pass]),
       row('terse', 'm2', 100, [pass, pass]),
@@ -162,5 +162,47 @@ describe('modelAnchorId', () => {
     expect(a).toMatch(/^[a-z0-9-]+$/);
     expect(a).not.toBe(modelAnchorId({ route: '/might-be-openAI', alias: 'nano4.1' }, 2));
     expect(a).not.toBe(modelAnchorId({ route: '/might-be-openAI', alias: '4mini' }, 1));
+  });
+});
+
+describe('summarizeModelRuns ranking with cost', () => {
+  const pass = { status: 'passed' } as any;
+  const fail = { status: 'failed' } as any;
+  const row = (alias: string, results: any[], out: number, costUsd?: number) => ({
+    requestName: 'r',
+    requestUrl: 'u',
+    responseCode: 200,
+    results,
+    aiGateway: {
+      route: '/r',
+      alias,
+      model: alias,
+      inputTokens: 10,
+      outputTokens: out,
+      ...(costUsd === undefined ? {} : { costUsd }),
+    },
+  });
+
+  it('breaks pass-rate ties by cheapest first, even when the cheaper model used more tokens', () => {
+    const ranked = summarizeModelRuns([row('pricey-terse', [pass], 50, 0.05), row('cheap-wordy', [pass], 900, 0.0004)]);
+    expect(ranked.map(s => s.alias)).toEqual(['cheap-wordy', 'pricey-terse']);
+  });
+
+  it('puts a higher pass rate ahead of a cheaper cost', () => {
+    const ranked = summarizeModelRuns([
+      row('cheap-flaky', [pass, fail], 10, 0.0001),
+      row('pricey-solid', [pass, pass], 10, 0.5),
+    ]);
+    expect(ranked.map(s => s.alias)).toEqual(['pricey-solid', 'cheap-flaky']);
+  });
+
+  it('falls back to output tokens when costs tie or are unknown, with unpriced models after priced ones', () => {
+    const ranked = summarizeModelRuns([
+      row('unpriced-small', [pass], 10),
+      row('priced-big', [pass], 500, 0.01),
+      row('priced-same-a', [pass], 300, 0.002),
+      row('priced-same-b', [pass], 100, 0.002),
+    ]);
+    expect(ranked.map(s => s.alias)).toEqual(['priced-same-b', 'priced-same-a', 'priced-big', 'unpriced-small']);
   });
 });
