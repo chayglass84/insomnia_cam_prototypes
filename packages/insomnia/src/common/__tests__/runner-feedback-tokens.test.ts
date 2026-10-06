@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatTokenUsage, summarizeModelRuns, sumTokenUsage } from '../runner-feedback';
+import {
+  formatTokenUsage,
+  groupRowsByModel,
+  modelAnchorId,
+  summarizeModelRuns,
+  sumTokenUsage,
+} from '../runner-feedback';
 
 describe('sumTokenUsage', () => {
   it('sums input and output tokens across rows that reported usage', () => {
@@ -55,5 +61,42 @@ describe('summarizeModelRuns', () => {
       { requestName: 'plain', requestUrl: 'u', responseCode: 200, results: [pass] },
     ]);
     expect(ranked.map(s => s.alias)).toEqual(['terse', 'wordy', 'flaky', 'untested']);
+  });
+});
+
+describe('groupRowsByModel', () => {
+  const info = (alias: string, model: string) => ({ route: '/r', alias, model });
+
+  it('groups by model in order of first appearance and keeps original indexes', () => {
+    const rows = [
+      { id: 'a', aiGateway: info('opus', 'm1') },
+      { id: 'b', aiGateway: info('fable', 'm2') },
+      { id: 'c', aiGateway: info('opus', 'm1') },
+    ];
+    const groups = groupRowsByModel(rows);
+    expect(groups.map(g => g.info?.alias)).toEqual(['opus', 'fable']);
+    expect(groups[0].entries.map(e => [e.row.id, e.index])).toEqual([
+      ['a', 0],
+      ['c', 2],
+    ]);
+  });
+
+  it('puts rows without gateway info in one headingless group', () => {
+    const plainRows: { id: string; aiGateway?: { alias: string; model: string } }[] = [
+      { id: 'plain' },
+      { id: 'also plain' },
+    ];
+    const groups = groupRowsByModel(plainRows);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].info).toBeNull();
+  });
+});
+
+describe('modelAnchorId', () => {
+  it('is a DOM-safe id that differs per iteration and per model', () => {
+    const a = modelAnchorId({ route: '/might-be-openAI', alias: 'nano4.1', model: 'gpt-4.1-nano' }, 1);
+    expect(a).toMatch(/^[a-z0-9-]+$/);
+    expect(a).not.toBe(modelAnchorId({ route: '/might-be-openAI', alias: 'nano4.1', model: 'gpt-4.1-nano' }, 2));
+    expect(a).not.toBe(modelAnchorId({ route: '/might-be-openAI', alias: '4mini', model: 'gpt-4.1-mini' }, 1));
   });
 });

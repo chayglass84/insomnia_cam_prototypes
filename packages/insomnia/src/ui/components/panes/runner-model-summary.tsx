@@ -1,6 +1,6 @@
 import type { FC } from 'react';
 
-import type { ModelRunSummary } from '../../../common/runner-feedback';
+import { modelAnchorId,type ModelRunSummary } from '../../../common/runner-feedback';
 
 const cell = 'px-3 py-1';
 const numberCell = `${cell} text-right tabular-nums`;
@@ -32,8 +32,19 @@ export const RunnerModelSummary: FC<{ summaries: ModelRunSummary[] }> = ({ summa
           >
             <td className={`${cell} font-mono`}>{summary.route || '—'}</td>
             <td className={cell}>
-              <span className="font-semibold">{summary.alias}</span>{' '}
-              <span className="font-mono text-xs text-(--hl)">{summary.model}</span>
+              <button
+                type="button"
+                title="Jump to this model's results"
+                className="cursor-pointer text-left hover:underline"
+                onClick={() =>
+                  document
+                    .getElementById(modelAnchorId(summary, 1))
+                    ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                }
+              >
+                <span className="font-semibold">{summary.alias}</span>{' '}
+                <span className="font-mono text-xs text-(--hl)">{summary.model}</span>
+              </button>
             </td>
             <td className={numberCell}>{summary.inputTokens.toLocaleString()}</td>
             <td className={numberCell}>{summary.outputTokens.toLocaleString()}</td>

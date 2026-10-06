@@ -8,6 +8,7 @@ import { Hotkey } from '~/ui/components/hotkey';
 
 import { RequestResultCard } from './request-result-card';
 import { hasMatchingTestResults, type TargetTestType } from './request-test-result-pane';
+import { RunnerModelGroups } from './runner-model-groups';
 import { RunnerModelSummary } from './runner-model-summary';
 
 const filterClassnames =
@@ -57,31 +58,41 @@ export const RunnerTestResultPane: FC<Props> = ({ result }) => {
     const key = `runner-test-result-iteration-${i + 1}`;
 
     if (Array.isArray(iterationResults)) {
-      const hasVisibleRequest = iterationResults.some(
-        requestTestResult => hasMatchingTestResults(requestTestResult.results ?? [], targetTests, resultFilter),
+      const hasVisibleRequest = iterationResults.some(requestTestResult =>
+        hasMatchingTestResults(requestTestResult.results ?? [], targetTests, resultFilter),
       );
 
       if (!hasVisibleRequest) {
         return null;
       }
 
-      const resultByRequest = iterationResults.map((requestTestResult: RunnerResultPerRequest, reqIndex: number) => {
-        const key = `request-test-result-${reqIndex}`;
-        return (
-          <RequestResultCard
-            key={key}
-            item={requestTestResult}
-            resultFilter={resultFilter}
-            targetTests={targetTests}
-            testId={key}
-            defaultExpanded
-          />
-        );
-      });
+      const resultByRequest = (
+        <RunnerModelGroups
+          rows={iterationResults}
+          iteration={i + 1}
+          isVisible={requestTestResult =>
+            hasMatchingTestResults(requestTestResult.results ?? [], targetTests, resultFilter)
+          }
+          renderRow={(requestTestResult, reqIndex) => {
+            const key = `request-test-result-${reqIndex}`;
+            return (
+              <RequestResultCard
+                key={key}
+                item={requestTestResult}
+                resultFilter={resultFilter}
+                targetTests={targetTests}
+                testId={key}
+                defaultExpanded
+                showModelLabel={!requestTestResult.aiGateway}
+              />
+            );
+          }}
+        />
+      );
 
       return (
         <div key={key} data-testid={key} className="border-b border-dashed border-b-(--hl-md) pt-6 pb-6">
-          <div className="mb-3 pl-3 leading-10 font-bold uppercase"> Iteration {i + 1} </div>
+          <h2 className="mb-3 pl-3 text-base leading-10 font-bold uppercase"> Iteration {i + 1} </h2>
           {resultByRequest}
         </div>
       );
