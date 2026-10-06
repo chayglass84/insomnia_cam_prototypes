@@ -1,20 +1,41 @@
 import type { AiGatewayModel } from 'insomnia-data';
 import type { FC } from 'react';
+import { Button } from 'react-aria-components';
+import { useParams } from 'react-router';
 
 import { groupModelsByPath } from '../../../konnect/transform';
+import { useWorkspaceLoaderData } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId';
+import { useTabNavigate } from '../../hooks/use-insomnia-tab';
+import { Icon } from '../icon';
 
 /** Read-only catalog of the models an AI Gateway exposes, grouped by route (path). Prototype (3593AI). */
 export const AiGatewayModelsPane: FC<{ models: AiGatewayModel[] }> = ({ models }) => {
   const groups = groupModelsByPath(models);
+  const { organizationId } = useParams() as { organizationId: string };
+  const { activeProject, activeWorkspace } = useWorkspaceLoaderData()!;
+  const tabNavigate = useTabNavigate();
+  const openRunner = () =>
+    tabNavigate(
+      { organization: organizationId, project: activeProject, workspace: activeWorkspace, item: activeWorkspace },
+      { shouldNavigate: true, asRunner: true },
+    );
 
   return (
     <div className="flex h-full w-full flex-col gap-4 overflow-y-auto p-4">
-      <div>
-        <h2 className="text-lg font-semibold">AI Gateway models</h2>
-        <p className="text-sm text-(--hl)">
-          {models.length} {models.length === 1 ? 'model' : 'models'} on {groups.length}{' '}
-          {groups.length === 1 ? 'route' : 'routes'}. Synced from Konnect; re-sync to refresh.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-semibold">AI Gateway models</h2>
+          <p className="text-sm text-(--hl)">
+            {models.length} {models.length === 1 ? 'model' : 'models'} on {groups.length}{' '}
+            {groups.length === 1 ? 'route' : 'routes'}. Synced from Konnect; re-sync to refresh.
+          </p>
+        </div>
+        <Button
+          onPress={openRunner}
+          className="flex shrink-0 items-center gap-2 rounded-sm bg-(--color-surprise) px-3 py-1.5 text-sm text-(--color-font-surprise) hover:bg-(--color-surprise)/90 focus:bg-(--color-surprise)/90"
+        >
+          <Icon icon="play" /> Evaluate Multiple Models
+        </Button>
       </div>
       {groups.map(([path, pathModels]) => (
         <section key={path} className="rounded-md border border-solid border-(--hl-md)">
