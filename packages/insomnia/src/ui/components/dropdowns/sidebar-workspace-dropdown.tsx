@@ -224,7 +224,8 @@ export const SidebarWorkspaceDropdown = ({
     items: [
       {
         id: 'RunCollection',
-        name: 'Run API Collection',
+        // Prototype (3593AI): synced AI Gateway collections call the runner the Model Evaluator.
+        name: workspace.konnectAiGatewayModels ? 'Model Evaluator' : 'Run API Collection',
         icon: 'circle-play',
         action: () => openInNewTab(true),
       },
