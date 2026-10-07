@@ -6,6 +6,7 @@ import type {
   Environment,
   MockRoute,
   MockServer,
+  ModelScore,
   Project,
   Request,
   RequestAuthentication,
@@ -14,6 +15,7 @@ import type {
   RequestParameter,
   RequestTestResult,
   ResponseTimelineEntry,
+  RunnerResultPerRequest,
   Settings,
   SocketIORequest,
   UserUploadEnvironment,
@@ -33,11 +35,13 @@ import { getRuntime } from '~/runtimes';
 
 import type { ExecutionOption, RequestContext } from '../../../insomnia-scripting-environment/src/objects';
 import { resolveJudgeInstructions } from '../common/ai-judge';
+import { DEFAULT_SCORING_SCRIPT, runScoring } from '../common/ai-scoring';
 import { SINGLE_VALUE_HEADERS } from '../common/common-headers';
 import { JSON_ORDER_PREFIX, JSON_ORDER_SEPARATOR } from '../common/constants';
 import { database as db } from '../common/database';
 import { generateId, getContentTypeHeader, getLocationHeader, getSetCookieHeaders } from '../common/misc';
 import { getRenderedRequestAndContext } from '../common/render';
+import { summarizeModelRuns } from '../common/runner-feedback';
 import { ascendingFirstIndexStringSort } from '../common/sorting';
 import type { ResponsePatch } from '../main/network/libcurl-promise';
 import { QUERY_PARAMS } from './api-key/constants';
@@ -506,6 +510,31 @@ const resolveJudgeConfig = async ({
   } catch (error) {
     console.warn('[judge] could not resolve the judge request', error);
     return;
+  }
+};
+
+// Prototype (3593AI): runs the collection's Model Scoring script (or the default) once over a finished run's per-model
+// totals. Never throws: a failing script comes back as `scoringError` so the run is still saved.
+export const scoreFinishedRun = async (
+  workspaceId: string,
+  rows: RunnerResultPerRequest[],
+): Promise<{ modelScores?: ModelScore[]; scoringError?: string }> => {
+  const summaries = summarizeModelRuns(rows);
+  if (summaries.length === 0) {
+    return {};
+  }
+  try {
+    const workspace = await services.workspace.getById(workspaceId);
+    const modelScores = await runScoring({
+      summaries,
+      script: workspace?.aiScoring?.script ?? DEFAULT_SCORING_SCRIPT,
+      settings: await services.settings.get(),
+      timelinePath: await getRuntime().network.getTimelinePath(`scoring_${workspaceId}`),
+      execute: options => getRuntime().network.runScript(options),
+    });
+    return { modelScores };
+  } catch (error) {
+    return { scoringError: error instanceof Error ? error.message : String(error) };
   }
 };
 

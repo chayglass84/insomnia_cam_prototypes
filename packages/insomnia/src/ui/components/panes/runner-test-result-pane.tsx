@@ -2,6 +2,7 @@ import type { BaseRunnerTestResult, RunnerResultPerRequest } from 'insomnia-data
 import React, { type FC, useState } from 'react';
 import { Toolbar } from 'react-aria-components';
 
+import { rankByScore } from '~/common/ai-scoring';
 import { summarizeModelRuns } from '~/common/runner-feedback';
 import { useRootLoaderData } from '~/root';
 import { Hotkey } from '~/ui/components/hotkey';
@@ -101,7 +102,8 @@ export const RunnerTestResultPane: FC<Props> = ({ result }) => {
   });
 
   const hasVisibleResults = resultsByIteration.some(Boolean);
-  const modelSummaries = summarizeModelRuns(result.iterationResults.flat());
+  const unrankedSummaries = summarizeModelRuns(result.iterationResults.flat());
+  const modelSummaries = result.modelScores ? rankByScore(unrankedSummaries, result.modelScores) : unrankedSummaries;
 
   return (
     <>
@@ -134,7 +136,13 @@ export const RunnerTestResultPane: FC<Props> = ({ result }) => {
             </button>
           </Toolbar>
           <div className="h-[calc(100%-var(--line-height-sm))] w-auto overflow-x-auto overflow-y-auto">
-            {modelSummaries.length > 0 && <RunnerModelSummary summaries={modelSummaries} />}
+            {modelSummaries.length > 0 && (
+              <RunnerModelSummary
+                summaries={modelSummaries}
+                scores={result.modelScores}
+                scoringError={result.scoringError}
+              />
+            )}
             {hasVisibleResults ? (
               resultsByIteration
             ) : (

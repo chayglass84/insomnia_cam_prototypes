@@ -318,7 +318,7 @@ export const useTabNavigate = () => {
 };
 
 export const useInsomniaTab = ({ organizationId }: InsomniaTabProps) => {
-  const { appTabsRef, changeActiveTab, closeTabById, addTemporaryTab } = useInsomniaTabContext();
+  const { appTabsRef, changeActiveTab, closeTabById, addTemporaryTab, updateTabById } = useInsomniaTabContext();
   const { routeInfo, getNavigationResources } = useInsomniaNavigation();
 
   // Sync active tab with current route (only activates existing tabs, or creates/updates temporary tab if no match)
@@ -340,11 +340,21 @@ export const useInsomniaTab = ({ organizationId }: InsomniaTabProps) => {
         }
       }
 
+      // Prototype (3593AI): a runner tab keeps the name it was created with, so one saved before the Model Evaluator
+      // rename (or for a collection that has since been synced as an AI Gateway) would stay "Runner".
+      if (matchingTab?.type === 'runner' && routeInfo?.routeId === 'runner') {
+        const { workspace } = await getNavigationResources();
+        const expectedName = workspace?.konnectAiGatewayModels ? 'Model Evaluator' : 'Runner';
+        if (matchingTab.name !== expectedName) {
+          updateTabById?.(matchingTab.id, { name: expectedName });
+        }
+      }
+
       if (currentActiveTabId !== matchingTab?.id) {
         changeActiveTab(matchingTab?.id ?? '');
       }
     })();
-  }, [addTemporaryTab, appTabsRef, changeActiveTab, getNavigationResources, organizationId, routeInfo]);
+  }, [addTemporaryTab, appTabsRef, changeActiveTab, getNavigationResources, organizationId, routeInfo, updateTabById]);
 
   // Keyboard shortcut to close current tab
   useDocBodyKeyboardShortcuts({
