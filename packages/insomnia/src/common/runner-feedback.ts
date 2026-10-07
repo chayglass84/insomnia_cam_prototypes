@@ -114,6 +114,13 @@ export interface ModelRunSummary {
   totalTests: number;
   /** Share of tests passed, 0-1, or null when the model's runs had no tests. */
   passRate: number | null;
+  /**
+   * Tests passed with partial credit: a test counts 1 if it passed and 0 if not, except a test that returned an
+   * `insomnia.judge()` verdict, which counts the share of its own checks passed (3 of 4 checks is 0.75).
+   */
+  testsScore: number;
+  /** `testsScore / totalTests`, 0-1, or null when the model's runs had no tests. */
+  testsScoreRate: number | null;
   /** LLM judge checks (from tests that return an `insomnia.judge()` verdict) passed and run, across the model's runs. */
   checksPassed: number;
   checksTotal: number;
@@ -149,6 +156,8 @@ export const summarizeModelRuns = (rows: RunnerResultPerRequest[]): ModelRunSumm
       passedTests: 0,
       totalTests: 0,
       passRate: null,
+      testsScore: 0,
+      testsScoreRate: null,
       checksPassed: 0,
       checksTotal: 0,
       checkRate: null,
@@ -166,6 +175,11 @@ export const summarizeModelRuns = (rows: RunnerResultPerRequest[]): ModelRunSumm
     summary.passedTests += (row.results ?? []).filter(result => result.status === 'passed').length;
     summary.totalTests += (row.results ?? []).length;
     for (const result of row.results ?? []) {
+      summary.testsScore += result.checks?.total
+        ? result.checks.passed / result.checks.total
+        : result.status === 'passed'
+          ? 1
+          : 0;
       summary.checksPassed += result.checks?.passed ?? 0;
       summary.checksTotal += result.checks?.total ?? 0;
     }
@@ -174,6 +188,7 @@ export const summarizeModelRuns = (rows: RunnerResultPerRequest[]): ModelRunSumm
   const summaries = [...byModel.values()].map(summary => ({
     ...summary,
     passRate: summary.totalTests > 0 ? summary.passedTests / summary.totalTests : null,
+    testsScoreRate: summary.totalTests > 0 ? summary.testsScore / summary.totalTests : null,
     checkRate: summary.checksTotal > 0 ? summary.checksPassed / summary.checksTotal : null,
   }));
   // Ascending-with-nulls-last / descending-with-nulls-last comparators for the two nullable keys.

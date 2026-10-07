@@ -3,6 +3,7 @@ import type { FC } from 'react';
 
 import { formatUsd } from '../../../common/llm-cost';
 import { modelAnchorId, type ModelRunSummary } from '../../../common/runner-feedback';
+import { Tooltip } from '../tooltip';
 
 const cell = 'px-3 py-1';
 const numberCell = `${cell} text-right tabular-nums`;
@@ -37,11 +38,15 @@ export const RunnerModelSummary: FC<{ summaries: ModelRunSummary[]; scores?: Mod
           <th className={`${cell} font-normal`}>Route</th>
           <th className={`${cell} font-normal`}>Model</th>
           {scores && (
-            <th
-              className={`${numberCell} cursor-help font-normal`}
-              title='Configure this from the "Model Scoring" tab on the Collection'
-            >
-              Score
+            <th className={`${numberCell} font-normal`}>
+              <Tooltip
+                message='Configure this from the "Model Scoring" tab on the Collection'
+                position="bottom"
+                className="inline-block cursor-help"
+                wide
+              >
+                Score
+              </Tooltip>
             </th>
           )}
           <th className={`${numberCell} font-normal`}>In</th>
@@ -49,11 +54,15 @@ export const RunnerModelSummary: FC<{ summaries: ModelRunSummary[]; scores?: Mod
           <th className={`${numberCell} font-normal`}>Cost</th>
           <th className={`${numberCell} font-normal`}>Tests passed</th>
           {summaries.some(summary => summary.checksTotal > 0) && (
-            <th
-              className={`${numberCell} cursor-help font-normal`}
-              title="Checks passed out of checks asked by an LLM judge (insomnia.judge), across this model's runs. Only tests that return the judge's verdict are counted."
-            >
-              Judge checks
+            <th className={`${numberCell} font-normal`}>
+              <Tooltip
+                message="Checks passed out of checks asked by an LLM judge (insomnia.judge), across this model's runs. Only tests that return the judge's verdict are counted."
+                position="bottom"
+                className="inline-block cursor-help"
+                wide
+              >
+                Judge checks
+              </Tooltip>
             </th>
           )}
         </tr>
@@ -101,9 +110,15 @@ export const RunnerModelSummary: FC<{ summaries: ModelRunSummary[]; scores?: Mod
               </button>
             </td>
             {scores && (
-              <td className={numberCell} title={scores.find(score => score.id === summary.id)?.note}>
+              <td className={numberCell}>
                 {scores.some(score => score.id === summary.id) ? (
-                  <strong>{scores.find(score => score.id === summary.id)!.score.toFixed(2)}</strong>
+                  <Tooltip
+                    message={scores.find(score => score.id === summary.id)?.note}
+                    position="bottom"
+                    className="inline-block"
+                  >
+                    <strong>{scores.find(score => score.id === summary.id)!.score.toFixed(2)}</strong>
+                  </Tooltip>
                 ) : (
                   '—'
                 )}
