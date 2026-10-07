@@ -27,6 +27,8 @@ const summary = (overrides: Partial<ModelRunSummary> & { id: string }): ModelRun
   passedTests: 0,
   totalTests: 0,
   passRate: null,
+  testsScore: 0,
+  testsScoreRate: null,
   checksPassed: 0,
   checksTotal: 0,
   checkRate: null,
@@ -163,9 +165,9 @@ describe('runScoring (real script engine)', () => {
     });
 
   const field = [
-    summary({ id: 'pricey', passRate: 1, passedTests: 2, totalTests: 2, costUsd: 0.02 }),
-    summary({ id: 'cheap', passRate: 1, passedTests: 2, totalTests: 2, costUsd: 0.01 }),
-    summary({ id: 'broken', passRate: 0.5, passedTests: 1, totalTests: 2, costUsd: null }),
+    summary({ id: 'pricey', passRate: 1, testsScoreRate: 1, passedTests: 2, totalTests: 2, costUsd: 0.02 }),
+    summary({ id: 'cheap', passRate: 1, testsScoreRate: 1, passedTests: 2, totalTests: 2, costUsd: 0.01 }),
+    summary({ id: 'broken', passRate: 0.5, testsScoreRate: 0.5, passedTests: 1, totalTests: 2, costUsd: null }),
   ];
 
   it('the default script blends 70% tests and 30% cost, with cost relative to the cheapest model', async () => {
@@ -175,6 +177,37 @@ describe('runScoring (real script engine)', () => {
     expect(byId.pricey).toBeCloseTo(0.7 + 0.3 * 0.5);
     expect(byId.broken).toBeCloseTo(0.35);
     expect(scores.find(score => score.id === 'cheap')?.note).toContain('tests 100%');
+  });
+
+  it('the default script counts a judge test as the share of its checks passed (1, 1 and 0.75 is 2.75 of 3)', async () => {
+    const test = (status: 'passed' | 'failed', checks?: { passed: number; total: number }) => ({
+      testCase: 't',
+      status,
+      executionTime: 1,
+      category: 'after-response' as const,
+      ...(checks ? { checks } : {}),
+    });
+    const row = (alias: string, costUsd: number) => ({
+      requestName: 'q',
+      requestUrl: 'u',
+      responseCode: 200,
+      // A valid-response test, an under-500-tokens test, and one judge test with 2.25 of 3 checks (average 0.75).
+      results: [test('passed'), test('passed'), test('failed', { passed: 2.25, total: 3 })],
+      aiGateway: { route: '/r', alias, model: alias, costUsd },
+    });
+    const rows = summarizeModelRuns([row('cheap', 0.01), row('pricey', 0.02)]);
+
+    const cheap = rows.find(r => r.alias === 'cheap')!;
+    expect(cheap.testsScore).toBeCloseTo(2.75);
+    expect(cheap.testsScoreRate).toBeCloseTo(2.75 / 3);
+    // The plain pass/fail view still sees the judge test as failed.
+    expect(cheap.passRate).toBeCloseTo(2 / 3);
+
+    const scores = await run(DEFAULT_SCORING_SCRIPT, rows);
+    const byId = Object.fromEntries(scores.map(score => [score.id, score.score]));
+    expect(byId['/r|cheap']).toBeCloseTo(0.7 * (2.75 / 3) + 0.3 * 1);
+    expect(byId['/r|pricey']).toBeCloseTo(0.7 * (2.75 / 3) + 0.3 * 0.5);
+    expect(scores.find(score => score.id === '/r|cheap')?.note).toContain('tests 92%');
   });
 
   it('a script can score on the judge check rate', async () => {

@@ -20,6 +20,13 @@ export interface ScoringModelInput {
   /** 0-1, or null when the model had no tests. */
   passRate: number | null;
   /**
+   * Tests passed with partial credit: each test counts 1 or 0, except a test that returned an `insomnia.judge()`
+   * verdict, which counts the share of its own checks passed (3 of 4 is 0.75).
+   */
+  testsScore: number;
+  /** `testsScore / testsTotal`, 0-1, or null when the model had no tests. */
+  testsScoreRate: number | null;
+  /**
    * LLM judge checks passed / run (from tests that return an `insomnia.judge()` verdict; controls are not counted).
    * Partial credit counts, so `checksPassed` can be fractional: a criterion averaging 0.75 adds 0.75.
    */
@@ -36,8 +43,11 @@ export interface ScoringModelInput {
 }
 
 export const DEFAULT_SCORING_SCRIPT = `// Runs once, at the end of a run. \`models\` has one entry per model with totals across the whole run:
-//   id, route, alias, model, rotating, testsPassed, testsTotal, passRate (0-1 or null),
-//   checksPassed (partial credit counts), checksTotal, checkRate (LLM judge checks, 0-1 or null if no judge ran),
+//   id, route, alias, model, rotating,
+//   testsPassed, testsTotal, passRate (0-1 or null)   plain pass/fail counts
+//   testsScore, testsScoreRate (0-1 or null)          like passRate, but a test that used insomnia.judge() counts the
+//                                                     share of its own checks passed (3 of 4 is 0.75, not 0 or 1)
+//   checksPassed, checksTotal, checkRate              every judge check across the run (partial credit counts)
 //   inputTokens, outputTokens, costUsd (null if unpriced), declined
 // Return one { id, score } per model, with a score from 0 to 1 (higher is better).
 // You can add a \`note\` to explain a score; it is shown when you hover the score.
@@ -48,7 +58,9 @@ const pricedCosts = models.map(m => m.costUsd).filter(cost => cost > 0);
 const cheapest = pricedCosts.length > 0 ? Math.min(...pricedCosts) : null;
 
 return models.map(m => {
-  const tests = m.passRate ?? 0;
+  // The mean of the model's test scores: a pass is 1, a fail is 0, and a judge test is the share of its checks passed.
+  // For example 1, 1 and 0.75 is 2.75 out of 3, or about 92%.
+  const tests = m.testsScoreRate ?? 0;
   // 1 for the cheapest model, falling toward 0 as a model gets pricier. A model with no price scores 0 here.
   const cost = cheapest && m.costUsd > 0 ? cheapest / m.costUsd : 0;
   return {
@@ -69,6 +81,8 @@ export const buildScoringInput = (summaries: ModelRunSummary[]): ScoringModelInp
     testsPassed: summary.passedTests,
     testsTotal: summary.totalTests,
     passRate: summary.passRate,
+    testsScore: summary.testsScore,
+    testsScoreRate: summary.testsScoreRate,
     checksPassed: summary.checksPassed,
     checksTotal: summary.checksTotal,
     checkRate: summary.checkRate,
