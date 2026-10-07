@@ -16,6 +16,8 @@ interface RunnerState {
   file: File | null;
   filePath: string;
   reqList: RequestRow[];
+  // AI Gateway evaluate tab (3593AI): model ids picked; null = untouched, which means all of them.
+  selectedModelIds: string[] | null;
 }
 
 type OrgRunnerStateMap = Record<string, Partial<RunnerState>>;
