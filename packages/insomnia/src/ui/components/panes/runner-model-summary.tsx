@@ -70,20 +70,24 @@ export const RunnerModelSummary: FC<{ summaries: ModelRunSummary[]; scores?: Mod
               >
                 <span className="font-semibold">{summary.alias}</span>{' '}
                 <span className="font-mono text-xs text-(--hl)">{summary.model || 'no response'}</span>
-                {summary.gatewayDeclined > 0 && (
-                  <span
-                    className="ml-2 rounded-sm bg-amber-600/20 px-1.5 text-xs text-amber-500"
-                    title="The gateway declined these requests (e.g. a format it doesn't translate). That's a gateway configuration choice, not a model failure."
-                  >
-                    {summary.gatewayDeclined} declined by gateway
-                  </span>
-                )}
-                {summary.rotating && (
-                  <span
-                    className="ml-2 rounded-sm bg-(--hl-md) px-1.5 text-xs"
-                    title="This alias rotates between several upstream models; the gateway chose this one for these runs."
-                  >
-                    rotating
+                {(summary.gatewayDeclined > 0 || summary.rotating) && (
+                  <span className="mt-1 flex flex-wrap gap-1">
+                    {summary.gatewayDeclined > 0 && (
+                      <span
+                        className="rounded-sm bg-amber-600/20 px-1.5 text-xs text-amber-500"
+                        title="The gateway declined these requests (e.g. a format it doesn't translate). That's a gateway configuration choice, not a model failure."
+                      >
+                        {summary.gatewayDeclined} declined by gateway
+                      </span>
+                    )}
+                    {summary.rotating && (
+                      <span
+                        className="rounded-sm bg-(--hl-md) px-1.5 text-xs"
+                        title="This alias rotates between several upstream models; the gateway chose this one for these runs."
+                      >
+                        rotating
+                      </span>
+                    )}
                   </span>
                 )}
               </button>
