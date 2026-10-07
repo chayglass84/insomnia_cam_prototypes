@@ -118,14 +118,15 @@ export const RequestResultCard: FC<Props> = ({
             {aiGateway && !showModelLabel && !isSkipped && hasTokenUsage && (
               <span className="float-right ml-2 text-sm tabular-nums">{usageText}</span>
             )}
-            <span>{item.requestName}</span>
-            {canViewResponse && (
+            {canViewResponse ? (
               <Button
                 onPress={viewResponse}
-                className="mx-1 rounded-xs px-1 text-xs text-(--hl) underline hover:text-(--color-font)"
+                className="rounded-xs underline decoration-dotted underline-offset-2 hover:decoration-solid"
               >
-                View
+                {item.requestName}
               </Button>
+            ) : (
+              <span>{item.requestName}</span>
             )}
             <span className="text-sm text-neutral-400">
               {' - '}
