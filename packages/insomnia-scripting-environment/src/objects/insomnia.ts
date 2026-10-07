@@ -9,6 +9,14 @@ import { Environment, Variables, Vault } from './environments';
 import { Execution } from './execution';
 import { Folder, ParentFolders } from './folders';
 import type { RequestContext } from './interfaces';
+import {
+  extractAnswerText,
+  extractQuestionText,
+  type JudgeConfig,
+  type JudgeOptions,
+  type JudgeVerdict,
+  runJudge,
+} from './judge';
 import { transformToSdkProxyOptions } from './proxy-configs';
 import { Request as ScriptRequest, type RequestOptions, toScriptRequestBody } from './request';
 import { RequestInfo } from './request-info';
@@ -45,6 +53,7 @@ export class InsomniaObject {
   private requestTestResults: RequestTestResult[];
 
   private parentFolders: ParentFolders;
+  private judgeConfig?: JudgeConfig;
 
   constructor(rawObj: {
     globals: Environment;
@@ -62,6 +71,7 @@ export class InsomniaObject {
     response?: ScriptResponse;
     parentFolders: ParentFolders;
     vault?: Vault;
+    judge?: JudgeConfig;
   }) {
     this.globals = rawObj.globals;
     this.baseGlobals = rawObj.baseGlobals;
@@ -82,6 +92,7 @@ export class InsomniaObject {
 
     this.requestTestResults = new Array<RequestTestResult>();
     this.parentFolders = rawObj.parentFolders;
+    this.judgeConfig = rawObj.judge;
 
     return new Proxy(this, {
       get: (target, prop, receiver) => {
@@ -103,6 +114,48 @@ export class InsomniaObject {
   sendRequest(request: string | ScriptRequest, cb: (error?: string, response?: ScriptResponse) => void) {
     return sendRequest(request, cb, this._settings);
   }
+
+  /**
+   * Prototype (3593AI): grades the current response against a checklist using a second model.
+   * `await insomnia.judge(['five bullets', 'concise'])` -> { checks, passed, total, allPassed, reason, summary }.
+   * Uses the collection's Judge settings; `options` ({ url, model, system, ... }) override them.
+   */
+  judge = async (criteria: string[], options?: JudgeOptions): Promise<JudgeVerdict> => {
+    if (!this.response && options?.answer === undefined) {
+      throw new Error(
+        'judge: there is no response to grade (use it in an after-response script, or pass options.answer)',
+      );
+    }
+    let answerBody: unknown;
+    try {
+      answerBody = this.response?.json();
+    } catch {
+      answerBody = undefined;
+    }
+    return runJudge({
+      criteria,
+      options: { ...this.judgeConfig, ...options },
+      answer: options?.answer ?? extractAnswerText(answerBody),
+      question: options?.question ?? extractQuestionText(this.request.body?.toString()),
+      send: (url, headers, body) =>
+        new Promise((resolve, reject) => {
+          const requestOptions: RequestOptions = {
+            url,
+            method: 'POST',
+            header: headers,
+            body: { mode: 'raw', raw: body },
+          };
+          sendRequest(
+            requestOptions,
+            (error, response) =>
+              error || !response
+                ? reject(error ?? new Error('judge: no response'))
+                : resolve({ code: response.code, text: response.text() }),
+            this._settings,
+          );
+        }),
+    });
+  };
 
   test = () => {
     // this method is intercepted by the proxy above
@@ -283,5 +336,6 @@ export async function initInsomniaObject(rawObj: RequestContext, log: (...args: 
     response,
     execution,
     parentFolders,
+    judge: rawObj.judge,
   });
 }

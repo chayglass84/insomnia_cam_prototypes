@@ -1186,6 +1186,8 @@ export async function clientAction({ request, params }: Route.ClientActionArgs) 
             : undefined,
         };
         const buildResult = () => ({
+          requestId: targetRequest.id,
+          responseId: resultCollector.responseId || undefined,
           requestName: targetRequest.name,
           requestUrl: resultCollector.requestUrl,
           responseCode: resultCollector.statusCode,
@@ -1197,6 +1199,7 @@ export async function clientAction({ request, params }: Route.ClientActionArgs) 
         });
         const buildLivePatch = (status: RunnerLiveItem['status']) => ({
           status,
+          responseId: resultCollector.responseId || undefined,
           requestUrl: resultCollector.requestUrl,
           statusCode: resultCollector.statusCode,
           statusMessage: resultCollector.statusMessage,

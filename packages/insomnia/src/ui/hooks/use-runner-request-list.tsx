@@ -51,8 +51,10 @@ export const useRunnerRequestList = (organizationId: string, targetFolderId: str
           return item.ancestors.map(a => a.id).includes(targetFolderId);
         }
         return true;
-      });
-  }, [collection, targetFolderId]);
+      })
+      // The request chosen as the judge (Judge tab) grades the others; it is not one of the candidates.
+      .filter(item => item.id !== activeWorkspace.aiJudge?.requestId);
+  }, [collection, targetFolderId, activeWorkspace.aiJudge?.requestId]);
 
   const { runnerStateMap, runnerStateRef, updateRunnerState } = useRunnerContext();
 

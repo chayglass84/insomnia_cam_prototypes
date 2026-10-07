@@ -47,6 +47,17 @@ describe('test / skip / waitForAllTestsDone', () => {
     expect(logs[0].errorMessage).toContain('2');
   });
 
+  it('omits ACTUAL/EXPECTED from a failure that is not an assertion error', async () => {
+    const logs: RequestTestResult[] = [];
+
+    await test('t3', async () => {
+      throw new Error('plain failure');
+    }, r => logs.push(r));
+    await waitForAllTestsDone();
+
+    expect(logs[0].errorMessage).toBe('error: Error: plain failure');
+  });
+
   it('logs a skipped result with executionTime 0', async () => {
     const logs: RequestTestResult[] = [];
 

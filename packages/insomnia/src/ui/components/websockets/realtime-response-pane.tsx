@@ -39,6 +39,7 @@ import {
   hasStreamingBodyFlag,
 } from '~/common/chat-streaming';
 import { docsMcpAuthentication } from '~/common/documentation';
+import { isPlainHttpBody } from '~/common/stream-event-log';
 import { extractStreamChatMeta, getCandidatePayloadsFromEvents, type StreamMessageEvent } from '~/common/stream-summary';
 import { buildQueryStringFromParams, joinUrlAndQueryString } from '~/common/utils/url/querystring';
 import { showToast } from '~/ui/components/toast-notification';
@@ -74,6 +75,7 @@ import { McpEventView } from '../mcp/event-view';
 import { McpNotificationTab } from '../mcp/mcp-notification-tab';
 import { Pane, PaneHeader } from '../panes/pane';
 import { PlaceholderResponsePane } from '../panes/placeholder-response-pane';
+import { ResponsePane } from '../panes/response-pane';
 import { SocketIOEventView } from '../socket-io/event-view';
 import { SvgIcon } from '../svg-icon';
 import { SizeTag } from '../tags/size-tag';
@@ -176,7 +178,7 @@ const StreamSummaryPanel: FC<{ requestId: string; streamSummary: ReturnType<type
   );
 };
 
-export const RealtimeResponsePane: FC<{ requestId?: string }> = () => {
+export const RealtimeResponsePane: FC<{ requestId?: string }> = ({ requestId }) => {
   const { activeResponse, responses, requestVersions } = useRequestLoaderData()!;
 
   if (!activeResponse) {
@@ -186,6 +188,12 @@ export const RealtimeResponsePane: FC<{ requestId?: string }> = () => {
         <PlaceholderResponsePane />
       </Pane>
     );
+  }
+  // Prototype (3593AI): a response from a plain send (e.g. a runner run of a streaming request) has an ordinary body, not
+  // an event log, so the events view would be empty. Show it in the regular response pane; its history dropdown switches
+  // back to the streamed responses. Large or empty bodies are not loaded here and keep the old behaviour.
+  if (requestId && models.response.isResponse(activeResponse) && isPlainHttpBody(activeResponse.bodyBuffer)) {
+    return <ResponsePane activeRequestId={requestId} />;
   }
   return (
     <RealTimeActiveResponsePaneWrapper

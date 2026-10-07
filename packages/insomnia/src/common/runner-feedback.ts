@@ -10,6 +10,8 @@ export interface RunnerLiveItem {
   key: string;
   iteration: number;
   requestId: string;
+  /** Set once the request has been sent; the response saved in the request's history. */
+  responseId?: string;
   requestName: string;
   requestUrl: string;
   status: RunnerItemStatus;

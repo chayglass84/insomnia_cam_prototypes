@@ -82,6 +82,7 @@ const buildRunnerTab = ({
   workspaceId,
   projectName,
   workspaceName,
+  isAiGateway = false,
   folderId,
   searchParams = new URLSearchParams(),
 }: {
@@ -90,6 +91,8 @@ const buildRunnerTab = ({
   workspaceId: string;
   projectName: string;
   workspaceName: string;
+  /** Prototype (3593AI): synced AI Gateway collections call the runner the Model Evaluator. */
+  isAiGateway?: boolean;
   folderId?: string | null;
   searchParams?: URLSearchParams;
 }): BaseTab => {
@@ -103,7 +106,7 @@ const buildRunnerTab = ({
   return {
     type: 'runner',
     id: buildRunnerTabId(workspaceId, folderId),
-    name: 'Runner',
+    name: isAiGateway ? 'Model Evaluator' : 'Runner',
     url,
     organizationId,
     projectId,
@@ -223,6 +226,7 @@ const buildTabFromNavigation = async (
       workspaceId: workspace._id,
       projectName: project.name,
       workspaceName: workspace.name,
+      isAiGateway: Boolean(workspace.konnectAiGatewayModels),
       folderId: routeInfo.searchParams.get('folder'),
     });
   }
@@ -262,7 +266,7 @@ export const useTabNavigate = () => {
       }: {
         organization: Pick<Organization, 'id'> | string;
         project: Pick<Project, '_id' | 'name'>;
-        workspace: Pick<Workspace, '_id' | 'name'>;
+        workspace: Pick<Workspace, '_id' | 'name'> & Partial<Pick<Workspace, 'konnectAiGatewayModels'>>;
         item: TabResource;
       },
       options: {
@@ -283,6 +287,7 @@ export const useTabNavigate = () => {
             workspaceId: workspace._id,
             projectName: project.name,
             workspaceName: workspace.name,
+            isAiGateway: Boolean(workspace.konnectAiGatewayModels),
             folderId: item.type === 'RequestGroup' ? item._id : undefined,
             searchParams,
           })

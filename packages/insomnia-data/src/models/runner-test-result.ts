@@ -42,6 +42,9 @@ export interface AiGatewayRunInfo {
 }
 
 export interface RunnerResultPerRequest {
+  /** Prototype (3593AI): lets a result row jump to the response it came from. Absent on older runs. */
+  requestId?: string;
+  responseId?: string;
   results: RequestTestResult[];
   requestName: string;
   requestUrl: string;

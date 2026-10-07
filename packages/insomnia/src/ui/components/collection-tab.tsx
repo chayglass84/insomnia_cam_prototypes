@@ -2,7 +2,7 @@ import { Tab, TabList, Tabs } from 'react-aria-components';
 import { useNavigate } from 'react-router';
 import { twMerge } from 'tailwind-merge';
 
-type DocumentTabId = 'spec' | 'test';
+type DocumentTabId = 'spec' | 'test' | 'judge';
 
 interface Props {
   organizationId: string;
@@ -14,6 +14,8 @@ interface Props {
   className?: string;
   /** Overrides the first tab's label, e.g. 'Routes/Models' for synced AI Gateway collections. */
   specTabLabel?: string;
+  /** Shows the Judge tab (settings for `insomnia.judge()`); synced AI Gateway collections only. Prototype (3593AI). */
+  showJudgeTab?: boolean;
 }
 
 export const CollectionTab = ({
@@ -25,6 +27,7 @@ export const CollectionTab = ({
   hasLegacyUnitTests,
   className,
   specTabLabel,
+  showJudgeTab,
 }: Props) => {
   const navigate = useNavigate();
   const base = `/organization/${organizationId}/project/${projectId}/workspace/${workspaceId}`;
@@ -34,6 +37,7 @@ export const CollectionTab = ({
 
   const items: { id: DocumentTabId; name: string; to: string }[] = [
     { id: 'spec', name: specTabLabel ?? 'Spec', to: `${base}/debug` },
+    ...(showJudgeTab ? [{ id: 'judge' as const, name: 'Judge', to: `${base}/debug?collectionTab=judge` }] : []),
     ...(showTestsTab ? [{ id: 'test' as const, name: 'Tests', to: `${base}/test` }] : []),
   ];
 
