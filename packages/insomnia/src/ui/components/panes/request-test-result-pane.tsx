@@ -107,7 +107,9 @@ export const RequestTestResultRows: FC<RequestTestResultRowsProps> = ({
       const message = (
         <>
           <span className="capitalize">{result.testCase}</span>
-          <span className="text-neutral-400">{result.errorMessage ? ' | ' + result.errorMessage : ''}</span>
+          <span className="text-sm whitespace-pre-wrap text-neutral-400">
+            {result.errorMessage ? ' | ' + result.errorMessage : ''}
+          </span>
           {result.detail && <div className="mt-1 text-sm whitespace-pre-wrap text-neutral-400">{result.detail}</div>}
         </>
       );

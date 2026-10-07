@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildJudgeRequestBody,
+  combineJudgeReplies,
   extractAnswerText,
   extractQuestionText,
   type JudgeSend,
+  MAX_JUDGE_RUNS,
   parseJudgeReply,
   runJudge,
 } from '../judge';
@@ -148,36 +150,66 @@ describe('buildJudgeRequestBody', () => {
 });
 
 describe('parseJudgeReply', () => {
-  it('parses a clean reply', () => {
-    const verdict = parseJudgeReply(
-      '{"checks":[{"criterion":"x","pass":true},{"criterion":"y","pass":false}],"reason":"meh"}',
-      criteria,
-    );
-    expect(verdict.passed).toBe(1);
-    expect(verdict.total).toBe(2);
-    expect(verdict.allPassed).toBe(false);
-    expect(verdict.reason).toBe('meh');
-    expect(verdict.summary).toBe('✓ five bullets\n✗ concise\nJudge: meh');
+  it('reads a score per criterion and the reason', () => {
+    const reply = parseJudgeReply('{"checks":[{"score":1},{"score":0.5}],"reason":"meh"}', criteria);
+    expect(reply.scores).toEqual([1, 0.5]);
+    expect(reply.reason).toBe('meh');
+  });
+
+  it('snaps any other number to the nearest of 0, 0.5 and 1, and clamps', () => {
+    const reply = parseJudgeReply('{"checks":[{"score":0.8},{"score":0.2}]}', criteria);
+    expect(reply.scores).toEqual([1, 0]);
+    expect(parseJudgeReply('{"checks":[{"score":7},{"score":-3}]}', criteria).scores).toEqual([1, 0]);
+    expect(parseJudgeReply('{"checks":[{"score":0.6},{"score":0.4}]}', criteria).scores).toEqual([0.5, 0.5]);
+  });
+
+  it('still understands a legacy pass boolean', () => {
+    expect(parseJudgeReply('{"checks":[{"pass":true},{"pass":false}]}', criteria).scores).toEqual([1, 0]);
   });
 
   it('tolerates code fences and surrounding prose', () => {
-    const verdict = parseJudgeReply(
-      'Sure!\n```json\n{"checks":[{"pass":true},{"pass":true}],"reason":"ok"}\n```',
-      criteria,
-    );
-    expect(verdict.allPassed).toBe(true);
+    const reply = parseJudgeReply('Sure!\n```json\n{"checks":[{"score":1},{"score":1}],"reason":"ok"}\n```', criteria);
+    expect(reply.scores).toEqual([1, 1]);
   });
 
-  it('counts a criterion the judge skipped, or answered with a non-boolean, as failed', () => {
-    const verdict = parseJudgeReply('{"checks":[{"pass":true},{"pass":"yes"}],"reason":""}', criteria);
-    expect(verdict.checks.map(c => c.pass)).toEqual([true, false]);
-    const short = parseJudgeReply('{"checks":[{"pass":true}]}', criteria);
-    expect(short.checks.map(c => c.pass)).toEqual([true, false]);
-    expect(short.allPassed).toBe(false);
+  it('scores a skipped or malformed criterion 0, never a pass', () => {
+    expect(parseJudgeReply('{"checks":[{"score":1},{"score":"yes"}]}', criteria).scores).toEqual([1, 0]);
+    expect(parseJudgeReply('{"checks":[{"score":1}]}', criteria).scores).toEqual([1, 0]);
+    expect(parseJudgeReply('{"checks":[null,{"pass":"true"}]}', criteria).scores).toEqual([0, 0]);
   });
 
   it('throws with the raw reply when there is no JSON', () => {
     expect(() => parseJudgeReply('I cannot do that', criteria)).toThrow(/not JSON: I cannot do that/);
+  });
+});
+
+describe('combineJudgeReplies', () => {
+  const reply = (scores: number[], reason = '') => ({ scores, reason, raw: JSON.stringify({ scores }) });
+
+  it('with one run, a criterion passes only at 1 and partial credit counts toward the score', () => {
+    const verdict = combineJudgeReplies(criteria, [reply([1, 0.5], 'close')]);
+    expect(verdict.checks.map(check => check.pass)).toEqual([true, false]);
+    expect(verdict.passed).toBe(1);
+    expect(verdict.score).toBe(1.5);
+    expect(verdict.allPassed).toBe(false);
+    expect(verdict.summary).toBe('✓ five bullets\n◐ concise — score 0.5\n\nJudge: close');
+  });
+
+  it('averages the runs per criterion: 0.5 and 1 make 0.75, which is not a pass', () => {
+    const verdict = combineJudgeReplies(criteria, [reply([1, 0.5], 'a'), reply([1, 1], 'b')]);
+    expect(verdict.checks[1]).toMatchObject({ score: 0.75, pass: false, runs: [0.5, 1] });
+    expect(verdict.checks[0]).toMatchObject({ score: 1, pass: true, runs: [1, 1] });
+    expect(verdict.score).toBe(1.75);
+    expect(verdict.runCount).toBe(2);
+  });
+
+  it('shows every run next to the average, so the mean stays inspectable', () => {
+    const verdict = combineJudgeReplies(criteria, [reply([1, 0], 'x'), reply([0, 0], 'y')]);
+    expect(verdict.summary).toContain('◐ five bullets — average score 0.5 (runs: 1, 0)');
+    expect(verdict.summary).toContain('✗ concise — average score 0 (runs: 0, 0)');
+    // All the results first, then a blank line, then each run's answer (without the word "Judge").
+    expect(verdict.summary).toContain('(runs: 0, 0)\n\nRun 1: x\nRun 2: y');
+    expect(verdict.summary).not.toContain('Judge:');
   });
 });
 
@@ -200,6 +232,82 @@ describe('runJudge', () => {
     await expect(runJudge({ ...base, send: sendWith(404, '{"message":"no Route matched"}') })).rejects.toThrow(
       /judge 404 from "http:\/\/gw\/judge\/chat\/completions": .*no Route matched/,
     );
+  });
+
+  it('expectAllPassed passes silently, and throws with the verdict attached when a check failed', async () => {
+    const good = await runJudge({
+      ...base,
+      send: sendWith(200, openAiReply('{"checks":[{"pass":true},{"pass":true}],"reason":"ok"}')),
+    });
+    expect(() => good.expectAllPassed()).not.toThrow();
+
+    const bad = await runJudge({
+      ...base,
+      send: sendWith(200, openAiReply('{"checks":[{"pass":true},{"pass":false}],"reason":"meh"}')),
+    });
+    let thrown: any;
+    try {
+      bad.expectAllPassed();
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown.message).toContain('✗ concise');
+    expect(thrown.judgeVerdict).toMatchObject({ passed: 1, total: 2, control: false });
+  });
+
+  it('marks a verdict as a control when it graded fixed text', async () => {
+    const verdict = await runJudge({
+      ...base,
+      control: true,
+      send: sendWith(200, openAiReply('{"checks":[{"pass":true},{"pass":true}],"reason":""}')),
+    });
+    expect(verdict.control).toBe(true);
+  });
+
+  it('asks the judge `runs` times, all at once, and averages them', async () => {
+    const replies = ['{"checks":[{"score":1},{"score":0.5}]}', '{"checks":[{"score":1},{"score":1}]}'];
+    let calls = 0;
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const send: JudgeSend = async () => {
+      const mine = calls++;
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise(resolve => setTimeout(resolve, 5));
+      inFlight--;
+      return { code: 200, text: openAiReply(replies[mine]) };
+    };
+    const verdict = await runJudge({ ...base, options: { ...options, runs: 2 }, send });
+    expect(calls).toBe(2);
+    expect(maxInFlight).toBe(2);
+    expect(verdict.checks[1].score).toBe(0.75);
+    expect(verdict.runCount).toBe(2);
+  });
+
+  it('keeps runs between 1 and the cap, and treats nonsense as 1', async () => {
+    const counts: number[] = [];
+    for (const runs of [0, -4, Number.NaN, 2.9, 999]) {
+      let calls = 0;
+      await runJudge({
+        ...base,
+        options: { ...options, runs },
+        send: async () => {
+          calls++;
+          return { code: 200, text: openAiReply('{"checks":[{"score":1},{"score":1}]}') };
+        },
+      });
+      counts.push(calls);
+    }
+    expect(counts).toEqual([1, 1, 1, 2, MAX_JUDGE_RUNS]);
+  });
+
+  it('fails if any run fails', async () => {
+    let call = 0;
+    const send: JudgeSend = async () => ({
+      code: call++ === 0 ? 200 : 500,
+      text: call === 1 ? openAiReply('{"checks":[{"score":1},{"score":1}]}') : 'boom',
+    });
+    await expect(runJudge({ ...base, options: { ...options, runs: 2 }, send })).rejects.toThrow(/judge 500/);
   });
 
   it('rejects bad input before sending anything', async () => {

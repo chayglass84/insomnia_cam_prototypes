@@ -27,6 +27,9 @@ const summary = (overrides: Partial<ModelRunSummary> & { id: string }): ModelRun
   passedTests: 0,
   totalTests: 0,
   passRate: null,
+  checksPassed: 0,
+  checksTotal: 0,
+  checkRate: null,
   ...overrides,
 });
 
@@ -94,8 +97,20 @@ describe('buildScoringInput / summary ids', () => {
         requestUrl: 'u',
         responseCode: 200,
         results: [
-          { testCase: 't', status: 'passed', executionTime: 1, category: 'after-response' },
-          { testCase: 'u', status: 'failed', executionTime: 1, category: 'after-response' },
+          {
+            testCase: 't',
+            status: 'passed',
+            executionTime: 1,
+            category: 'after-response',
+            checks: { passed: 2, total: 2 },
+          },
+          {
+            testCase: 'u',
+            status: 'failed',
+            executionTime: 1,
+            category: 'after-response',
+            checks: { passed: 1, total: 2 },
+          },
         ],
         aiGateway: {
           route: '/anthropic',
@@ -119,6 +134,9 @@ describe('buildScoringInput / summary ids', () => {
       testsPassed: 1,
       testsTotal: 2,
       passRate: 0.5,
+      checksPassed: 3,
+      checksTotal: 4,
+      checkRate: 0.75,
       inputTokens: 10,
       outputTokens: 5,
       costUsd: 0.5,
@@ -157,6 +175,20 @@ describe('runScoring (real script engine)', () => {
     expect(byId.pricey).toBeCloseTo(0.7 + 0.3 * 0.5);
     expect(byId.broken).toBeCloseTo(0.35);
     expect(scores.find(score => score.id === 'cheap')?.note).toContain('tests 100%');
+  });
+
+  it('a script can score on the judge check rate', async () => {
+    const withChecks = [
+      summary({ id: 'strict', checksPassed: 1, checksTotal: 4, checkRate: 0.25 }),
+      summary({ id: 'good', checksPassed: 4, checksTotal: 4, checkRate: 1 }),
+      summary({ id: 'no-judge' }),
+    ];
+    const scores = await run('return models.map(m => ({ id: m.id, score: m.checkRate ?? 0 }));', withChecks);
+    expect(Object.fromEntries(scores.map(score => [score.id, score.score]))).toEqual({
+      'strict': 0.25,
+      'good': 1,
+      'no-judge': 0,
+    });
   });
 
   it('runs a script of the user own', async () => {

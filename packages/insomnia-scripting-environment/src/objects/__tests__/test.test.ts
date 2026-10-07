@@ -32,6 +32,56 @@ describe('test / skip / waitForAllTestsDone', () => {
     expect(logs[1]).not.toHaveProperty('detail');
   });
 
+  const verdict = (overrides: Record<string, unknown> = {}) => ({
+    summary: '✓ a\n✗ b',
+    passed: 1,
+    total: 2,
+    control: false,
+    ...overrides,
+  });
+
+  it('records a returned judge verdict as detail plus checks', async () => {
+    const logs: RequestTestResult[] = [];
+
+    await test('judged', async () => verdict() as any, r => logs.push(r));
+    await waitForAllTestsDone();
+
+    expect(logs[0].status).toBe('passed');
+    expect(logs[0].detail).toBe('✓ a\n✗ b');
+    expect(logs[0].checks).toEqual({ passed: 1, total: 2 });
+  });
+
+  it('records the verdict score (partial credit) rather than the count of outright passes', async () => {
+    const logs: RequestTestResult[] = [];
+
+    await test('partial', async () => verdict({ passed: 1, total: 2, score: 1.5 }) as any, r => logs.push(r));
+    await waitForAllTestsDone();
+
+    expect(logs[0].checks).toEqual({ passed: 1.5, total: 2 });
+  });
+
+  it('does not record the checks of a control verdict', async () => {
+    const logs: RequestTestResult[] = [];
+
+    await test('control', async () => verdict({ control: true }) as any, r => logs.push(r));
+    await waitForAllTestsDone();
+
+    expect(logs[0].detail).toBe('✓ a\n✗ b');
+    expect(logs[0]).not.toHaveProperty('checks');
+  });
+
+  it('records the checks of a failed test that threw a judge verdict', async () => {
+    const logs: RequestTestResult[] = [];
+
+    await test('failed judge', async () => {
+      throw Object.assign(new Error('\n✗ b'), { judgeVerdict: verdict() });
+    }, r => logs.push(r));
+    await waitForAllTestsDone();
+
+    expect(logs[0].status).toBe('failed');
+    expect(logs[0].checks).toEqual({ passed: 1, total: 2 });
+  });
+
   it('logs a failed result with error details for a throwing test', async () => {
     const logs: RequestTestResult[] = [];
 

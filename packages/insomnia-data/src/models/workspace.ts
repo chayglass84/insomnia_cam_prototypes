@@ -64,6 +64,8 @@ export interface AiJudgeSettings {
   requestId?: string;
   /** Extra instructions appended to the built-in judge prompt. */
   system?: string;
+  /** How many times the judge is asked per judgment (1-10, default 1); each criterion's score is the average. */
+  runs?: number;
 }
 
 export type WorkspaceScope = BaseWorkspace['scope'];

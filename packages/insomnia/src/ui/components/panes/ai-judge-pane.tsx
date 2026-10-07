@@ -2,9 +2,11 @@ import { models, services } from 'insomnia-data';
 import { type FC, Fragment, useState } from 'react';
 import {
   Button,
+  Input,
   Label,
   ListBox,
   ListBoxItem,
+  NumberField,
   Popover,
   Select,
   SelectValue,
@@ -13,6 +15,7 @@ import {
 } from 'react-aria-components';
 import { useRevalidator } from 'react-router';
 
+import { MAX_JUDGE_RUNS } from '../../../../../insomnia-scripting-environment/src/objects/judge';
 import { DEFAULT_JUDGE_INSTRUCTIONS } from '../../../common/ai-judge';
 import { useWorkspaceLoaderData } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId';
 import { Icon } from '../icon';
@@ -31,6 +34,7 @@ export const AiJudgePane: FC = () => {
   // typing is never interrupted by a re-render.
   const [requestId, setRequestId] = useState(settings.requestId);
   const [system, setSystem] = useState(settings.system ?? DEFAULT_JUDGE_INSTRUCTIONS);
+  const [runs, setRuns] = useState(settings.runs ?? 1);
 
   const docsById = new Map(collection.map(item => [item.doc._id, item.doc]));
   const requests = collection
@@ -46,8 +50,8 @@ export const AiJudgePane: FC = () => {
     });
   const selected = requests.find(request => request.id === requestId);
 
-  const save = async (next: { requestId?: string; system?: string }) => {
-    await services.workspace.update(activeWorkspace, { aiJudge: { requestId, system, ...next } });
+  const save = async (next: { requestId?: string; system?: string; runs?: number }) => {
+    await services.workspace.update(activeWorkspace, { aiJudge: { requestId, system, runs, ...next } });
     revalidate();
   };
 
@@ -101,6 +105,29 @@ export const AiJudgePane: FC = () => {
             : 'Its URL, headers and model are used. Its messages are replaced and streaming is turned off.'}
         </p>
       </Select>
+
+      <NumberField
+        aria-label="Runs per judgment"
+        value={runs}
+        minValue={1}
+        maxValue={MAX_JUDGE_RUNS}
+        step={1}
+        onChange={value => {
+          if (Number.isFinite(value)) {
+            setRuns(value);
+            save({ runs: value });
+          }
+        }}
+        className="flex max-w-xl flex-col gap-2"
+      >
+        <Label className="text-sm font-bold">Runs per judgment</Label>
+        <Input className="w-24 rounded-xs border border-solid border-(--hl-sm) bg-(--color-bg) px-2 py-1 text-(--color-font) transition-colors focus:ring-1 focus:ring-(--hl-md) focus:outline-hidden" />
+        <p className="text-xs text-(--hl)">
+          Each judgment asks the judge this many times, all at once, and averages every criterion's score: a 1 and a 0.5
+          make 0.75, and the results show each run. More runs smooth out a noisy judge, but they multiply the judge
+          calls (and cost) per request and model. The most is {MAX_JUDGE_RUNS}.
+        </p>
+      </NumberField>
 
       <TextField
         value={system}

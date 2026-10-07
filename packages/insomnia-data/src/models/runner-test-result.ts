@@ -20,6 +20,8 @@ export interface RequestTestResult {
   errorMessage?: string;
   /** Prototype (3593AI): free text a test returns from its callback (e.g. an LLM judge's reasoning), shown under the test name. */
   detail?: string;
+  /** Prototype (3593AI): how many of an LLM judge's checks passed, recorded when a test returns an `insomnia.judge()` verdict. */
+  checks?: { passed: number; total: number };
   category: TestCategory;
 }
 
