@@ -1,3 +1,4 @@
+import type { ModelScore } from 'insomnia-data';
 import type { FC } from 'react';
 
 import { formatUsd } from '../../../common/llm-cost';
@@ -9,17 +10,40 @@ const numberCell = `${cell} text-right tabular-nums`;
 const passRateClassName = (rate: number | null) =>
   rate === null ? 'text-(--hl)' : rate === 1 ? 'text-lime-500' : rate === 0 ? 'text-red-500' : 'text-yellow-500';
 
-/** Ranked per-model comparison shown above a gateway run's results. Prototype (3593AI). */
-export const RunnerModelSummary: FC<{ summaries: ModelRunSummary[] }> = ({ summaries }) => (
+/**
+ * Ranked per-model comparison shown above a gateway run's results. With `scores` (from the collection's Model Scoring
+ * script) it is ranked by score and shows a Score column; `scoringError` explains why a run has none. Prototype (3593AI).
+ */
+export const RunnerModelSummary: FC<{ summaries: ModelRunSummary[]; scores?: ModelScore[]; scoringError?: string }> = ({
+  summaries,
+  scores,
+  scoringError,
+}) => (
   <div
     className="m-3 overflow-x-auto rounded-sm border border-solid border-(--hl-md)"
     data-testid="runner-model-summary"
   >
+    {scoringError && (
+      <p
+        className="border-b border-solid border-(--hl-md) px-3 py-1.5 text-sm text-amber-500"
+        data-testid="runner-scoring-error"
+      >
+        The Model Scoring script failed, so this uses the default ranking: {scoringError}
+      </p>
+    )}
     <table className="w-full text-left text-sm">
       <thead className="text-xs text-(--hl)">
         <tr>
           <th className={`${cell} font-normal`}>Route</th>
           <th className={`${cell} font-normal`}>Model</th>
+          {scores && (
+            <th
+              className={`${numberCell} cursor-help font-normal`}
+              title='Configure this from the "Model Scoring" tab on the Collection'
+            >
+              Score
+            </th>
+          )}
           <th className={`${numberCell} font-normal`}>In</th>
           <th className={`${numberCell} font-normal`}>Out</th>
           <th className={`${numberCell} font-normal`}>Cost</th>
@@ -64,6 +88,15 @@ export const RunnerModelSummary: FC<{ summaries: ModelRunSummary[] }> = ({ summa
                 )}
               </button>
             </td>
+            {scores && (
+              <td className={numberCell} title={scores.find(score => score.id === summary.id)?.note}>
+                {scores.some(score => score.id === summary.id) ? (
+                  <strong>{scores.find(score => score.id === summary.id)!.score.toFixed(2)}</strong>
+                ) : (
+                  '—'
+                )}
+              </td>
+            )}
             <td className={numberCell}>{summary.inputTokens.toLocaleString()}</td>
             <td className={numberCell}>{summary.outputTokens.toLocaleString()}</td>
             <td className={numberCell}>{summary.costUsd === null ? '—' : formatUsd(summary.costUsd)}</td>
@@ -85,8 +118,9 @@ export const RunnerModelSummary: FC<{ summaries: ModelRunSummary[] }> = ({ summa
       className="border-t border-solid border-(--hl-md) px-3 py-1.5 text-xs text-(--hl)"
       data-testid="runner-model-summary-note"
     >
-      Ranked by tests passed, then cheapest, then fewest output tokens. Models without tests or prices rank after those
-      with them.
+      {scores
+        ? "Ranked by score, from the collection's Model Scoring script (hover a score for its note). Models without a score rank last."
+        : 'Ranked by tests passed, then cheapest, then fewest output tokens. Models without tests or prices rank after those with them.'}
     </p>
   </div>
 );

@@ -97,6 +97,8 @@ export const formatCost = (costUsd: number | null | undefined) =>
   costUsd === null || costUsd === undefined ? '' : `Cost: ${formatUsd(costUsd)}`;
 
 export interface ModelRunSummary {
+  /** Stable id (route and alias, plus the model for a rotating alias); see `modelSummaryId`. */
+  id: string;
   route: string;
   alias: string;
   model: string;
@@ -130,6 +132,7 @@ export const summarizeModelRuns = (rows: RunnerResultPerRequest[]): ModelRunSumm
     // A rotating alias is split by the model that actually answered, since their cost and quality differ.
     const key = `${info.route ?? ''}\u0000${info.alias}\u0000${info.rotating ? info.model : ''}`;
     const summary = byModel.get(key) ?? {
+      id: [info.route ?? '', info.alias, ...(info.rotating ? [info.model] : [])].join('|'),
       route: info.route ?? '',
       alias: info.alias,
       model: info.model,

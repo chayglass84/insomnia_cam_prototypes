@@ -36,6 +36,7 @@ import { PromptModal } from '~/ui/components/modals/prompt-modal';
 import { RequestSettingsModal } from '~/ui/components/modals/request-settings-modal';
 import { AiGatewayModelsPane } from '~/ui/components/panes/ai-gateway-models-pane';
 import { AiJudgePane } from '~/ui/components/panes/ai-judge-pane';
+import { AiScoringPane } from '~/ui/components/panes/ai-scoring-pane';
 import { GrpcRequestPane } from '~/ui/components/panes/grpc-request-pane';
 import { GrpcResponsePane } from '~/ui/components/panes/grpc-response-pane';
 import { RequestGroupPane } from '~/ui/components/panes/request-group-pane';
@@ -541,10 +542,14 @@ const Debug = () => {
                             activeItemId={
                               activeWorkspace.konnectAiGatewayModels && searchParams.get('collectionTab') === 'judge'
                                 ? 'judge'
-                                : 'spec'
+                                : activeWorkspace.konnectAiGatewayModels &&
+                                    searchParams.get('collectionTab') === 'scoring'
+                                  ? 'scoring'
+                                  : 'spec'
                             }
                             specTabLabel={activeWorkspace.konnectAiGatewayModels ? 'Routes/Models' : undefined}
                             showJudgeTab={Boolean(activeWorkspace.konnectAiGatewayModels)}
+                            showScoringTab={Boolean(activeWorkspace.konnectAiGatewayModels)}
                             enableLegacyUnitTests={settings.enableLegacyUnitTests}
                             hasLegacyUnitTests={hasLegacyUnitTests}
                           />
@@ -552,6 +557,8 @@ const Debug = () => {
                             {activeWorkspace.konnectAiGatewayModels ? (
                               searchParams.get('collectionTab') === 'judge' ? (
                                 <AiJudgePane key={activeWorkspace._id} />
+                              ) : searchParams.get('collectionTab') === 'scoring' ? (
+                                <AiScoringPane key={activeWorkspace._id} />
                               ) : (
                                 <AiGatewayModelsPane models={activeWorkspace.konnectAiGatewayModels} />
                               )

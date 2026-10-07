@@ -51,6 +51,12 @@ export interface BaseWorkspace {
   konnectAiGatewayModels?: AiGatewayModel[] | null;
   /** Prototype (3593AI): collection-wide settings for `insomnia.judge()`, edited on the collection's Judge tab. */
   aiJudge?: AiJudgeSettings | null;
+  /** Prototype (3593AI): the Model Scoring tab's script; absent means the default script. */
+  aiScoring?: AiScoringSettings | null;
+}
+
+export interface AiScoringSettings {
+  script?: string;
 }
 
 export interface AiJudgeSettings {
@@ -74,7 +80,7 @@ export type Workspace = BaseModel & BaseWorkspace;
 
 export const isWorkspace = (model: Pick<BaseModel, 'type'>): model is Workspace => model.type === type;
 
-export const optionalKeys = ['konnectServiceId', 'konnectAiGatewayModels', 'aiJudge'];
+export const optionalKeys = ['konnectServiceId', 'konnectAiGatewayModels', 'aiJudge', 'aiScoring'];
 export const isWorkspaceId = (id?: string | null) => id?.startsWith(prefix + '_');
 
 export const isDesign = (workspace: Pick<Workspace, 'scope'>) => workspace.scope === WorkspaceScopeKeys.design;

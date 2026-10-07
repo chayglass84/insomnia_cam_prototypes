@@ -56,6 +56,14 @@ export interface RunnerResultPerRequest {
   aiGateway?: AiGatewayRunInfo;
 }
 
+/** Prototype (3593AI): a model's score from the collection's Model Scoring script, frozen with the run. */
+export interface ModelScore {
+  /** Matches `ModelRunSummary.id`: route and alias (plus the model for a rotating alias). */
+  id: string;
+  score: number;
+  note?: string;
+}
+
 export interface ResponseInfo {
   responseId: string;
   originalRequestName: string;
@@ -71,10 +79,16 @@ export interface BaseRunnerTestResult {
   avgRespTime: number; // millisecond
   iterationResults: RunnerResultPerRequestPerIteration;
   responsesInfo: ResponseInfo[];
+  /** Prototype (3593AI): scores computed when the run finished, and why scoring failed if it did. */
+  modelScores?: ModelScore[];
+  scoringError?: string;
   version: '1'; // We might want to add or remove result features in future
 }
 
 export type RunnerTestResult = BaseModel & BaseRunnerTestResult;
+
+// Not in init(), and the data layer prunes top-level fields a model does not declare, so these must be listed here.
+export const optionalKeys = ['modelScores', 'scoringError'];
 
 export const isRunnerTestResult = (model: Pick<BaseModel, 'type'>): model is RunnerTestResult => model.type === type;
 

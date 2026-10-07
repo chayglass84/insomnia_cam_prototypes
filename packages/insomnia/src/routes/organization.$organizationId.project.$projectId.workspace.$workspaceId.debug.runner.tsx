@@ -39,7 +39,7 @@ import {
 } from '~/common/runner-feedback';
 import { invariant } from '~/common/utils/invariant';
 import { isRotatingModel } from '~/konnect/transform';
-import { defaultSendActionRuntime } from '~/network/network';
+import { defaultSendActionRuntime, scoreFinishedRun } from '~/network/network';
 import { useRootLoaderData } from '~/root';
 import { useWorkspaceLoaderData } from '~/routes/organization.$organizationId.project.$projectId.workspace.$workspaceId';
 import type { CollectionRunnerContext } from '~/routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request.$requestId.send';
@@ -1353,6 +1353,9 @@ export async function clientAction({ request, params }: Route.ClientActionArgs) 
   } finally {
     finishExecution(runnerId);
 
+    // Prototype (3593AI): scores are computed once, here, and saved with the run (frozen, like cost).
+    const { modelScores, scoringError } = await scoreFinishedRun(workspaceId, testCtx.iterationResults.flat());
+
     await services.runnerTestResult.create({
       parentId: runnerId,
       source: testCtx.source,
@@ -1361,6 +1364,8 @@ export async function clientAction({ request, params }: Route.ClientActionArgs) 
       avgRespTime: testCtx.avgRespTime,
       iterationResults: testCtx.iterationResults,
       responsesInfo: testCtx.responsesInfo,
+      modelScores,
+      scoringError,
     });
   }
   return null;
