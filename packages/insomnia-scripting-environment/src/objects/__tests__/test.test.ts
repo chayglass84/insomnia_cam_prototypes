@@ -21,6 +21,17 @@ describe('test / skip / waitForAllTestsDone', () => {
     expect(logs[0].category).toBe('unknown');
   });
 
+  it('keeps a string returned from a passing test as detail', async () => {
+    const logs: RequestTestResult[] = [];
+
+    await test('with detail', async () => 'judge said: looks good', r => logs.push(r));
+    await test('without detail', async () => {}, r => logs.push(r));
+    await waitForAllTestsDone();
+
+    expect(logs[0].detail).toBe('judge said: looks good');
+    expect(logs[1]).not.toHaveProperty('detail');
+  });
+
   it('logs a failed result with error details for a throwing test', async () => {
     const logs: RequestTestResult[] = [];
 

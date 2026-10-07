@@ -18,6 +18,8 @@ export interface RequestTestResult {
   status: TestStatus;
   executionTime: number; // milliseconds
   errorMessage?: string;
+  /** Prototype (3593AI): free text a test returns from its callback (e.g. an LLM judge's reasoning), shown under the test name. */
+  detail?: string;
   category: TestCategory;
 }
 

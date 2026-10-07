@@ -86,10 +86,10 @@ export class InsomniaObject {
     return new Proxy(this, {
       get: (target, prop, receiver) => {
         if (prop === 'test') {
-          const testHandler: TestHandler = async (msg: string, fn: () => Promise<void>) => {
+          const testHandler: TestHandler = async (msg: string, fn: () => Promise<void | string>) => {
             await this._test(msg, fn, this.pushRequestTestResult);
           };
-          testHandler.skip = async (msg: string, fn: () => Promise<void>) => {
+          testHandler.skip = async (msg: string, fn: () => Promise<void | string>) => {
             await this._skip(msg, fn, this.pushRequestTestResult);
           };
 

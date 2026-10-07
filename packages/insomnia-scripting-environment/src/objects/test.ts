@@ -3,18 +3,20 @@ import type { RequestTestResult } from 'insomnia-data';
 const NativePromise = Promise;
 
 /** @ignore */
-export async function test(msg: string, fn: () => Promise<void>, log: (testResult: RequestTestResult) => void) {
+export async function test(msg: string, fn: () => Promise<void | string>, log: (testResult: RequestTestResult) => void) {
   const wrapFn = async () => {
     const started = performance.now();
 
     try {
-      await fn();
+      const detail = await fn();
 
       const executionTime = performance.now() - started;
       log({
         testCase: msg,
         status: 'passed',
         executionTime,
+        // A test may return a string to show alongside its result.
+        ...(typeof detail === 'string' && detail ? { detail } : {}),
         category: 'unknown',
       });
     } catch (e) {
@@ -51,7 +53,7 @@ function startTestObserver(promise: Promise<void>) {
 }
 
 /** ignore */
-export async function skip(msg: string, _: () => Promise<void>, log: (testResult: RequestTestResult) => void) {
+export async function skip(msg: string, _: () => Promise<void | string>, log: (testResult: RequestTestResult) => void) {
   log({
     testCase: msg,
     status: 'skipped',
@@ -62,6 +64,6 @@ export async function skip(msg: string, _: () => Promise<void>, log: (testResult
 
 /** ignore */
 export interface TestHandler {
-  (msg: string, fn: () => Promise<void>): Promise<void>;
-  skip?: (msg: string, fn: () => Promise<void>) => void;
+  (msg: string, fn: () => Promise<void | string>): Promise<void>;
+  skip?: (msg: string, fn: () => Promise<void | string>) => void;
 }

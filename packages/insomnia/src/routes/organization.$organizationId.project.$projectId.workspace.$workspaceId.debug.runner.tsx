@@ -199,8 +199,6 @@ export const Runner: FC = () => {
   // AI Gateway collections (3593AI): the Evaluate tab picks requests and models; every selected request runs on every selected model.
   const { activeWorkspace } = useWorkspaceLoaderData()!;
   const gatewayModels = activeWorkspace.konnectAiGatewayModels?.filter(model => model.enabled) ?? null;
-  const [selectedModelIds, setSelectedModelIds] = useState<string[] | null>(null);
-  const chosenModels = gatewayModels?.filter(model => !selectedModelIds || selectedModelIds.includes(model.id)) ?? [];
 
   const [zeroableIterationCount, setZeroableIterationCount] = useState<string>('1');
   const [clearableDelay, setClearableDelay] = useState<string>('0');
@@ -209,11 +207,14 @@ export const Runner: FC = () => {
     delay = 0,
     // AI Gateway collections start with no requests picked (see use-runner-request-list).
     selectedKeys = gatewayModels ? new Set<Key>() : 'all',
+    // Kept in the runner context (not local state) so the picks survive switching away from the runner tab.
+    selectedModelIds = null,
     advancedConfig = defaultAdvancedConfig,
     uploadData = [],
     file,
     filePath,
   } = runnerStateMap?.[organizationId]?.[runnerId] || {};
+  const chosenModels = gatewayModels?.filter(model => !selectedModelIds || selectedModelIds.includes(model.id)) ?? [];
   invariant(iterationCount, 'iterationCount should not be null');
 
   useEffect(() => {
@@ -890,7 +891,7 @@ export const Runner: FC = () => {
                     onRequestsChange={ids => updateRunnerState(organizationId, runnerId, { selectedKeys: new Set(ids) })}
                     models={gatewayModels}
                     selectedModelIds={selectedModelIds}
-                    onModelsChange={setSelectedModelIds}
+                    onModelsChange={ids => updateRunnerState(organizationId, runnerId, { selectedModelIds: ids })}
                     disabled={isRunning}
                   />
                 </TabPanel>
