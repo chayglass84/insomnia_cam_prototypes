@@ -49,6 +49,15 @@ export interface BaseWorkspace {
   konnectServiceId?: string | null;
   /** Prototype (3593AI): model catalog synced from a Konnect AI Gateway. */
   konnectAiGatewayModels?: AiGatewayModel[] | null;
+  /** Prototype (3593AI): collection-wide settings for `insomnia.judge()`, edited on the collection's Judge tab. */
+  aiJudge?: AiJudgeSettings | null;
+}
+
+export interface AiJudgeSettings {
+  /** The request (in this collection) whose URL, headers and body template the judge uses. */
+  requestId?: string;
+  /** Extra instructions appended to the built-in judge prompt. */
+  system?: string;
 }
 
 export type WorkspaceScope = BaseWorkspace['scope'];
@@ -65,7 +74,7 @@ export type Workspace = BaseModel & BaseWorkspace;
 
 export const isWorkspace = (model: Pick<BaseModel, 'type'>): model is Workspace => model.type === type;
 
-export const optionalKeys = ['konnectServiceId', 'konnectAiGatewayModels'];
+export const optionalKeys = ['konnectServiceId', 'konnectAiGatewayModels', 'aiJudge'];
 export const isWorkspaceId = (id?: string | null) => id?.startsWith(prefix + '_');
 
 export const isDesign = (workspace: Pick<Workspace, 'scope'>) => workspace.scope === WorkspaceScopeKeys.design;

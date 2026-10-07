@@ -4,7 +4,7 @@ import { models, services } from 'insomnia-data';
 import type { OpenAPIV3 } from 'openapi-types';
 import React, { useEffect, useRef, useState } from 'react';
 import { type ImperativePanelGroupHandle, Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
-import { href, redirect, useLoaderData, useMatch, useParams } from 'react-router';
+import { href, redirect, useLoaderData, useMatch, useParams, useSearchParams } from 'react-router';
 import YAML from 'yaml';
 
 import { getProductName } from '~/common/constants';
@@ -35,6 +35,7 @@ import { PasteCurlModal } from '~/ui/components/modals/paste-curl-modal';
 import { PromptModal } from '~/ui/components/modals/prompt-modal';
 import { RequestSettingsModal } from '~/ui/components/modals/request-settings-modal';
 import { AiGatewayModelsPane } from '~/ui/components/panes/ai-gateway-models-pane';
+import { AiJudgePane } from '~/ui/components/panes/ai-judge-pane';
 import { GrpcRequestPane } from '~/ui/components/panes/grpc-request-pane';
 import { GrpcResponsePane } from '~/ui/components/panes/grpc-response-pane';
 import { RequestGroupPane } from '~/ui/components/panes/request-group-pane';
@@ -194,6 +195,8 @@ const Debug = () => {
   const [isPasteCurlModalOpen, setPasteCurlModalOpen] = useState(false);
   const [pastedCurl, setPastedCurl] = useState('');
 
+  // Prototype (3593AI): the collection's extra tabs (Judge) are switched by a query param, not a route.
+  const [searchParams] = useSearchParams();
   const { organizationId, projectId, workspaceId, requestId, requestGroupId, panel } = useParams() as {
     organizationId: string;
     projectId: string;
@@ -535,14 +538,23 @@ const Debug = () => {
                             organizationId={organizationId}
                             projectId={projectId}
                             workspaceId={workspaceId}
-                            activeItemId="spec"
+                            activeItemId={
+                              activeWorkspace.konnectAiGatewayModels && searchParams.get('collectionTab') === 'judge'
+                                ? 'judge'
+                                : 'spec'
+                            }
                             specTabLabel={activeWorkspace.konnectAiGatewayModels ? 'Routes/Models' : undefined}
+                            showJudgeTab={Boolean(activeWorkspace.konnectAiGatewayModels)}
                             enableLegacyUnitTests={settings.enableLegacyUnitTests}
                             hasLegacyUnitTests={hasLegacyUnitTests}
                           />
                           <div className="min-h-0 flex-1">
                             {activeWorkspace.konnectAiGatewayModels ? (
-                              <AiGatewayModelsPane models={activeWorkspace.konnectAiGatewayModels} />
+                              searchParams.get('collectionTab') === 'judge' ? (
+                                <AiJudgePane key={activeWorkspace._id} />
+                              ) : (
+                                <AiGatewayModelsPane models={activeWorkspace.konnectAiGatewayModels} />
+                              )
                             ) : (
                               <SpecView
                                 organizationId={organizationId}

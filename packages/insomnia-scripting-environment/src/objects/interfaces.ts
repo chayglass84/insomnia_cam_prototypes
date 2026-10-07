@@ -1,6 +1,7 @@
 import type { ClientCertificate, CookieJar, Request, RequestTestResult, Settings } from 'insomnia-data';
 
 import type { ExecutionOption } from './execution';
+import type { JudgeConfig } from './judge';
 import type { RequestInfoOption } from './request-info';
 
 /** @ignore */
@@ -34,4 +35,6 @@ export interface RequestContext {
   logs: string[];
   transientVariables?: Omit<IEnvironment, 'id'>;
   parentFolders: { id: string; name: string; environment: Record<string, any> }[];
+  /** Prototype (3593AI): resolved from the collection's Judge tab; read by `insomnia.judge()`. */
+  judge?: JudgeConfig;
 }

@@ -1,8 +1,11 @@
 import type { RunnerResultPerRequest } from 'insomnia-data';
+import { models, services } from 'insomnia-data';
 import React, { type FC, useState } from 'react';
 import { Button } from 'react-aria-components';
+import { useParams } from 'react-router';
 
 import { Icon } from '~/ui/components/icon';
+import { showToast } from '~/ui/components/toast-notification';
 
 import {
   formatCost,
@@ -12,6 +15,8 @@ import {
   type RunnerItemStatus,
   type RunnerLiveItem,
 } from '../../../common/runner-feedback';
+import { useWorkspaceLoaderData } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId';
+import { useTabNavigate } from '../../hooks/use-insomnia-tab';
 import { RenderedText } from '../rendered-text';
 import { hasMatchingTestResults, RequestTestResultRows, type TargetTestType } from './request-test-result-pane';
 
@@ -36,6 +41,9 @@ export const RequestResultCard: FC<Props> = ({
   showModelLabel = true,
 }) => {
   const [isExpanded, setIsExpanded] = useState(defaultExpanded);
+  const { organizationId } = useParams() as { organizationId: string };
+  const { activeProject, activeWorkspace, collection } = useWorkspaceLoaderData()!;
+  const tabNavigate = useTabNavigate();
   const status: RunnerItemStatus =
     'status' in item ? item.status : item.skipped ? 'skipped' : item.responseCode > 0 ? 'completed' : 'failed';
   const isSkipped = status === 'skipped';
@@ -55,7 +63,31 @@ export const RequestResultCard: FC<Props> = ({
   const showTestResults = isExpanded && !isSkipped && results.length > 0;
   const showInlineStats = isExpanded && !isSkipped && stats;
 
-  const requestId = 'requestId' in item ? item.requestId : undefined;
+  const requestId = item.requestId;
+  const responseId = item.responseId;
+  const canViewResponse = Boolean(requestId && responseId) && !isSkipped;
+
+  // Prototype (3593AI): open the request with this run's response selected in its response history. Responses are
+  // capped by the "max history responses" setting, so an old run's response may be gone.
+  const viewResponse = async () => {
+    const request = collection.find(entry => entry.doc._id === requestId)?.doc;
+    const response = responseId ? await services.response.getById(responseId) : null;
+    if (!requestId || !responseId || !request || !models.request.isRequest(request) || !response) {
+      showToast({
+        icon: 'info-circle',
+        title: 'Response not available',
+        status: 'warning',
+        description:
+          'It is no longer in the response history (older than the history limit), or the request was deleted.',
+      });
+      return;
+    }
+    await services.requestMeta.updateOrCreateByParentId(requestId, { activeResponseId: responseId });
+    tabNavigate(
+      { organization: organizationId, project: activeProject, workspace: activeWorkspace, item: request },
+      { shouldNavigate: true },
+    );
+  };
   const aiGateway = item.aiGateway;
   const hasTokenUsage = aiGateway?.inputTokens !== undefined || aiGateway?.outputTokens !== undefined;
   const usageText = aiGateway
@@ -87,6 +119,14 @@ export const RequestResultCard: FC<Props> = ({
               <span className="float-right ml-2 text-sm tabular-nums">{usageText}</span>
             )}
             <span>{item.requestName}</span>
+            {canViewResponse && (
+              <Button
+                onPress={viewResponse}
+                className="mx-1 rounded-xs px-1 text-xs text-(--hl) underline hover:text-(--color-font)"
+              >
+                View
+              </Button>
+            )}
             <span className="text-sm text-neutral-400">
               {' - '}
               {item.requestUrl.includes('{{') ? (

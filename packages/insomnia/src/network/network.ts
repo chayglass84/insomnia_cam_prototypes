@@ -32,6 +32,7 @@ import { buildQueryStringFromParams, joinUrlAndQueryString, smartEncodeUrl } fro
 import { getRuntime } from '~/runtimes';
 
 import type { ExecutionOption, RequestContext } from '../../../insomnia-scripting-environment/src/objects';
+import { resolveJudgeInstructions } from '../common/ai-judge';
 import { SINGLE_VALUE_HEADERS } from '../common/common-headers';
 import { JSON_ORDER_PREFIX, JSON_ORDER_SEPARATOR } from '../common/constants';
 import { database as db } from '../common/database';
@@ -43,6 +44,7 @@ import { QUERY_PARAMS } from './api-key/constants';
 import { getAuthObjectOrNull, isAuthEnabled } from './authentication';
 import { filterClientCertificates } from './certificate';
 import type { TransformedExecuteScriptContext } from './concurrency.renderer';
+import { toJudgeConfig } from './judge-config';
 
 const { isRequest } = models.request;
 const { isRequestGroup } = models.requestGroup;
@@ -482,6 +484,31 @@ export async function savePatchesMadeByScript(patches: {
   });
 }
 
+// Prototype (3593AI): resolves the collection's Judge tab settings for `insomnia.judge()`. undefined when no judge is
+// configured, or the chosen request is gone or fails to render.
+const resolveJudgeConfig = async ({
+  ancestors,
+  environment,
+  baseEnvironment,
+}: Pick<RequestContextForScript, 'ancestors' | 'environment' | 'baseEnvironment'>) => {
+  const workspace = ancestors.find(models.workspace.isWorkspace);
+  const requestId = workspace?.aiJudge?.requestId;
+  if (!requestId) {
+    return;
+  }
+  try {
+    const judgeRequest = await services.request.getById(requestId);
+    if (!judgeRequest) {
+      return;
+    }
+    const { request } = await tryToInterpolateRequest({ request: judgeRequest, environment, baseEnvironment });
+    return toJudgeConfig(request, resolveJudgeInstructions(workspace?.aiJudge?.system));
+  } catch (error) {
+    console.warn('[judge] could not resolve the judge request', error);
+    return;
+  }
+};
+
 const tryToExecuteScript = async (context: RequestAndContextAndOptionalResponse) => {
   const {
     script,
@@ -525,10 +552,14 @@ const tryToExecuteScript = async (context: RequestAndContextAndOptionalResponse)
     vault = globals.data[models.environment.vaultEnvironmentPath];
   }
 
+  const judge =
+    eventName === 'prerequest' ? undefined : await resolveJudgeConfig({ ancestors, environment, baseEnvironment });
+
   try {
     const output = await getRuntime().network.runScript({
       script,
       context: {
+        judge,
         request,
         timelinePath,
         timeout: settings.timeout,

@@ -108,7 +108,7 @@ export function useWorkspaceBreadcrumbs() {
     if (isRunner) {
       crumbs.push({
         id: 'runner',
-        label: 'Runner',
+        label: activeWorkspace?.konnectAiGatewayModels ? 'Model Evaluator' : 'Runner',
         icon: <Icon icon="play" className="w-2.5 shrink-0" />,
       });
     }

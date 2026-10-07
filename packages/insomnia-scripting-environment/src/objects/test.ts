@@ -25,7 +25,11 @@ export async function test(msg: string, fn: () => Promise<void | string>, log: (
         testCase: msg,
         status: 'failed',
         executionTime,
-        errorMessage: `error: ${e} | ACTUAL: ${e.actual} | EXPECTED: ${e.expected}`,
+        // ACTUAL/EXPECTED only exist on assertion errors; a thrown Error would just print "undefined" for both.
+        errorMessage:
+          e.actual === undefined && e.expected === undefined
+            ? `error: ${e}`
+            : `error: ${e} | ACTUAL: ${e.actual} | EXPECTED: ${e.expected}`,
         category: 'unknown',
       });
     }
