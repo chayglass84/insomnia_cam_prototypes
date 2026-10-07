@@ -60,7 +60,7 @@ export const AiGatewayModelsPane: FC<{ models: AiGatewayModel[] }> = ({ models }
           onPress={openRunner}
           className="flex shrink-0 items-center gap-2 rounded-sm bg-(--color-surprise) px-3 py-1.5 text-sm text-(--color-font-surprise) hover:bg-(--color-surprise)/90 focus:bg-(--color-surprise)/90"
         >
-          <Icon icon="play" /> Evaluate Multiple Models
+          <Icon icon="play" /> Model Evaluator
         </Button>
       </div>
       {groups.map(([path, pathModels]) => (
