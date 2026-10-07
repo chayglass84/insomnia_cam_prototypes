@@ -506,7 +506,7 @@ const resolveJudgeConfig = async ({
       return;
     }
     const { request } = await tryToInterpolateRequest({ request: judgeRequest, environment, baseEnvironment });
-    return toJudgeConfig(request, resolveJudgeInstructions(workspace?.aiJudge?.system));
+    return toJudgeConfig(request, resolveJudgeInstructions(workspace?.aiJudge?.system), workspace?.aiJudge?.runs);
   } catch (error) {
     console.warn('[judge] could not resolve the judge request', error);
     return;

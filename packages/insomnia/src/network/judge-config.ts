@@ -15,7 +15,7 @@ interface RenderedJudgeRequest {
  * `Accept: text/event-stream` header (set on generated streaming requests) is replaced. Authentication configured on the
  * request (as opposed to a header) is not applied yet.
  */
-export const toJudgeConfig = (rendered: RenderedJudgeRequest, system?: string): JudgeConfig => {
+export const toJudgeConfig = (rendered: RenderedJudgeRequest, system?: string, runs?: number): JudgeConfig => {
   const headers: Record<string, string> = {};
   for (const header of rendered.headers) {
     if (!header.disabled && header.name && header.name.toLowerCase() !== 'accept') {
@@ -32,5 +32,5 @@ export const toJudgeConfig = (rendered: RenderedJudgeRequest, system?: string): 
     body = undefined;
   }
 
-  return { url: rendered.url, headers, body, ...(system ? { system } : {}) };
+  return { url: rendered.url, headers, body, ...(system ? { system } : {}), ...(runs && runs > 1 ? { runs } : {}) };
 };

@@ -114,6 +114,11 @@ export interface ModelRunSummary {
   totalTests: number;
   /** Share of tests passed, 0-1, or null when the model's runs had no tests. */
   passRate: number | null;
+  /** LLM judge checks (from tests that return an `insomnia.judge()` verdict) passed and run, across the model's runs. */
+  checksPassed: number;
+  checksTotal: number;
+  /** Share of judge checks passed, 0-1, or null when no judge ran for the model. */
+  checkRate: number | null;
 }
 
 /**
@@ -144,6 +149,9 @@ export const summarizeModelRuns = (rows: RunnerResultPerRequest[]): ModelRunSumm
       passedTests: 0,
       totalTests: 0,
       passRate: null,
+      checksPassed: 0,
+      checksTotal: 0,
+      checkRate: null,
     };
     // Rows that ran report the provider's actual (often dated) model; prefer that over the catalog name.
     summary.model = info.model || summary.model;
@@ -157,11 +165,16 @@ export const summarizeModelRuns = (rows: RunnerResultPerRequest[]): ModelRunSumm
     }
     summary.passedTests += (row.results ?? []).filter(result => result.status === 'passed').length;
     summary.totalTests += (row.results ?? []).length;
+    for (const result of row.results ?? []) {
+      summary.checksPassed += result.checks?.passed ?? 0;
+      summary.checksTotal += result.checks?.total ?? 0;
+    }
     byModel.set(key, summary);
   }
   const summaries = [...byModel.values()].map(summary => ({
     ...summary,
     passRate: summary.totalTests > 0 ? summary.passedTests / summary.totalTests : null,
+    checkRate: summary.checksTotal > 0 ? summary.checksPassed / summary.checksTotal : null,
   }));
   // Ascending-with-nulls-last / descending-with-nulls-last comparators for the two nullable keys.
   const nullsLast = (a: number | null, b: number | null, direction: 1 | -1) =>

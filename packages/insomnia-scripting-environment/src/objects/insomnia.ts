@@ -97,10 +97,10 @@ export class InsomniaObject {
     return new Proxy(this, {
       get: (target, prop, receiver) => {
         if (prop === 'test') {
-          const testHandler: TestHandler = async (msg: string, fn: () => Promise<void | string>) => {
+          const testHandler: TestHandler = async (msg: string, fn: () => Promise<void | string | JudgeVerdict>) => {
             await this._test(msg, fn, this.pushRequestTestResult);
           };
-          testHandler.skip = async (msg: string, fn: () => Promise<void | string>) => {
+          testHandler.skip = async (msg: string, fn: () => Promise<void | string | JudgeVerdict>) => {
             await this._skip(msg, fn, this.pushRequestTestResult);
           };
 
@@ -136,6 +136,7 @@ export class InsomniaObject {
       criteria,
       options: { ...this.judgeConfig, ...options },
       answer: options?.answer ?? extractAnswerText(answerBody),
+      control: options?.answer !== undefined,
       question: options?.question ?? extractQuestionText(this.request.body?.toString()),
       send: (url, headers, body) =>
         new Promise((resolve, reject) => {

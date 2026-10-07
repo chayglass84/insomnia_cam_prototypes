@@ -30,6 +30,12 @@ describe('toJudgeConfig', () => {
     expect(toJudgeConfig(rendered({ body: {} })).body).toBeUndefined();
   });
 
+  it('only includes runs when the judge should be asked more than once', () => {
+    expect(toJudgeConfig(rendered())).not.toHaveProperty('runs');
+    expect(toJudgeConfig(rendered(), undefined, 1)).not.toHaveProperty('runs');
+    expect(toJudgeConfig(rendered(), undefined, 3).runs).toBe(3);
+  });
+
   it('only includes system when there is some', () => {
     expect(toJudgeConfig(rendered())).not.toHaveProperty('system');
     expect(toJudgeConfig(rendered(), 'Be harsh.').system).toBe('Be harsh.');

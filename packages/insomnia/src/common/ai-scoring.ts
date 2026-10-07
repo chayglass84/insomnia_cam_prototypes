@@ -19,6 +19,14 @@ export interface ScoringModelInput {
   testsTotal: number;
   /** 0-1, or null when the model had no tests. */
   passRate: number | null;
+  /**
+   * LLM judge checks passed / run (from tests that return an `insomnia.judge()` verdict; controls are not counted).
+   * Partial credit counts, so `checksPassed` can be fractional: a criterion averaging 0.75 adds 0.75.
+   */
+  checksPassed: number;
+  checksTotal: number;
+  /** 0-1, or null when no judge ran for the model. */
+  checkRate: number | null;
   inputTokens: number;
   outputTokens: number;
   /** Total USD for the model's runs, or null when none were priced. */
@@ -29,6 +37,7 @@ export interface ScoringModelInput {
 
 export const DEFAULT_SCORING_SCRIPT = `// Runs once, at the end of a run. \`models\` has one entry per model with totals across the whole run:
 //   id, route, alias, model, rotating, testsPassed, testsTotal, passRate (0-1 or null),
+//   checksPassed (partial credit counts), checksTotal, checkRate (LLM judge checks, 0-1 or null if no judge ran),
 //   inputTokens, outputTokens, costUsd (null if unpriced), declined
 // Return one { id, score } per model, with a score from 0 to 1 (higher is better).
 // You can add a \`note\` to explain a score; it is shown when you hover the score.
@@ -60,6 +69,9 @@ export const buildScoringInput = (summaries: ModelRunSummary[]): ScoringModelInp
     testsPassed: summary.passedTests,
     testsTotal: summary.totalTests,
     passRate: summary.passRate,
+    checksPassed: summary.checksPassed,
+    checksTotal: summary.checksTotal,
+    checkRate: summary.checkRate,
     inputTokens: summary.inputTokens,
     outputTokens: summary.outputTokens,
     costUsd: summary.costUsd,

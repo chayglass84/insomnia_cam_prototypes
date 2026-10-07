@@ -48,6 +48,14 @@ export const RunnerModelSummary: FC<{ summaries: ModelRunSummary[]; scores?: Mod
           <th className={`${numberCell} font-normal`}>Out</th>
           <th className={`${numberCell} font-normal`}>Cost</th>
           <th className={`${numberCell} font-normal`}>Tests passed</th>
+          {summaries.some(summary => summary.checksTotal > 0) && (
+            <th
+              className={`${numberCell} cursor-help font-normal`}
+              title="Checks passed out of checks asked by an LLM judge (insomnia.judge), across this model's runs. Only tests that return the judge's verdict are counted."
+            >
+              Judge checks
+            </th>
+          )}
         </tr>
       </thead>
       <tbody>
@@ -114,6 +122,18 @@ export const RunnerModelSummary: FC<{ summaries: ModelRunSummary[]; scores?: Mod
                 </>
               )}
             </td>
+            {summaries.some(row => row.checksTotal > 0) && (
+              <td className={`${numberCell} ${passRateClassName(summary.checkRate)}`}>
+                {summary.checkRate === null ? (
+                  '—'
+                ) : (
+                  <>
+                    <strong>{`${Math.round(summary.checkRate * 100)}%`}</strong>
+                    <span className="ml-1 text-xs text-(--hl)">{`(${Number(summary.checksPassed.toFixed(2))}/${summary.checksTotal})`}</span>
+                  </>
+                )}
+              </td>
+            )}
           </tr>
         ))}
       </tbody>
