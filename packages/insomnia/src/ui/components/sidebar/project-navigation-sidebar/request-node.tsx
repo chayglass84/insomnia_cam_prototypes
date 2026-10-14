@@ -133,6 +133,7 @@ interface RequestNodeProps {
 
 export const RequestNode = ({ item, onToggleFolder, className, depthOffset = 0 }: RequestNodeProps) => {
   const { doc, level: requestLevel, workspace, project, collapsed, pinned, kind } = item;
+  const isSkill = 'isSkill' in item && Boolean(item.isSkill);
   const isPinnedRequest = kind === 'pinnedRequest';
   const isLastPinned = item.kind === 'pinnedRequest' && item.isLastPinned;
 
@@ -161,7 +162,7 @@ export const RequestNode = ({ item, onToggleFolder, className, depthOffset = 0 }
         </Button>
       )}
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-xs px-2 py-1 text-left transition-colors">
-        {isFolder ? <Icon icon="folder" className={ICON_CLASS} /> : <MethodBadge doc={doc} />}
+        {isFolder ? <Icon icon="folder" className={ICON_CLASS} /> : isSkill ? null : <MethodBadge doc={doc} />}
         <EditableInput
           value={getRequestNameOrFallback(doc)}
           name="request name"

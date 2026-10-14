@@ -7,6 +7,7 @@ import { type ImperativePanelGroupHandle, Panel, PanelGroup, PanelResizeHandle }
 import { href, redirect, useLoaderData, useMatch, useParams, useSearchParams } from 'react-router';
 import YAML from 'yaml';
 
+import { isSkillRequest } from '~/common/ai-skills';
 import { getProductName } from '~/common/constants';
 import { generateId } from '~/common/misc';
 import type { GrpcMethodInfo } from '~/main/ipc/grpc';
@@ -42,6 +43,7 @@ import { GrpcResponsePane } from '~/ui/components/panes/grpc-response-pane';
 import { RequestGroupPane } from '~/ui/components/panes/request-group-pane';
 import { RequestPane } from '~/ui/components/panes/request-pane';
 import { ResponsePane } from '~/ui/components/panes/response-pane';
+import { SkillPane } from '~/ui/components/panes/skill-pane';
 import { SocketIORequestPane } from '~/ui/components/socket-io/request-pane';
 import { SpecView } from '~/ui/components/spec-view';
 import { OrganizationTabList } from '~/ui/components/tabs/tab-list';
@@ -187,6 +189,14 @@ const Debug = () => {
 
   const requestData = useRequestLoaderData();
   const { activeRequest } = requestData || {};
+  // Prototype (3593AI): requests under a prompts project's Skills folder are Markdown skills, not HTTP requests.
+  const isSkill =
+    !!activeRequest &&
+    isRequest(activeRequest) &&
+    isSkillRequest(
+      activeRequest,
+      _collection.map(({ doc }) => doc).filter(models.requestGroup.isRequestGroup),
+    );
 
   const deleteRequestFetcher = useRequestDeleteActionFetcher();
   const duplicateRequestFetcher = useRequestDuplicateActionFetcher();
@@ -523,7 +533,8 @@ const Debug = () => {
                       {models.socketIORequest.isSocketIORequestId(requestId) && activeRequest?._id === requestId && (
                         <SocketIORequestPane environment={activeEnvironment} />
                       )}
-                      {isRequestId(requestId) && activeRequest?._id === requestId && (
+                      {isRequestId(requestId) && activeRequest?._id === requestId && isSkill && <SkillPane />}
+                      {isRequestId(requestId) && activeRequest?._id === requestId && !isSkill && (
                         <RequestPane
                           environmentId={activeEnvironment ? activeEnvironment._id : ''}
                           settings={settings}
@@ -588,7 +599,7 @@ const Debug = () => {
                     </ErrorBoundary>
                   ) : null}
                 </Panel>
-                {activeRequest ? (
+                {activeRequest && !isSkill ? (
                   <>
                     <PanelResizeHandle
                       className={direction === 'horizontal' ? 'h-full w-px bg-(--hl-md)' : 'h-px w-full bg-(--hl-md)'}

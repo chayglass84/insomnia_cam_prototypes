@@ -13,6 +13,7 @@ import { href } from 'react-router';
 import type { RenderedRequest } from '~/common/templating/types';
 import { invariant } from '~/common/utils/invariant';
 import { AnalyticsEvent } from '~/ui/analytics';
+import { bodyTextWithRequestSkills } from '~/ui/utils/apply-request-skills';
 import { createFetcherSubmitHook } from '~/ui/utils/router';
 
 import type { Route } from './+types/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request.$requestId.connect';
@@ -86,6 +87,15 @@ export async function clientAction({ params, request }: Route.ClientActionArgs) 
   }
   if (isEventStreamRequest(req)) {
     const renderedRequest = { ...req, ...rendered } as RenderedRequest;
+    console.info('[skills] connect action, skills checked:', (renderedRequest as any).aiSkillIds?.length ?? 0);
+    // Prototype (3593AI): event-stream prompts send through here, not the plain send action, so add skills here too.
+    const bodyWithSkills = await bodyTextWithRequestSkills(
+      renderedRequest,
+      (await services.workspace.getById(workspaceId))?.konnectAiGatewayModels,
+    );
+    if (bodyWithSkills !== undefined) {
+      renderedRequest.body = { ...renderedRequest.body, text: bodyWithSkills };
+    }
     window.main.curl.open({ workspaceId, renderedRequest });
     window.main.trackAnalyticsEvent({
       event: AnalyticsEvent.requestExecuted,

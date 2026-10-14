@@ -10,6 +10,7 @@ import * as reactUse from 'react-use';
 import { extractQueryStringFromUrl } from '~/common/utils/url/querystring';
 import { OneLineEditor } from '~/ui/components/.client/codemirror/one-line-editor';
 
+import { isSkillRequest } from '../../../common/ai-skills';
 import { getAuthObjectOrNull } from '../../../network/authentication';
 import { useWorkspaceLoaderData } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId';
 import {
@@ -39,6 +40,7 @@ import {
 import { Pane, PaneHeader } from './pane';
 import { PlaceholderRequestPane } from './placeholder-request-pane';
 import { RequestPluginsTab } from './request-plugins-tab';
+import { RequestSkillsTab } from './request-skills-tab';
 
 const { getCombinedPathParametersFromUrl } = models.request;
 
@@ -88,7 +90,7 @@ export const RequestPane: FC<Props> = ({ environmentId, settings, onPaste }) => 
   };
   const gitVersion = useGitVCSVersion();
 
-  const { activeEnvironment, activeGlobalEnvironment, vcsVersion, activeWorkspace, activeProject } =
+  const { activeEnvironment, activeGlobalEnvironment, vcsVersion, activeWorkspace, activeProject, collection } =
     useWorkspaceLoaderData()!;
   // Force re-render when we switch requests, the environment gets modified, or the (Git|Sync)VCS version changes
   const uniqueKey = `${activeEnvironment?._id}::${activeEnvironment?.modified}::${activeGlobalEnvironment?._id}::${activeGlobalEnvironment?.modified}::${requestId}::${gitVersion}::${vcsVersion}::${activeRequestMeta?.activeResponseId}`;
@@ -117,6 +119,14 @@ export const RequestPane: FC<Props> = ({ environmentId, settings, onPaste }) => 
     activeProject?.konnectAiGatewayPromptsFor && activeWorkspace.konnectAiGatewayModels?.length
       ? activeWorkspace.konnectAiGatewayModels
       : null;
+  const skillFolders = collection.map(({ doc }) => doc).filter(models.requestGroup.isRequestGroup);
+  const skills = promptCatalog
+    ? collection
+        .map(({ doc }) => doc)
+        .filter(models.request.isRequest)
+        .filter(doc => isSkillRequest(doc, skillFolders))
+    : [];
+  const checkedSkillCount = (activeRequest.aiSkillIds ?? []).filter(id => skills.some(skill => skill._id === id)).length;
 
   return (
     <Pane type="request">
@@ -146,6 +156,19 @@ export const RequestPane: FC<Props> = ({ environmentId, settings, onPaste }) => 
           className="scrollbar-thin flex h-(--line-height-sm) w-full shrink-0 items-center overflow-x-auto border-b border-solid border-b-(--hl-md) bg-(--color-bg)"
           aria-label="Request pane tabs"
         >
+          {promptCatalog && (
+            <Tab
+              className="flex h-full shrink-0 cursor-pointer items-center justify-between gap-2 px-3 py-1 text-(--hl) outline-hidden transition-colors duration-300 select-none hover:bg-(--hl-sm) hover:text-(--color-font) focus:bg-(--hl-sm) aria-selected:bg-(--hl-xs) aria-selected:text-(--color-font) aria-selected:hover:bg-(--hl-sm) aria-selected:focus:bg-(--hl-sm) data-focus-visible:ring-2 data-focus-visible:ring-(--hl-md) data-focus-visible:ring-inset"
+              id="skills"
+            >
+              <span>Skills</span>
+              {checkedSkillCount > 0 && (
+                <span className="flex h-6 min-w-6 items-center justify-center rounded-lg border border-solid border-(--hl) p-1 text-xs">
+                  {checkedSkillCount}
+                </span>
+              )}
+            </Tab>
+          )}
           <Tab
             className="flex h-full shrink-0 cursor-pointer items-center justify-between gap-2 px-3 py-1 text-(--hl) outline-hidden transition-colors duration-300 select-none hover:bg-(--hl-sm) hover:text-(--color-font) focus:bg-(--hl-sm) aria-selected:bg-(--hl-xs) aria-selected:text-(--color-font) aria-selected:hover:bg-(--hl-sm) aria-selected:focus:bg-(--hl-sm) data-focus-visible:ring-2 data-focus-visible:ring-(--hl-md) data-focus-visible:ring-inset"
             id="params"
@@ -454,6 +477,9 @@ export const RequestPane: FC<Props> = ({ environmentId, settings, onPaste }) => 
             defaultValue={activeRequest.description}
             onChange={(description: string) => patchRequest(requestId, { description })}
           />
+        </TabPanel>
+        <TabPanel className="w-full flex-1 overflow-hidden" id="skills">
+          <RequestSkillsTab request={activeRequest} skills={skills} />
         </TabPanel>
         <TabPanel className="w-full flex-1 overflow-hidden" id="plugins">
           <ErrorBoundary key={uniqueKey} errorClassName="font-error pad text-center">

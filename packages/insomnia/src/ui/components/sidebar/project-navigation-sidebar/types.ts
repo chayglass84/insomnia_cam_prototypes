@@ -55,6 +55,8 @@ export interface CollectionChildFlatItem extends BaseFlatItem<Child['doc']> {
   // nested children for request group
   children?: Child[];
   ancestors?: string[];
+  /** Prototype (3593AI): a request under a Skills folder; shown without an HTTP method badge. */
+  isSkill?: boolean;
   level: number;
   pinned: boolean;
 }
