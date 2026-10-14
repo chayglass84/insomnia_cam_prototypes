@@ -550,6 +550,8 @@ export function applyAiGatewayModelOverride(
   request: { url: string; headers?: { name: string; value: string; disabled?: boolean }[]; body?: { text?: string } },
   target: AiGatewayModel,
   catalog: AiGatewayModel[],
+  /** Saving the change onto the request (prompt model picker) rather than a one-off send: leave stream/Accept alone. */
+  options: { keepStreaming?: boolean } = {},
 ): AiGatewayModelOverride {
   // Strip scheme + host; a templated host like `{{ _.proxy_host }}` contains no `/`.
   const rest = request.url.replace(/^[a-z][a-z0-9+.-]*:\/\/[^/]*/i, '');
@@ -577,16 +579,34 @@ export function applyAiGatewayModelOverride(
     };
   }
 
-  const body = { ...JSON.parse(request.body!.text!), model: modelValue, stream: false };
+  const body = {
+    ...JSON.parse(request.body!.text!),
+    model: modelValue,
+    ...(options.keepStreaming ? {} : { stream: false }),
+  };
   return {
     ...(parsed.format !== target.format ? { formatMismatch: { from: parsed.format, to: target.format } } : {}),
     url: `${hostPart}${targetPath}${rest.slice(currentRoute.length)}`,
     bodyText: JSON.stringify(body, null, 2),
     // Streaming is off, so don't ask for an event stream back.
     headers: (request.headers ?? []).map(h =>
-      h.name.toLowerCase() === 'accept' ? { ...h, value: 'application/json' } : h,
+      !options.keepStreaming && h.name.toLowerCase() === 'accept' ? { ...h, value: 'application/json' } : h,
     ),
   };
+}
+
+/** The catalog model a request currently points at: the one on its route whose `model` value the body carries. */
+export function findSelectedAiGatewayModel(
+  request: { url: string; body?: { text?: string } },
+  catalog: AiGatewayModel[],
+): AiGatewayModel | undefined {
+  let bodyModel: unknown;
+  try {
+    bodyModel = request.body?.text ? JSON.parse(request.body.text).model : undefined;
+  } catch {
+    return undefined;
+  }
+  return findCatalogModelsByPath(request.url, catalog).find(m => m.routeModelValues.includes(String(bodyModel)));
 }
 
 /** The upstream models a catalog model balances across (one entry for older syncs that stored only the first). */

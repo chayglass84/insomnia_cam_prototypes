@@ -31,6 +31,11 @@ import { MarkdownEditor } from '../markdown-editor';
 import { RequestSettingsModal } from '../modals/request-settings-modal';
 import { RenderedQueryString } from '../rendered-query-string';
 import { RequestUrlBar, type RequestUrlBarHandle } from '../request-url-bar';
+import {
+  AiGatewayPromptModelPicker,
+  type AiGatewayPromptTarget,
+  AiGatewayPromptTargetToggle,
+} from './ai-gateway-prompt-model-picker';
 import { Pane, PaneHeader } from './pane';
 import { PlaceholderRequestPane } from './placeholder-request-pane';
 import { RequestPluginsTab } from './request-plugins-tab';
@@ -52,6 +57,10 @@ export const RequestPane: FC<Props> = ({ environmentId, settings, onPaste }) => 
   const patchRequest = useRequestPatcher();
 
   const requestUrlBarRef = useRef<RequestUrlBarHandle>(null);
+  const [promptTarget = 'model', setPromptTarget] = reactUse.useLocalStorage<AiGatewayPromptTarget>(
+    'aiGatewayPromptTarget',
+    'model',
+  );
   const [dismissPathParameterTip, setDismissPathParameterTip] = reactUse.useLocalStorage('dismissPathParameterTip', '');
   const handleImportQueryFromUrl = () => {
     let query;
@@ -104,6 +113,11 @@ export const RequestPane: FC<Props> = ({ environmentId, settings, onPaste }) => 
     Boolean(resolveKonnectRouteLink(activeRequest, activeWorkspace, activeProject)) ||
     Boolean(activeProject?.konnectAiGateway);
 
+  const promptCatalog =
+    activeProject?.konnectAiGatewayPromptsFor && activeWorkspace.konnectAiGatewayModels?.length
+      ? activeWorkspace.konnectAiGatewayModels
+      : null;
+
   return (
     <Pane type="request">
       <PaneHeader>
@@ -118,6 +132,12 @@ export const RequestPane: FC<Props> = ({ environmentId, settings, onPaste }) => 
             nunjucksPowerUserMode={settings.nunjucksPowerUserMode}
             onPaste={onPaste}
             ref={requestUrlBarRef}
+            leading={promptCatalog ? <AiGatewayPromptTargetToggle value={promptTarget} onChange={setPromptTarget} /> : undefined}
+            urlReplacement={
+              promptCatalog && promptTarget === 'model' ? (
+                <AiGatewayPromptModelPicker request={activeRequest} catalog={promptCatalog} />
+              ) : undefined
+            }
           />
         </ErrorBoundary>
       </PaneHeader>

@@ -6,6 +6,7 @@ import {
   buildAiGatewayRequestSpec,
   findCatalogModelByRequest,
   findCatalogModelByResponseModel,
+  findSelectedAiGatewayModel,
   formatMismatchNote,
   gatewayErrorText,
   getAiGatewayModelSuggestions,
@@ -117,6 +118,27 @@ describe('applyAiGatewayModelOverride', () => {
       }),
     },
   };
+
+  it('keepStreaming retargets path and model but leaves stream and Accept as they were', () => {
+    const result = applyAiGatewayModelOverride(request, sonnet, catalog, { keepStreaming: true });
+    expect('skipReason' in result).toBe(false);
+    if ('skipReason' in result) {
+      return;
+    }
+    expect(result.url).toBe('http://{{ _.proxy_host }}/other-anthropic/v1/messages?x=1');
+    expect(JSON.parse(result.bodyText)).toMatchObject({ model: 'sonnet', stream: true, system: 'Hi' });
+    expect(result.headers.find(h => h.name === 'Accept')?.value).toBe('text/event-stream');
+  });
+
+  it('findSelectedAiGatewayModel finds the model a request currently points at', () => {
+    const catalogForFind = [opus, fable, sonnet];
+    expect(findSelectedAiGatewayModel(request, catalogForFind)?.id).toBe('opus');
+    expect(
+      findSelectedAiGatewayModel({ ...request, body: { text: JSON.stringify({ model: 'nope' }) } }, catalogForFind),
+    ).toBeUndefined();
+    expect(findSelectedAiGatewayModel({ ...request, body: { text: 'not json' } }, catalogForFind)).toBeUndefined();
+    expect(findSelectedAiGatewayModel({ ...request, url: 'http://h/unknown' }, catalogForFind)).toBeUndefined();
+  });
 
   it('retargets path and model, turns streaming off, keeps the rest of the body and the query', () => {
     const result = applyAiGatewayModelOverride(request, sonnet, catalog);

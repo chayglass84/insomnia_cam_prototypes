@@ -48,6 +48,10 @@ interface Props {
   nunjucksPowerUserMode: boolean;
   historyKey: string;
   onPaste: (text: string) => void;
+  /** Prototype (3593AI): shown in place of the URL editor (AI Gateway prompts pick a model instead of typing a URL). */
+  urlReplacement?: React.ReactNode;
+  /** Prototype (3593AI): rendered at the far left, before the method selector. */
+  leading?: React.ReactNode;
 }
 
 export interface RequestUrlBarHandle {
@@ -56,7 +60,7 @@ export interface RequestUrlBarHandle {
 }
 
 export const RequestUrlBar = forwardRef<RequestUrlBarHandle, Props>(
-  ({ handleAutocompleteUrls, historyKey, onPaste }, ref) => {
+  ({ handleAutocompleteUrls, historyKey, onPaste, urlReplacement, leading }, ref) => {
     const [searchParams, setSearchParams] = useSearchParams();
     const { userSession } = useRootLoaderData()!;
     const { vaultKey } = userSession;
@@ -308,6 +312,7 @@ export const RequestUrlBar = forwardRef<RequestUrlBarHandle, Props>(
     const isCancellable = currentInterval || currentTimeout || isEventStreamOpen || isGraphQLSubscriptionOpen;
     return (
       <div className="flex w-full items-stretch justify-between self-stretch">
+        {leading}
         <div className="flex items-stretch p-1">
           <MethodSelector
             className="self-stretch"
@@ -318,6 +323,7 @@ export const RequestUrlBar = forwardRef<RequestUrlBarHandle, Props>(
           />
         </div>
         <div className="flex flex-1 items-center p-1">
+          {urlReplacement ?? (
           <OneLineEditor
             id="request-url-bar"
             // Remount on request switch or environment change (switch/edit) so nunjucks
@@ -339,6 +345,7 @@ export const RequestUrlBar = forwardRef<RequestUrlBarHandle, Props>(
             })}
             onPaste={onPaste}
           />
+          )}
           <div className="flex self-stretch">
             {isCancellable ? (
               <button

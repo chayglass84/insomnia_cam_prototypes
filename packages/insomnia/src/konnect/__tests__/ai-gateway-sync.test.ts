@@ -158,6 +158,35 @@ describe('AI Gateway prompts project', () => {
     expect((await insoservices.project.list({ parentId: ORG_ID })).filter(p => p.konnectAiGatewayPromptsFor)).toHaveLength(1);
   });
 
+  it('adopts an existing unmarked project with the generated name instead of creating a duplicate', async () => {
+    vi.stubGlobal('fetch', mockFetch());
+    await syncKonnect({ pat: 'kpat_test', organizationId: ORG_ID });
+    const marked = (await getPromptsProject())!;
+    // Simulate a data layer that pruned the marker when the project was first saved.
+    await insoservices.project.update(marked, { konnectAiGatewayPromptsFor: null });
+    expect(await getPromptsProject()).toBeUndefined();
+
+    await syncKonnect({ pat: 'kpat_test', organizationId: ORG_ID });
+    const all = await insoservices.project.list({ parentId: ORG_ID });
+    expect(all.filter(p => p.name === 'My Gateway prompts')).toHaveLength(1);
+    expect((await getPromptsProject())?._id).toBe(marked._id);
+  });
+
+  it('keeps a copy of the gateway model catalog on the prompts workspace and refreshes it on re-sync', async () => {
+    vi.stubGlobal('fetch', mockFetch([apiModel('opus')]));
+    await syncKonnect({ pat: 'kpat_test', organizationId: ORG_ID });
+    const promptsCatalog = async () => {
+      const project = (await getPromptsProject())!;
+      const [workspace] = await insoservices.workspace.list({ parentId: project._id, scope: 'collection' });
+      return workspace.konnectAiGatewayModels?.flatMap(m => m.routeModelValues);
+    };
+    expect(await promptsCatalog()).toEqual(['opus']);
+
+    vi.stubGlobal('fetch', mockFetch([apiModel('opus'), apiModel('fable')]));
+    await syncKonnect({ pat: 'kpat_test', organizationId: ORG_ID });
+    expect(await promptsCatalog()).toEqual(['opus', 'fable']);
+  });
+
   it('gives the prompts project the same proxy_host as the gateway project on first sync', async () => {
     vi.stubGlobal('fetch', mockFetch());
     await syncKonnect({ pat: 'kpat_test', organizationId: ORG_ID });
