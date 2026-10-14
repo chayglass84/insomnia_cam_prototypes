@@ -97,6 +97,8 @@ interface CommonProject {
   konnectRegion?: string | null;
   /** Prototype (3593AI): true when this Konnect project is an AI Gateway, not a control plane. */
   konnectAiGateway?: boolean | null;
+  /** Prototype (3593AI): set on the local "prompts" project that belongs to the AI Gateway with this id. */
+  konnectAiGatewayPromptsFor?: string | null;
 }
 
 export interface RemoteProject extends BaseModel, CommonProject {
@@ -120,7 +122,7 @@ export const isProject = (model: Pick<BaseModel, 'type'>): model is Project => m
 
 export const isProjectId = (id: string | null) => id?.startsWith(`${prefix}_`);
 
-export const optionalKeys = ['konnectControlPlaneId', 'konnectClusterType', 'konnectDeploymentType', 'konnectRegion', 'konnectAiGateway'];
+export const optionalKeys = ['konnectControlPlaneId', 'konnectClusterType', 'konnectDeploymentType', 'konnectRegion', 'konnectAiGateway', 'konnectAiGatewayPromptsFor'];
 
 export function init(): Partial<Project> {
   return {

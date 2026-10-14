@@ -128,6 +128,47 @@ describe('AI Gateway environment', () => {
   });
 });
 
+describe('AI Gateway prompts project', () => {
+  const getPromptsProject = async () =>
+    (await insoservices.project.list({ parentId: ORG_ID })).find(p => p.konnectAiGatewayPromptsFor === 'gw-1');
+
+  it('creates a plain local project with Prompts and Skills folders and a starter prompt', async () => {
+    vi.stubGlobal('fetch', mockFetch());
+    await syncKonnect({ pat: 'kpat_test', organizationId: ORG_ID });
+
+    const project = (await getPromptsProject())!;
+    expect(project.konnectControlPlaneId ?? null).toBeNull();
+    const [workspace] = await insoservices.workspace.list({ parentId: project._id, scope: 'collection' });
+    const folders = await db.find(models.requestGroup.type, { parentId: workspace._id });
+    expect(folders.map(f => f.name).sort()).toEqual(['Prompts', 'Skills']);
+    const prompts = folders.find(f => f.name === 'Prompts');
+    expect(prompts.afterResponseScript).toContain("insomnia.test('Got a valid response'");
+    const requests = await db.find(models.request.type, { parentId: prompts._id });
+    expect(requests.map(r => r.name)).toEqual(['My first prompt test']);
+  });
+
+  it('is create-only: a deleted starter prompt stays deleted and nothing is duplicated on re-sync', async () => {
+    vi.stubGlobal('fetch', mockFetch());
+    await syncKonnect({ pat: 'kpat_test', organizationId: ORG_ID });
+    const [request] = await db.find(models.request.type, { name: 'My first prompt test' });
+    await insoservices.request.remove(request);
+
+    await syncKonnect({ pat: 'kpat_test', organizationId: ORG_ID });
+    expect(await db.find(models.request.type, { name: 'My first prompt test' })).toHaveLength(0);
+    expect((await insoservices.project.list({ parentId: ORG_ID })).filter(p => p.konnectAiGatewayPromptsFor)).toHaveLength(1);
+  });
+
+  it('gives the prompts project the same proxy_host as the gateway project on first sync', async () => {
+    vi.stubGlobal('fetch', mockFetch());
+    await syncKonnect({ pat: 'kpat_test', organizationId: ORG_ID });
+
+    const project = (await getPromptsProject())!;
+    const [envWorkspace] = await insoservices.workspace.list({ parentId: project._id, scope: 'environment' });
+    const promptsEnv = await insoservices.environment.getOrCreateForParentId(envWorkspace._id);
+    expect(promptsEnv.data.proxy_host).toBe((await getGatewayEnv()).data.proxy_host);
+  });
+});
+
 describe('AI Gateway starter tests', () => {
   const getRootFolder = async () => {
     const folders = await db.find(models.requestGroup.type, { konnectRouteId: 'ai:gw-1:root' });
