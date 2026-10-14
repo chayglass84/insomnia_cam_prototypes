@@ -352,6 +352,18 @@ const DURATION_OPTIONS: { id: number; name: string }[] = [
 const primaryButton = 'shrink-0 rounded-xs bg-(--color-surprise) px-3 py-1 text-center font-medium text-(--color-font-surprise)';
 const secondaryButton = 'shrink-0 rounded-xs border border-solid border-(--hl-md) px-3 py-1 text-center hover:bg-(--hl-sm)';
 
+function fmtAgo(ms: number): string {
+  const mins = Math.floor(ms / 60_000);
+  if (mins < 1) {
+    return 'just now';
+  }
+  if (mins < 60) {
+    return `${mins} min ago`;
+  }
+  const hours = Math.floor(mins / 60);
+  return hours < 24 ? `${hours} hr ago` : `${Math.floor(hours / 24)} days ago`;
+}
+
 // The one place to configure/start/stop the (control-plane-wide) session —
 // moved here from the floating panel 2026-10-14. Same shared session as every
 // other Konnect-linked request in the workspace; only the highlighting of
@@ -371,9 +383,31 @@ function DebuggerControls({ debuggerState }: { debuggerState: UseKonnectDebugger
     return () => clearInterval(interval);
   }, [status, startedAt]);
 
+  // Only for the "x min ago" text — this session can be hours old, since it
+  // lives at the workspace level and outlives the tab. Coarse tick is enough.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(interval);
+  }, []);
+
   const isRunning = status === 'in_progress';
+  // The window has elapsed but Konnect hasn't reported `completed_at` yet
+  // (poll cadence + its own lag), so we're still `in_progress`. Say so
+  // instead of counting past the end ("32s / 30s").
+  const isFinishing = isRunning && durationSecs != null && elapsedSecs >= durationSecs;
   return (
-    <div className="flex shrink-0 flex-wrap items-center gap-3 border-b border-solid border-(--hl-md) px-3 py-2">
+    <div className="flex shrink-0 flex-col border-b border-solid border-(--hl-md)">
+      {startedAt && (
+        <div className="flex flex-wrap items-baseline gap-x-2 border-b border-solid border-(--hl-sm) px-3 py-1.5">
+          <span className="text-(--hl)">Session started</span>
+          <span className="font-semibold">
+            {new Date(startedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'medium' })}
+          </span>
+          <span className="text-xs text-(--hl)">({fmtAgo(now - startedAt)})</span>
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-3 px-3 py-2">
       {(status === 'idle' || status === 'completed' || status === 'error') && (
         <>
           <span className="shrink-0 text-(--hl)">Duration</span>
@@ -419,7 +453,9 @@ function DebuggerControls({ debuggerState }: { debuggerState: UseKonnectDebugger
       {isRunning && (
         <>
           <span className="text-(--hl)">
-            Capturing… {elapsedSecs}s / {durationSecs}s
+            {isFinishing
+              ? 'Wrapping up — waiting for Konnect to finish the session…'
+              : `Capturing… ${elapsedSecs}s / ${durationSecs}s`}
           </span>
           <Button className={secondaryButton} onPress={stop}>
             Stop
@@ -444,6 +480,7 @@ function DebuggerControls({ debuggerState }: { debuggerState: UseKonnectDebugger
       >
         Learn more about Kong Debugger
       </Button>
+      </div>
     </div>
   );
 }
