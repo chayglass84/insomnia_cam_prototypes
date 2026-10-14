@@ -846,40 +846,41 @@ function aiGatewayModelsChanged(a: AiGatewayModel[], b: AiGatewayModel[]): boole
  * requests are never edited or deleted, so user prompts and folder-level scripts survive every sync.
  * The URL scheme is hardcoded to http (fine for local hybrid data planes) — prototype shortcut.
  */
+const ROUTES_AND_MODELS_FOLDER = 'Routes and Models';
+
+/** Create-only (no rename, unlike upsertRouteFolder) so a user renaming a folder isn't reverted. */
+const ensureFolder = async (
+  parentId: string,
+  name: string,
+  konnectRouteId: string,
+  extraFields: Partial<RequestGroup> = {},
+) =>
+  (await db.find<RequestGroup>(models.requestGroup.type, { parentId, konnectRouteId }))[0]?._id ??
+  (await insoservices.requestGroup.create({ parentId, name, konnectRouteId, ...extraFields }))._id;
+
 async function ensureAiGatewayTree(
   workspaceId: string,
   gatewayId: string,
-  gatewayName: string,
   gatewayModels: AiGatewayModel[],
 ) {
-  // Create-only (no rename, unlike upsertRouteFolder) so a user renaming a folder isn't reverted.
-  const ensureFolder = async (
-    parentId: string,
-    name: string,
-    konnectRouteId: string,
-    extraFields: Partial<RequestGroup> = {},
-  ) =>
-    (await db.find<RequestGroup>(models.requestGroup.type, { parentId, konnectRouteId }))[0]?._id ??
-    (await insoservices.requestGroup.create({ parentId, name, konnectRouteId, ...extraFields }))._id;
-
-  // Prototype convenience: starter tests on the root folder (applies to every route beneath it), set only when
+  // One flat "Routes and Models" folder, one request per route. Its konnectRouteId keeps the legacy `:root` suffix.
+  // Prototype convenience: starter tests on the folder (applies to every request in it), set only when
   // the folder is first created so edits survive re-sync, and a delete + re-add of the gateway brings them back.
-  const rootFolderId = await ensureFolder(workspaceId, gatewayName, `ai:${gatewayId}:root`, {
+  const routesFolderId = await ensureFolder(workspaceId, ROUTES_AND_MODELS_FOLDER, `ai:${gatewayId}:root`, {
     afterResponseScript: AI_GATEWAY_STARTER_AFTER_RESPONSE_SCRIPT,
   });
 
   for (const [routePath, routeModels] of groupModelsByPath(gatewayModels)) {
-    const routeFolderId = await ensureFolder(rootFolderId, `Route: ${routePath}`, `ai:${gatewayId}:${routePath}`);
     const key = `ai:${gatewayId}:${routePath}`;
     const existing = (
-      await db.find<Request>(models.request.type, { parentId: routeFolderId, konnectRouteKey: key })
+      await db.find<Request>(models.request.type, { parentId: routesFolderId, konnectRouteKey: key })
     )[0];
     if (existing) {
       continue;
     }
     const spec = buildAiGatewayRequestSpec(routePath, routeModels);
     await insoservices.request.create({
-      parentId: routeFolderId,
+      parentId: routesFolderId,
       name: spec.name,
       description: spec.description,
       method: 'POST',
@@ -890,6 +891,77 @@ async function ensureAiGatewayTree(
       ],
       ...(spec.body ? { body: { mimeType: 'application/json', text: spec.body } } : {}),
       konnectRouteKey: key,
+    });
+  }
+}
+
+/**
+ * Prototype (3593AI): a second, plain local project next to the gateway project that holds the user's own
+ * prompts and skills (the gateway project stays the source of truth for routes and models). Create-only:
+ * deleting it and re-syncing brings back the starter content. It has no `konnectControlPlaneId`, so neither
+ * the control-plane sync nor the remove-only project rules touch it.
+ */
+async function ensureAiGatewayPromptsProject(
+  gateway: KonnectAiGateway,
+  gatewayName: string,
+  gatewayProject: Project,
+  organizationId: string,
+  gatewayModels: AiGatewayModel[],
+): Promise<void> {
+  const promptsName = `${gatewayName} prompts`;
+  const existing = (await insoservices.project.list({ parentId: organizationId })).find(
+    p => p.konnectAiGatewayPromptsFor === gateway.id,
+  );
+  const project =
+    existing ??
+    (await insoservices.project.create({
+      parentId: organizationId,
+      name: promptsName,
+      konnectAiGatewayPromptsFor: gateway.id,
+    }));
+
+  // Same proxy host as the gateway project (fill-only, so the user's edits to it are never overwritten).
+  const [gatewayEnvWorkspace] = await insoservices.workspace.list({ parentId: gatewayProject._id, scope: 'environment' });
+  const gatewayEnv = await insoservices.environment.getOrCreateForParentId(gatewayEnvWorkspace._id);
+  const environmentId = await upsertProjectEnvVars(
+    { name: promptsName, proxy_urls: gateway.proxy_urls },
+    project,
+    String(gatewayEnv.data?.proxy_host ?? AI_GATEWAY_FALLBACK_PROXY_HOST),
+  );
+
+  let workspace = (await insoservices.workspace.list({ parentId: project._id })).find(w => w.scope === 'collection');
+  if (!workspace) {
+    workspace = await insoservices.workspace.create({ parentId: project._id, name: promptsName, scope: 'collection' });
+  }
+  const workspaceMeta = await insoservices.workspaceMeta.getOrCreateByParentId(workspace._id);
+  if (workspaceMeta.activeGlobalEnvironmentId !== environmentId) {
+    await insoservices.workspaceMeta.update(workspaceMeta, { activeGlobalEnvironmentId: environmentId });
+  }
+  await insoservices.cookieJar.getOrCreateForParentId(workspace._id);
+
+  // The starter prompt is created together with its folder only, so a prompt the user deletes stays deleted.
+  const promptsKey = `ai:${gateway.id}:prompts`;
+  const promptsFolderExists = (
+    await db.find<RequestGroup>(models.requestGroup.type, { parentId: workspace._id, konnectRouteId: promptsKey })
+  ).length > 0;
+  const promptsFolderId = await ensureFolder(workspace._id, 'Prompts', promptsKey, {
+    afterResponseScript: AI_GATEWAY_STARTER_AFTER_RESPONSE_SCRIPT,
+  });
+  await ensureFolder(workspace._id, 'Skills', `ai:${gateway.id}:skills`);
+  const [firstRoute] = groupModelsByPath(gatewayModels);
+  if (!promptsFolderExists && firstRoute) {
+    // Placeholder wiring: a normal route request. The model dropdown replaces the typed URL in a later chunk.
+    const spec = buildAiGatewayRequestSpec(firstRoute[0], firstRoute[1]);
+    await insoservices.request.create({
+      parentId: promptsFolderId,
+      name: 'My first prompt test',
+      method: 'POST',
+      url: `http://{{ _.proxy_host }}${spec.path}`,
+      headers: [
+        { name: 'Content-Type', value: 'application/json' },
+        { name: 'Accept', value: 'text/event-stream' },
+      ],
+      ...(spec.body ? { body: { mimeType: 'application/json', text: spec.body } } : {}),
     });
   }
 }
@@ -965,7 +1037,8 @@ async function syncAiGateway(
       konnectAiGatewayModels: models,
     });
   }
-  await ensureAiGatewayTree(workspace._id, gateway.id, name, models);
+  await ensureAiGatewayTree(workspace._id, gateway.id, models);
+  await ensureAiGatewayPromptsProject(gateway, name, project, organizationId, models);
 
   const workspaceMeta = await insoservices.workspaceMeta.getOrCreateByParentId(workspace._id);
   if (workspaceMeta.activeGlobalEnvironmentId !== environmentId) {
