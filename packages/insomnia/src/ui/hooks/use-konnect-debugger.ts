@@ -11,12 +11,12 @@ import {
   type KonnectDebugSpan,
 } from '../../konnect/api';
 
-// Real-time-ish per user request ("can it update once a second, whatever")
-// — this used to only fetch traces once, after the session's `completed_at`
-// showed up. Now it fetches (incrementally) on every poll tick, so the tab
-// fills in live while a session is still `in_progress` instead of only
-// showing anything once the whole window has elapsed.
-const POLL_INTERVAL_MS = 1000;
+// Fetches (incrementally) on every poll tick, so the tab fills in while a
+// session is still `in_progress` instead of only showing anything once the
+// whole window has elapsed. 3s (was 1s, 2026-10-14): traces take ~10s to
+// show up on Konnect's side regardless (confirmed with a plain curl), so
+// polling faster than that just hammers the API for no visible gain.
+const POLL_INTERVAL_MS = 3000;
 // PROTOTYPE SHORTCUT: a session can report up to `maxSamples` traces, and
 // each one needs its own detail fetch (no batch/detail endpoint found).
 // Capping how many we fetch *in total, across the whole session* (not per
@@ -83,6 +83,10 @@ export function useKonnectDebugger(link: KonnectControlPlaneLink | null) {
   // time, instead of re-fetching (and re-appending duplicates of) every
   // trace on every tick. Reset at the top of every start().
   const loadedTraceIdsRef = useRef<Set<string>>(new Set());
+  // Skip a tick if the previous one is still running, so slow responses
+  // can't stack up overlapping polls (which also re-fetched the same trace
+  // details, since ids are only marked loaded after the detail returns).
+  const pollInFlightRef = useRef(false);
 
   useEffect(() => {
     // BUG FIXED 2026-09-23: `cancelledRef` was never reset back to false
@@ -183,7 +187,12 @@ export function useKonnectDebugger(link: KonnectControlPlaneLink | null) {
         traces: [],
       });
 
+      pollInFlightRef.current = false;
       pollTimer.current = setInterval(async () => {
+        if (pollInFlightRef.current) {
+          return;
+        }
+        pollInFlightRef.current = true;
         try {
           const [current, newTraces] = await Promise.all([
             fetchDebugSession(pat, link.controlPlaneId, session.id, link.region),
@@ -213,6 +222,8 @@ export function useKonnectDebugger(link: KonnectControlPlaneLink | null) {
           if (!cancelledRef.current) {
             setState(prev => ({ ...prev, status: 'error', error: err instanceof Error ? err.message : 'Failed to poll debug session.' }));
           }
+        } finally {
+          pollInFlightRef.current = false;
         }
       }, POLL_INTERVAL_MS);
     } catch (err) {

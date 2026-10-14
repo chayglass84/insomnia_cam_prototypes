@@ -230,6 +230,12 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
   const isRequestSending = requestSendingFetcher.state !== 'idle';
 
   const { isExecuting, steps } = useExecutionState({ requestId: activeRequest._id });
+  const konnectDebugger = useKonnectDebuggerContext();
+  // The Debugger tab hosts the session controls, so it has to be reachable
+  // even before this request has ever been sent (see the no-response branch
+  // below). `konnectRouteKey` is `${routeId}:${method}:...` — see
+  // use-konnect-plugins.ts.
+  const konnectRouteId = activeRequest?.konnectRouteKey?.split(':')[0] ?? null;
   // Moved here from the Request pane per user feedback ("shouldn't debugger
   // show in the Response panel, right after Preview, rather than Request?").
   // Note the trade-off this creates: this whole tab bar (see the `!activeResponse`
@@ -297,7 +303,7 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
 
   // If there is no previous response, show placeholder for loading indicator
   if (!activeResponse) {
-    return (
+    const placeholder = (
       <PlaceholderResponsePane>
         {isExecuting && (
           <ResponseTimer
@@ -307,6 +313,39 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
           />
         )}
       </PlaceholderResponsePane>
+    );
+    // Konnect-linked projects get a minimal tab bar here so the Debugger
+    // (which owns start/stop) isn't gated behind sending a request first.
+    if (!konnectDebugger || konnectDebugger.debuggerState.status === 'not-linked') {
+      return placeholder;
+    }
+    const tabClassName =
+      'flex h-full shrink-0 cursor-pointer items-center justify-between gap-2 px-3 py-1 text-(--hl) outline-hidden transition-colors duration-300 select-none hover:bg-(--hl-sm) hover:text-(--color-font) focus:bg-(--hl-sm) aria-selected:bg-(--hl-xs) aria-selected:text-(--color-font) aria-selected:hover:bg-(--hl-sm) aria-selected:focus:bg-(--hl-sm)';
+    return (
+      <Tabs aria-label="Response pane tabs" className="flex h-full w-full flex-1 flex-col">
+        <TabList
+          className="flex h-(--line-height-sm) w-full shrink-0 items-center overflow-x-auto border-b border-solid border-b-(--hl-md) bg-(--color-bg)"
+          aria-label="Response pane tabs"
+        >
+          <Tab className={tabClassName} id="preview">
+            Preview
+          </Tab>
+          <Tab className={tabClassName} id="debugger">
+            <span>Debugger</span>
+            <span className="flex h-6 min-w-6 shrink-0 items-center justify-center">
+              <KongLogo width={14} height={13} />
+            </span>
+          </Tab>
+        </TabList>
+        <TabPanel className="flex w-full flex-1 flex-col overflow-hidden" id="preview">
+          {placeholder}
+        </TabPanel>
+        <TabPanel className="w-full flex-1 overflow-hidden" id="debugger">
+          <ErrorBoundary errorClassName="font-error pad text-center">
+            <RequestDebuggerTab routeId={konnectRouteId} />
+          </ErrorBoundary>
+        </TabPanel>
+      </Tabs>
     );
   }
 
@@ -488,7 +527,7 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
         </TabPanel>
         <TabPanel className="w-full flex-1 overflow-hidden" id="debugger">
           <ErrorBoundary key={activeResponse._id} errorClassName="font-error pad text-center">
-            <RequestDebuggerTab />
+            <RequestDebuggerTab routeId={konnectRouteId} />
           </ErrorBoundary>
         </TabPanel>
         <TabPanel className="flex w-full flex-1 flex-col overflow-y-auto" id="headers">
