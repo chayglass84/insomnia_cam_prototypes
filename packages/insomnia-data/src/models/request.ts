@@ -309,6 +309,8 @@ export interface BaseRequest {
   settingRebuildPath: boolean;
   settingFollowRedirects: 'global' | 'on' | 'off';
   disableUserAgentHeader?: boolean;
+  /** Prototype (3593AI): ids of the Skills-folder requests whose Markdown is added to the system prompt on send. */
+  aiSkillIds?: string[] | null;
   konnectRouteKey?: string | null;
   konnectManagedHeaderNames?: string[] | null;
 }
@@ -345,6 +347,7 @@ export const isGraphqlSubscriptionRequest = (model: Pick<BaseModel, 'type'>) =>
   isRequest(model) && getOperationType(model) === OperationTypeNode.SUBSCRIPTION;
 
 export const optionalKeys: (keyof BaseRequest)[] = [
+  'aiSkillIds',
   'konnectRouteKey',
   'konnectManagedHeaderNames',
   'disableUserAgentHeader',

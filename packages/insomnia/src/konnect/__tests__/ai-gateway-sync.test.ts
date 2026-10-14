@@ -144,7 +144,44 @@ describe('AI Gateway prompts project', () => {
     const prompts = folders.find(f => f.name === 'Prompts');
     expect(prompts.afterResponseScript).toContain("insomnia.test('Got a valid response'");
     const requests = await db.find(models.request.type, { parentId: prompts._id });
-    expect(requests.map(r => r.name)).toEqual(['My first prompt test']);
+    expect(requests.map(r => r.name)).toEqual(['My first prompt test', 'Test the Concise answers skill']);
+    const concise = requests.find(r => r.name === 'Test the Concise answers skill');
+    expect(concise.afterResponseScript).toContain('under 80 words');
+    expect(concise.aiSkillIds ?? []).toEqual([]);
+    expect(JSON.parse(concise.body.text).messages.at(-1).content).toBe('Explain how HTTP caching works.');
+  });
+
+  it('adds the example skill to an empty Skills folder, and not once the user has a skill of their own', async () => {
+    vi.stubGlobal('fetch', mockFetch());
+    await syncKonnect({ pat: 'kpat_test', organizationId: ORG_ID });
+    const skillsFolder = (await db.find(models.requestGroup.type, { konnectRouteId: 'ai:gw-1:skills' }))[0];
+    const skillsIn = () => db.find(models.request.type, { parentId: skillsFolder._id });
+    const [example] = await skillsIn();
+    expect(example.name).toBe('Concise answers');
+    expect(example.description).toContain('Answer in as few words');
+
+    // Re-sync does not duplicate it.
+    await syncKonnect({ pat: 'kpat_test', organizationId: ORG_ID });
+    expect(await skillsIn()).toHaveLength(1);
+
+    // The user's own skill replaces the example; it does not come back alongside it.
+    await insoservices.request.create({ parentId: skillsFolder._id, name: 'Mine', description: '# Mine' });
+    await insoservices.request.remove(example);
+    await syncKonnect({ pat: 'kpat_test', organizationId: ORG_ID });
+    expect((await skillsIn()).map(r => r.name)).toEqual(['Mine']);
+  });
+
+  it('backfills the example into a Skills folder that already existed empty', async () => {
+    vi.stubGlobal('fetch', mockFetch());
+    await syncKonnect({ pat: 'kpat_test', organizationId: ORG_ID });
+    const skillsFolder = (await db.find(models.requestGroup.type, { konnectRouteId: 'ai:gw-1:skills' }))[0];
+    for (const request of await db.find(models.request.type, { parentId: skillsFolder._id })) {
+      await insoservices.request.remove(request);
+    }
+    await syncKonnect({ pat: 'kpat_test', organizationId: ORG_ID });
+    expect((await db.find(models.request.type, { parentId: skillsFolder._id })).map(r => r.name)).toEqual([
+      'Concise answers',
+    ]);
   });
 
   it('is create-only: a deleted starter prompt stays deleted and nothing is duplicated on re-sync', async () => {
@@ -155,6 +192,7 @@ describe('AI Gateway prompts project', () => {
 
     await syncKonnect({ pat: 'kpat_test', organizationId: ORG_ID });
     expect(await db.find(models.request.type, { name: 'My first prompt test' })).toHaveLength(0);
+    expect(await db.find(models.request.type, { name: 'Test the Concise answers skill' })).toHaveLength(1);
     expect((await insoservices.project.list({ parentId: ORG_ID })).filter(p => p.konnectAiGatewayPromptsFor)).toHaveLength(1);
   });
 

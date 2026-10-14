@@ -39,6 +39,7 @@ import {
   tryToTransformRequestWithPlugins,
 } from '~/network/network';
 import { AnalyticsEvent, type ImportAttribution, importAttributionKey } from '~/ui/analytics';
+import { bodyTextWithRequestSkills } from '~/ui/utils/apply-request-skills';
 import { recordAction } from '~/ui/utils/record-action';
 import { createFetcherSubmitHook } from '~/ui/utils/router';
 
@@ -169,6 +170,17 @@ export const sendActionImplementation = async (options: {
         headers: override.headers,
         body: { ...fetchedRequestData.request.body, text: override.bodyText },
       },
+    };
+  }
+  // Prototype (3593AI): add the request's checked skills to its system prompt for this send only (nothing is saved).
+  const bodyWithSkills = await bodyTextWithRequestSkills(
+    requestData.request,
+    requestData.workspace.konnectAiGatewayModels,
+  );
+  if (bodyWithSkills !== undefined) {
+    requestData = {
+      ...requestData,
+      request: { ...requestData.request, body: { ...requestData.request.body, text: bodyWithSkills } },
     };
   }
   const requestMeta = await services.requestMeta.getOrCreateByParentId(requestId);

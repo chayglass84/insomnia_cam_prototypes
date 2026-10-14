@@ -18,6 +18,7 @@ import { href, useNavigate, useParams, useSearchParams } from 'react-router';
 import * as reactUse from 'react-use';
 
 import { Button as BasicButton } from '~/basic-components/button';
+import { isSkillsFolder } from '~/common/ai-skills';
 import { workspaceChildrenKeys } from '~/common/app-data';
 import { filterCollection, flattenCollectionChildren } from '~/common/collection';
 import type { SortOrder } from '~/common/constants';
@@ -310,6 +311,12 @@ const ProjectNavigationSidebarInner = (
               // If workspace or any of its collection child matches the filter, show the workspace; otherwise hide
               items.find(i => i.kind === 'workspace' && i.doc._id === workspaceId)!.hidden = shouldHide;
             }
+            // Prototype (3593AI): requests under a Skills folder are shown without an HTTP method badge.
+            const skillFolderIds = new Set(
+              collectionChildren
+                .filter(child => models.requestGroup.isRequestGroup(child.doc) && isSkillsFolder(child.doc))
+                .map(child => child.doc._id),
+            );
             // Show pinned collection children when the workspace is expanded
             const pinnedCollectionChildren = shouldHideCollectionChildren
               ? []
@@ -332,6 +339,7 @@ const ProjectNavigationSidebarInner = (
                 workspace: workspace as Workspace,
                 children: child.children,
                 ancestors: child.ancestors,
+                isSkill: child.ancestors?.some(id => skillFolderIds.has(id)) ?? false,
                 doc: child.doc,
                 collapsed: child.collapsed,
                 hidden: false,
@@ -345,6 +353,7 @@ const ProjectNavigationSidebarInner = (
             collectionChildren.forEach(child => {
               items.push({
                 kind: 'collectionChild',
+                isSkill: child.ancestors?.some(id => skillFolderIds.has(id)) ?? false,
                 organizationId,
                 project: project,
                 workspace: workspace as Workspace,

@@ -1,8 +1,20 @@
+import { models } from 'insomnia-data';
 import React, { type FC, useRef } from 'react';
-import { Button, ComboBox, Group, Input, ListBox, ListBoxItem, Popover } from 'react-aria-components';
+import {
+  Button,
+  ComboBox,
+  Group,
+  Input,
+  ListBox,
+  ListBoxItem,
+  Popover,
+  Tooltip,
+  TooltipTrigger,
+} from 'react-aria-components';
 
 import { Icon } from '~/ui/components/icon';
 
+import { isSkillRequest } from '../../../common/ai-skills';
 import type { ChatTotals } from '../../../common/chat-totals';
 import { formatUsd } from '../../../common/llm-cost';
 import { getAiGatewayModelSuggestions } from '../../../konnect/transform';
@@ -43,6 +55,49 @@ interface Props {
   isStreaming?: boolean;
   pendingNotice?: { message: string; actionLabel: string; onAction: () => void } | null;
 }
+
+/**
+ * Prototype (3593AI): "N skills included" with the names on hover. Reflects the request's skills as they are checked
+ * now, which is what the next send uses; a response sent earlier with a different selection isn't tracked.
+ */
+const SkillsChip: FC = () => {
+  const collection = useWorkspaceLoaderData()?.collection;
+  const activeRequest = useRequestLoaderData()?.activeRequest;
+  const aiSkillIds = activeRequest && models.request.isRequest(activeRequest) ? activeRequest.aiSkillIds : undefined;
+  if (!collection || !aiSkillIds?.length) {
+    return null;
+  }
+  const docs = collection.map(item => item.doc);
+  const folders = docs.filter(models.requestGroup.isRequestGroup);
+  const names = docs
+    .filter(models.request.isRequest)
+    .filter(doc => aiSkillIds.includes(doc._id) && isSkillRequest(doc, folders))
+    .map(doc => doc.name || 'Untitled skill');
+  if (names.length === 0) {
+    return null;
+  }
+  return (
+    <TooltipTrigger delay={200}>
+      <Button
+        className="flex items-center gap-1 rounded-sm bg-(--hl-sm) px-2 py-0.5 text-(--color-font) outline-hidden"
+        data-testid="chat-skills"
+      >
+        <Icon icon="puzzle-piece" />
+        {names.length} {names.length === 1 ? 'skill' : 'skills'} included
+      </Button>
+      <Tooltip
+        offset={8}
+        className="rounded-md border border-solid border-(--hl-sm) bg-(--color-bg) px-2 py-1 text-base text-(--color-font) shadow-lg select-none focus:outline-hidden"
+      >
+        <ul className="list-none">
+          {names.map(name => (
+            <li key={name}>{name}</li>
+          ))}
+        </ul>
+      </Tooltip>
+    </TooltipTrigger>
+  );
+};
 
 const fieldClassName =
   'rounded-xs border border-solid border-(--hl-sm) bg-(--color-bg) px-2 py-1 text-xs text-(--color-font) outline-hidden focus:border-(--hl)';
@@ -160,6 +215,7 @@ export const ChatSettingsBar: FC<Props> = ({
               {values.model}
             </span>
           )}
+          <SkillsChip />
           {totalsBadge}
           {stopReason && (
             <span className="flex items-center gap-1">
@@ -224,6 +280,7 @@ export const ChatSettingsBar: FC<Props> = ({
             </ListBox>
           </Popover>
         </ComboBox>
+        <SkillsChip />
         {totalsBadge}
       </div>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">

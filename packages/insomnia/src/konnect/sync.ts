@@ -10,6 +10,15 @@ import type {
 } from 'insomnia-data';
 import { EnvironmentKvPairDataType, models, services as insoservices } from 'insomnia-data';
 
+import {
+  CONCISE_SKILL_AFTER_RESPONSE_SCRIPT,
+  CONCISE_SKILL_PROMPT_DESCRIPTION,
+  CONCISE_SKILL_PROMPT_NAME,
+  CONCISE_SKILL_PROMPT_QUESTION,
+  skillsFolderKey,
+  STARTER_SKILL_MARKDOWN,
+  STARTER_SKILL_NAME,
+} from '../common/ai-skills';
 import { database as db } from '../common/database';
 import {
   fetchAiGatewayModels,
@@ -963,7 +972,19 @@ async function ensureAiGatewayPromptsProject(
   const promptsFolderId = await ensureFolder(workspace._id, 'Prompts', promptsKey, {
     afterResponseScript: AI_GATEWAY_STARTER_AFTER_RESPONSE_SCRIPT,
   });
-  await ensureFolder(workspace._id, 'Skills', `ai:${gateway.id}:skills`);
+  const skillsFolderId = await ensureFolder(workspace._id, 'Skills', skillsFolderKey(gateway.id));
+  // One example so the folder isn't empty. Added whenever the folder has no skills at all, so it also reaches
+  // projects whose Skills folder predates it. Once the user has any skill of their own it is never re-added.
+  const hasSkills =
+    (await db.find<Request>(models.request.type, { parentId: skillsFolderId })).length > 0 ||
+    (await db.find<RequestGroup>(models.requestGroup.type, { parentId: skillsFolderId })).length > 0;
+  if (!hasSkills) {
+    await insoservices.request.create({
+      parentId: skillsFolderId,
+      name: STARTER_SKILL_NAME,
+      description: STARTER_SKILL_MARKDOWN,
+    });
+  }
   const [firstRoute] = groupModelsByPath(gatewayModels);
   if (!promptsFolderExists && firstRoute) {
     // Placeholder wiring: a normal route request. The model dropdown replaces the typed URL in a later chunk.
@@ -979,6 +1000,40 @@ async function ensureAiGatewayPromptsProject(
       ],
       ...(spec.body ? { body: { mimeType: 'application/json', text: spec.body } } : {}),
     });
+    // A second prompt that wants a long answer, with its own test, to try the starter skill on (left unchecked).
+    const conciseBody = withLastUserMessage(spec.body, CONCISE_SKILL_PROMPT_QUESTION);
+    await insoservices.request.create({
+      parentId: promptsFolderId,
+      name: CONCISE_SKILL_PROMPT_NAME,
+      description: CONCISE_SKILL_PROMPT_DESCRIPTION,
+      method: 'POST',
+      url: `http://{{ _.proxy_host }}${spec.path}`,
+      headers: [
+        { name: 'Content-Type', value: 'application/json' },
+        { name: 'Accept', value: 'text/event-stream' },
+      ],
+      ...(conciseBody ? { body: { mimeType: 'application/json', text: conciseBody } } : {}),
+      afterResponseScript: CONCISE_SKILL_AFTER_RESPONSE_SCRIPT,
+    });
+  }
+}
+
+/** The chat body with its last user message replaced; undefined when there's no body to adapt. */
+function withLastUserMessage(bodyText: string | undefined, question: string): string | undefined {
+  if (!bodyText) {
+    return undefined;
+  }
+  try {
+    const body = JSON.parse(bodyText);
+    const messages = Array.isArray(body.messages) ? [...body.messages] : [];
+    const index = messages.map((m: { role?: string }) => m.role).lastIndexOf('user');
+    if (index === -1) {
+      return bodyText;
+    }
+    messages[index] = { ...messages[index], content: question };
+    return JSON.stringify({ ...body, messages }, null, 2);
+  } catch {
+    return bodyText;
   }
 }
 
