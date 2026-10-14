@@ -909,16 +909,23 @@ async function ensureAiGatewayPromptsProject(
   gatewayModels: AiGatewayModel[],
 ): Promise<void> {
   const promptsName = `${gatewayName} prompts`;
-  const existing = (await insoservices.project.list({ parentId: organizationId })).find(
-    p => p.konnectAiGatewayPromptsFor === gateway.id,
+  const orgProjects = (await insoservices.project.list({ parentId: organizationId })).sort(
+    (a, b) => a.created - b.created,
   );
-  const project =
-    existing ??
-    (await insoservices.project.create({
+  // The marker field is the identity. Fallback: adopt an unmarked local project with the generated name (e.g. one
+  // created while a stale data layer was pruning the field) rather than creating a duplicate, then stamp the marker.
+  let project =
+    orgProjects.find(p => p.konnectAiGatewayPromptsFor === gateway.id) ??
+    orgProjects.find(p => !p.konnectControlPlaneId && !p.konnectAiGatewayPromptsFor && p.name === promptsName);
+  if (!project) {
+    project = await insoservices.project.create({
       parentId: organizationId,
       name: promptsName,
       konnectAiGatewayPromptsFor: gateway.id,
-    }));
+    });
+  } else if (project.konnectAiGatewayPromptsFor !== gateway.id) {
+    project = await insoservices.project.update(project, { konnectAiGatewayPromptsFor: gateway.id });
+  }
 
   // Same proxy host as the gateway project (fill-only, so the user's edits to it are never overwritten).
   const [gatewayEnvWorkspace] = await insoservices.workspace.list({ parentId: gatewayProject._id, scope: 'environment' });
@@ -930,8 +937,17 @@ async function ensureAiGatewayPromptsProject(
   );
 
   let workspace = (await insoservices.workspace.list({ parentId: project._id })).find(w => w.scope === 'collection');
+  // The prompts workspace carries a copy of the gateway's model catalog (refreshed every sync), so the runner,
+  // the Models tab and the prompt model picker all work here unchanged. The gateway stays the source of truth.
   if (!workspace) {
-    workspace = await insoservices.workspace.create({ parentId: project._id, name: promptsName, scope: 'collection' });
+    workspace = await insoservices.workspace.create({
+      parentId: project._id,
+      name: promptsName,
+      scope: 'collection',
+      konnectAiGatewayModels: gatewayModels,
+    });
+  } else if (aiGatewayModelsChanged(workspace.konnectAiGatewayModels ?? [], gatewayModels)) {
+    workspace = await insoservices.workspace.update(workspace, { konnectAiGatewayModels: gatewayModels });
   }
   const workspaceMeta = await insoservices.workspaceMeta.getOrCreateByParentId(workspace._id);
   if (workspaceMeta.activeGlobalEnvironmentId !== environmentId) {
