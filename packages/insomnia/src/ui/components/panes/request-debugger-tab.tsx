@@ -114,11 +114,11 @@ function ownerFor(name: string): TimeOwner {
   return 'kong';
 }
 
-const OWNER_STYLE: Record<TimeOwner, { label: string; bar: string }> = {
+const OWNER_STYLE: Record<TimeOwner, { label: string; color: string }> = {
   // Kong brand lime — same #CCFF00 as the KongLogo mark.
-  kong: { label: 'Kong', bar: 'bg-[#CCFF00]' },
-  upstream: { label: 'Upstream', bar: 'bg-(--color-info)' },
-  client: { label: 'Client / network', bar: 'bg-(--hl-xl)' },
+  kong: { label: 'Kong', color: '#CCFF00' },
+  upstream: { label: 'Upstream', color: 'var(--color-info)' },
+  client: { label: 'Client / network', color: 'var(--hl-xl)' },
 };
 
 // Totals come straight from the root span's own latency attributes (Kong's
@@ -138,6 +138,14 @@ function latencySummary(root: KonnectDebugSpan | undefined) {
     return null;
   }
   return { kong, upstream, client, total };
+}
+
+// Paints [leftPct, leftPct+widthPct] of the track in `color`, transparent
+// elsewhere, as a single background-image (see the waterfall bar comment).
+function barGradient(leftPct: number, widthPct: number, color: string): string {
+  const start = Math.min(Math.max(leftPct, 0), 100);
+  const end = Math.min(start + widthPct, 100);
+  return `linear-gradient(to right, transparent ${start}%, ${color} ${start}%, ${color} ${end}%, transparent ${end}%)`;
 }
 
 function TraceView({ trace }: { trace: DebuggerTrace }) {
@@ -181,38 +189,8 @@ function TraceView({ trace }: { trace: DebuggerTrace }) {
     });
   }, [rows, collapsedIds]);
 
-  // KNOWN BUG, UNRESOLVED 2026-09-25: the waterfall bars below (each an
-  // inline `style={{ width: ... }}`) sometimes don't paint on first mount —
-  // the row's label and duration text render correctly, but the bar itself
-  // is blank until ANY unrelated re-render/click happens elsewhere in the
-  // app, at which point every bar on screen snaps into place at once.
-  //
-  // Confirmed NOT a wrong-value bug: the "Total: {fmtMs(totalMs)}" header
-  // above renders the correct number on the exact same first render, from
-  // the exact same `totalMs` the bars' percentages are computed from — so
-  // `leftPct`/`widthPct` are provably correct numbers going into the style
-  // objects; the browser just isn't painting them.
-  //
-  // Tried, in order, none of which fixed it:
-  //   1. Original: absolute-positioned fill inside a `position: relative`
-  //      track, sized via `left`/`width` percentages.
-  //   2. Swapped to two plain (non-absolute) flex children with percentage
-  //      `width`s instead — ruling out `position: absolute` specifically as
-  //      the mechanism.
-  //   3. Forced a synchronous reflow right after mount via the classic
-  //      `el.style.display = 'none'; el.offsetHeight; el.style.display = ''`
-  //      trick, on a rAF timer keyed to `trace.traceId` — ruling out "just
-  //      needs literally any reflow shortly after mount".
-  //
-  // Not yet tried / worth investigating next: whether this is tied to the
-  // response pane's Tabs/TabPanel mount-and-reveal timing specifically
-  // (does it still happen if the Debugger tab is the *default* selected
-  // tab, so nothing has to switch into it?); whether react-resizable-
-  // panels' own JS-driven width assignment on the ancestor Panel is
-  // involved; or genuine Electron/Chromium devtools performance-tab
-  // profiling of the first paint vs. the post-click repaint, to see what
-  // actually differs. Real diagnostic instrumentation (not another blind
-  // style change) is the next step.
+  // WATERFALL PAINT BUG (first paint blank until an unrelated click): see
+  // the comment on the bar element below for history and the current attempt.
   return (
     <div className="flex h-full flex-col overflow-y-auto p-4">
       <div className="mb-3 flex items-center gap-3 text-(--hl)">
@@ -226,8 +204,10 @@ function TraceView({ trace }: { trace: DebuggerTrace }) {
             {(['kong', 'upstream', 'client'] as const).map(owner => (
               <div
                 key={owner}
-                className={OWNER_STYLE[owner].bar}
-                style={{ width: `${(summary[owner] / summary.total) * 100}%` }}
+                style={{
+                  width: `${(summary[owner] / summary.total) * 100}%`,
+                  backgroundColor: OWNER_STYLE[owner].color,
+                }}
                 title={`${OWNER_STYLE[owner].label}: ${fmtMs(summary[owner])}`}
               />
             ))}
@@ -235,7 +215,10 @@ function TraceView({ trace }: { trace: DebuggerTrace }) {
           <div className="flex flex-col gap-1">
             {(['kong', 'upstream', 'client'] as const).map(owner => (
               <span key={owner} className="flex items-center gap-1.5">
-                <span className={`inline-block size-2.5 rounded-xs ${OWNER_STYLE[owner].bar}`} />
+                <span
+                  className="inline-block size-2.5 rounded-xs"
+                  style={{ backgroundColor: OWNER_STYLE[owner].color }}
+                />
                 <span className="text-(--hl)">{OWNER_STYLE[owner].label}</span>
                 <span className="font-semibold tabular-nums">{fmtMs(summary[owner])}</span>
                 <span className="text-xs text-(--hl) tabular-nums">
@@ -294,30 +277,36 @@ function TraceView({ trace }: { trace: DebuggerTrace }) {
                   )}
                   <span className="truncate">{labelFor(row.span.name)}</span>
                 </div>
-                {/* BUG FIXED 2026-09-25: this used to be a `position: absolute`
-                    fill inside a `relative` track, sized with `left`/`width`
-                    percentages. Same underlying data, same computed
-                    percentages, but on first paint the fill sometimes didn't
-                    render at all — only appearing after any unrelated
-                    re-render (e.g. clicking a row). Never fully root-caused
-                    (smells like the same class of paint/compositing timing
-                    issue noted in konnect-debugger-banner.tsx, though the
-                    usual "transform ancestor" cause doesn't apply here since
-                    the immediate parent already establishes its own
-                    containing block). Rebuilt as plain flex children with
-                    percentage widths instead of out-of-flow absolute
-                    positioning — normal flow layout, no containing-block or
-                    paint-order dependency to get wrong on first render. */}
-                <div className="flex h-4 flex-1 overflow-hidden rounded-xs border border-solid border-(--hl-sm) bg-(--hl-sm)">
-                  <div className="shrink-0" style={{ width: `${leftPct}%` }} />
-                  <div
-                    className={`h-full shrink-0 rounded-xs ${
-                      row.depth === 0 ? 'bg-(--hl-lg)' : OWNER_STYLE[ownerFor(row.span.name)].bar
-                    } ${isBottleneck ? 'ring-1 ring-(--color-font)' : ''}`}
-                    style={{ width: `${widthPct}%` }}
-                    title={`${row.span.name}: ${fmtMs(row.durationMs)}`}
-                  />
-                </div>
+                {/* Waterfall bar. HISTORY: the bar used to be a child element (absolute,
+                    then percentage-width flex children) inside a rounded,
+                    `overflow-hidden` track, and on first paint it often didn't
+                    render until any unrelated click/re-render, even though the
+                    label/duration text and the Total header (same numbers) were
+                    right. Absolute positioning, and a forced reflow, didn't help,
+                    so it was never a wrong-value or layout-timing problem.
+                    2026-10-14 attempt 4: the bar is now ONE element painted as a
+                    gradient background — no child boxes, no percentage widths to
+                    resolve against a flexed parent, no rounded overflow clip
+                    around children. DID NOT FIX IT (user click-tested, same
+                    symptom), so the cause is outside this element (tab-panel
+                    reveal timing, resizable-panel width assignment, or
+                    something Electron-specific). Accepted as "good enough" for
+                    the prototype; a real fix needs a devtools performance
+                    recording (first paint vs post-click repaint), not another
+                    style change. */}
+                <div
+                  className={`h-4 flex-1 rounded-xs border border-solid bg-(--hl-sm) ${
+                    isBottleneck ? 'border-(--color-font)' : 'border-(--hl-sm)'
+                  }`}
+                  style={{
+                    backgroundImage: barGradient(
+                      leftPct,
+                      widthPct,
+                      row.depth === 0 ? 'var(--hl-lg)' : OWNER_STYLE[ownerFor(row.span.name)].color,
+                    ),
+                  }}
+                  title={`${row.span.name}: ${fmtMs(row.durationMs)}`}
+                />
                 <div className={`w-20 shrink-0 text-right tabular-nums ${isBottleneck ? 'font-bold text-(--color-font)' : 'text-(--hl)'}`}>
                   {fmtMs(row.durationMs)}
                 </div>
