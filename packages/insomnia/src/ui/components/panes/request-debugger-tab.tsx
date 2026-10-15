@@ -148,10 +148,127 @@ function barGradient(leftPct: number, widthPct: number, color: string): string {
   return `linear-gradient(to right, transparent ${start}%, ${color} ${start}%, ${color} ${end}%, transparent ${end}%)`;
 }
 
+// PROTOTYPE: flowchart-style alternative to the waterfall. Same real span
+// tree (see buildRows), but each span is a box in a top-to-bottom chain with
+// its share of the total time; click a box to expand its child spans (e.g.
+// access -> plugins) as a nested chain. Unlike the waterfall it ignores
+// concurrency/offsets: it shows "where did the time go", not "when".
+interface FlowNode {
+  row: SpanRow;
+  children: FlowNode[];
+}
+
+// rows are DFS pre-order with depth, so the tree falls out of a depth-indexed stack.
+function buildFlow(rows: SpanRow[]): FlowNode[] {
+  const stack: FlowNode[] = [];
+  rows.forEach(row => {
+    const node: FlowNode = { row, children: [] };
+    stack[row.depth] = node;
+    stack.length = row.depth + 1;
+    if (row.depth > 0) {
+      stack[row.depth - 1].children.push(node);
+    }
+  });
+  return stack[0]?.children ?? [];
+}
+
+// Plugin spans are named `kong.<phase>.plugin.<name>` (see labelFor). Counted
+// at any depth so every box with a plugin somewhere beneath it can say so.
+function countPlugins(node: FlowNode): number {
+  const self = /^kong\.\w+\.plugin\./.test(node.row.span.name) ? 1 : 0;
+  return node.children.reduce((sum, child) => sum + countPlugins(child), self);
+}
+
+function FlowChain({
+  nodes,
+  totalMs,
+  expandedIds,
+  onToggle,
+}: {
+  nodes: FlowNode[];
+  totalMs: number;
+  expandedIds: Set<string>;
+  onToggle: (spanId: string) => void;
+}) {
+  return (
+    <div className="flex flex-col items-stretch">
+      {nodes.map((node, index) => {
+        const { span, durationMs: ms } = node.row;
+        const pct = totalMs > 0 ? (ms / totalMs) * 100 : 0;
+        // Only worth expanding when there's a real sequence to show; a lone
+        // child would just repeat its parent's time.
+        const isExpandable = node.children.length > 1;
+        // A plugin span is itself the plugin, so only count ones strictly beneath it.
+        const pluginCount = countPlugins(node) - (/^kong\.\w+\.plugin\./.test(span.name) ? 1 : 0);
+        const isExpanded = isExpandable && expandedIds.has(span.span_id);
+        return (
+          <React.Fragment key={span.span_id}>
+            {index > 0 && <div className="self-center text-(--hl)">↓</div>}
+            <div className="overflow-hidden rounded-xs border border-solid border-(--hl-md)">
+              {/* Not `disabled` for the plain boxes: browsers grey out a disabled
+                  button's text, which made their numbers hard to read. */}
+              <button
+                type="button"
+                onClick={() => isExpandable && onToggle(span.span_id)}
+                className={`flex w-full items-stretch gap-3 pr-3 text-left ${isExpandable ? 'hover:bg-(--hl-xs)' : 'cursor-default'}`}
+                title={span.name}
+              >
+                <span
+                  className="w-1.5 shrink-0 self-stretch"
+                  style={{ backgroundColor: OWNER_STYLE[ownerFor(span.name)].color }}
+                />
+                <span className="flex min-w-0 flex-1 items-center gap-2 py-4">
+                  <span className="w-[1ch] shrink-0 text-(--hl)">{isExpandable ? (isExpanded ? '▼' : '▶') : ''}</span>
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate font-medium">{labelFor(span.name)}</span>
+                    {pluginCount > 0 && (
+                      <span
+                        className="mt-0.5 self-start truncate rounded-xs px-1.5 text-xs font-medium text-black"
+                        style={{ backgroundColor: OWNER_STYLE.kong.color }}
+                      >
+                        {pluginCount} Konnect plugin{pluginCount === 1 ? '' : 's'}
+                      </span>
+                    )}
+                  </span>
+                  {isExpandable && <span className="shrink-0 text-xs text-(--hl)">{node.children.length} steps</span>}
+                  <span className="shrink-0 tabular-nums">{fmtMs(ms)}</span>
+                  <span className="w-14 shrink-0 text-right font-semibold tabular-nums">{pct.toFixed(1)}%</span>
+                </span>
+              </button>
+              {isExpanded && (
+                <div className="border-t border-solid border-(--hl-sm) bg-(--hl-xs) py-2 pr-2 pl-8">
+                  <FlowChain nodes={node.children} totalMs={totalMs} expandedIds={expandedIds} onToggle={onToggle} />
+                </div>
+              )}
+            </div>
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
+}
+
+function FlowView({ rows, totalMs }: { rows: SpanRow[]; totalMs: number }) {
+  const nodes = useMemo(() => buildFlow(rows), [rows]);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const onToggle = (spanId: string) =>
+    setExpandedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(spanId)) {
+        next.delete(spanId);
+      } else {
+        next.add(spanId);
+      }
+      return next;
+    });
+  return <FlowChain nodes={nodes} totalMs={totalMs} expandedIds={expandedIds} onToggle={onToggle} />;
+}
+
 function TraceView({ trace }: { trace: DebuggerTrace }) {
   const { rows, totalMs } = useMemo(() => buildRows(trace.spans), [trace.spans]);
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
   const [detailSpanId, setDetailSpanId] = useState<string | null>(null);
+  const [view, setView] = useState<'waterfall' | 'flow'>('flow');
   const root = rows[0]?.span;
   const status = root?.attributes['http.response.status_code'];
   const method = root?.attributes['http.request.method'];
@@ -229,7 +346,21 @@ function TraceView({ trace }: { trace: DebuggerTrace }) {
           </div>
         </div>
       )}
-      <div>
+      <div className="mt-2.5 shrink-0 border-t border-solid border-(--hl-sm)" />
+      <div className="mt-2.5 mb-3 flex shrink-0 self-start overflow-hidden rounded-xs border border-solid border-(--hl-md)">
+        {(['flow', 'waterfall'] as const).map(v => (
+          <button
+            type="button"
+            key={v}
+            onClick={() => setView(v)}
+            className={`px-3 py-1 capitalize ${view === v ? 'bg-(--hl-sm) font-semibold text-(--color-font)' : 'text-(--hl) hover:bg-(--hl-xs)'}`}
+          >
+            {v}
+          </button>
+        ))}
+      </div>
+      {view === 'flow' && <FlowView key={trace.traceId} rows={rows} totalMs={totalMs} />}
+      <div className={view === 'flow' ? 'hidden' : undefined}>
         {visibleRows.map((row, index) => {
           const isBottleneck = row.span.span_id === bottleneckSpanId;
           const leftPct = totalMs > 0 ? (row.startOffsetMs / totalMs) * 100 : 0;
