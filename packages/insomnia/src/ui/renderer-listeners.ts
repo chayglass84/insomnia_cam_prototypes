@@ -5,7 +5,7 @@ import * as themes from '~/ui/plugins/misc';
 import { plugins } from '~/ui/plugins/renderer-bridge';
 import * as templating from '~/ui/templating/renderer-safe';
 
-import { dispatchEditorUndo } from './components/.client/codemirror/editor-undo';
+import { dispatchEditorUndo, UNDO_PERFORMED_EVENT } from './components/.client/codemirror/editor-undo';
 import { showModal } from './components/modals';
 import { SettingsModal } from './components/modals/settings-modal';
 
@@ -13,6 +13,20 @@ import { SettingsModal } from './components/modals/settings-modal';
 // with the native undo stack based on what's focused (see editor-undo.ts).
 window.main.on('edit:undo', () => dispatchEditorUndo('undo'));
 window.main.on('edit:redo', () => dispatchEditorUndo('redo'));
+
+// On Windows/Linux CodeMirror handles Ctrl+Z itself before the menu accelerator
+// fires, so the Edit-menu path above never sees it. Observe the shortcut directly
+// (capture, no preventDefault) so the undo hint still appears. Redundant but
+// harmless on macOS, where the accelerator wins.
+window.addEventListener(
+  'keydown',
+  event => {
+    if (event.key.toLowerCase() === 'z' && (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey) {
+      window.dispatchEvent(new CustomEvent(UNDO_PERFORMED_EVENT));
+    }
+  },
+  true,
+);
 
 window.main.on('toggle-preferences', () => {
   showModal(SettingsModal);

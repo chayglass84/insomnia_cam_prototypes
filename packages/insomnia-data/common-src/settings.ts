@@ -207,4 +207,6 @@ export interface Settings {
   npmRegistryUrl: string;
   // Forces the test tab to show. Otherwise, only show it if the collection already has legacy tests.
   enableLegacyUnitTests: boolean;
+  // Suppresses the hint shown after undo that points at Response History.
+  hideUndoResponseHistoryHint: boolean;
 }

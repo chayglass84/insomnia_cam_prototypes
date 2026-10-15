@@ -58,6 +58,11 @@ export const General: FC = () => {
             setting="enableLegacyUnitTests"
             help="If checked, the Tests tab will always be shown in the collection view. Otherwise, it will only be shown if the collection already has legacy tests."
           />
+          <BooleanSetting
+            label="Hide response history hint after undo"
+            setting="hideUndoResponseHistoryHint"
+            help="If checked, Insomnia won't suggest the Response History dropdown when you undo."
+          />
         </div>
       </div>
 

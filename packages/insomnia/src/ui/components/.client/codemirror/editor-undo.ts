@@ -3,6 +3,10 @@ import type CodeMirror from 'codemirror';
 // CodeMirror sets its instance on the `.CodeMirror` wrapper DOM node.
 type CodeMirrorWrapper = HTMLElement & { CodeMirror?: CodeMirror.Editor };
 
+// Fired on every undo so unrelated UI (e.g. the response-history hint) can react
+// without editor-undo needing to know about it.
+export const UNDO_PERFORMED_EVENT = 'insomnia:undo-performed';
+
 /**
  * Single app-level undo/redo dispatcher.
  *
@@ -18,6 +22,9 @@ type CodeMirrorWrapper = HTMLElement & { CodeMirror?: CodeMirror.Editor };
  *   command, exactly as the old `role` did.
  */
 export const dispatchEditorUndo = (mode: 'undo' | 'redo'): void => {
+  if (mode === 'undo') {
+    window.dispatchEvent(new CustomEvent(UNDO_PERFORMED_EVENT));
+  }
   const active = document.activeElement as HTMLElement | null;
   const wrapper = active?.closest('.CodeMirror') as CodeMirrorWrapper | null;
   const cm = wrapper?.CodeMirror;

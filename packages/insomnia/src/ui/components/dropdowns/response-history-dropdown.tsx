@@ -13,11 +13,13 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from 'react-aria-components';
 import { useParams } from 'react-router';
 
+import { useRootLoaderData } from '~/root';
 import { useRequestResponseDeleteActionFetcher } from '~/routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request.$requestId.response.delete';
 import { useRequestResponseDeleteAllActionFetcher } from '~/routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request.$requestId.response.delete-all';
 
 import { useWorkspaceLoaderData } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId';
-import { useRequestMetaPatcher } from '../../hooks/use-request';
+import { useRequestMetaPatcher, useSettingsPatcher } from '../../hooks/use-request';
+import { UNDO_PERFORMED_EVENT } from '../.client/codemirror/editor-undo';
 import { Dropdown, type DropdownHandle, DropdownItem, DropdownSection, ItemContent } from '../base/dropdown';
 import { useDocBodyKeyboardShortcuts } from '../keydown-binder';
 import { SizeTag } from '../tags/size-tag';
@@ -27,6 +29,8 @@ import { URLTag } from '../tags/url-tag';
 import { TimeFromNow } from '../time-from-now';
 
 const { isRequest } = models.request;
+
+const UNDO_HINT_DURATION_MS = 5000;
 
 type ResponseType = Response | WebSocketResponse | SocketIOResponse | McpResponse;
 
@@ -214,61 +218,106 @@ export const ResponseHistoryDropdown = ({
     request_toggleHistory: () => dropdownRef.current?.toggle(true),
   });
 
+  // Gentle nudge: undo is limited, but picking an older response restores the whole
+  // request too. Only worth mentioning when there is an older response to go back to.
+  const [showUndoHint, setShowUndoHint] = useState(false);
+  const { settings } = useRootLoaderData()!;
+  const patchSettings = useSettingsPatcher();
+  const hintDisabled = settings.hideUndoResponseHistoryHint;
+  const hasHistory = responses.length > 1 && !hintDisabled;
+  useEffect(() => {
+    if (!hasHistory) {
+      setShowUndoHint(false);
+      return;
+    }
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const onUndo = () => {
+      setShowUndoHint(true);
+      clearTimeout(timeout);
+      timeout = setTimeout(() => setShowUndoHint(false), UNDO_HINT_DURATION_MS);
+    };
+    window.addEventListener(UNDO_PERFORMED_EVENT, onUndo);
+    return () => {
+      window.removeEventListener(UNDO_PERFORMED_EVENT, onUndo);
+      clearTimeout(timeout);
+    };
+  }, [hasHistory]);
+
   const environmentName = activeEnvironment ? activeEnvironment.name : 'Base';
   const isLatestResponseActive = !responses.length || activeResponse._id === responses[0]._id;
   return (
-    <Dropdown
-      ref={dropdownRef}
-      aria-label="Response history dropdown"
-      key={activeResponse ? activeResponse._id : 'n/a'}
-      closeOnSelect={false}
-      className="tall pane__header__right"
-      triggerButton={
-        <Button className="btn btn--super-compact tall">
-          {activeResponse && <TimeFromNow timestamp={activeResponse.created} titleCase />}
-          {!isLatestResponseActive ? (
-            <i className="fa fa-thumb-tack space-left" />
-          ) : (
-            <i className="fa fa-caret-down space-left" />
-          )}
-        </Button>
-      }
-    >
-      <DropdownSection
-        aria-label={`${environmentName} Responses`}
-        title={
-          <span>
-            <strong>{environmentName}</strong> Responses
-          </span>
+    <>
+      <Dropdown
+        ref={dropdownRef}
+        aria-label="Response history dropdown"
+        key={activeResponse ? activeResponse._id : 'n/a'}
+        closeOnSelect={false}
+        className="tall pane__header__right"
+        triggerButton={
+          <Button className="btn btn--super-compact tall">
+            {activeResponse && <TimeFromNow timestamp={activeResponse.created} titleCase />}
+            {!isLatestResponseActive ? (
+              <i className="fa fa-thumb-tack space-left" />
+            ) : (
+              <i className="fa fa-caret-down space-left" />
+            )}
+          </Button>
         }
       >
-        <DropdownItem aria-label="Delete Current Response">
-          <ItemContent icon="trash-o" label="Delete Current Response" onClick={handleDeleteResponse} />
-        </DropdownItem>
-        <DropdownItem aria-label="Clear History">
-          <ItemContent icon="trash-o" label="Clear History" onClick={handleDeleteResponses} />
-        </DropdownItem>
-      </DropdownSection>
+        <DropdownSection
+          aria-label={`${environmentName} Responses`}
+          title={
+            <span>
+              <strong>{environmentName}</strong> Responses
+            </span>
+          }
+        >
+          <DropdownItem aria-label="Delete Current Response">
+            <ItemContent icon="trash-o" label="Delete Current Response" onClick={handleDeleteResponse} />
+          </DropdownItem>
+          <DropdownItem aria-label="Clear History">
+            <ItemContent icon="trash-o" label="Clear History" onClick={handleDeleteResponses} />
+          </DropdownItem>
+        </DropdownSection>
 
-      <DropdownSection aria-label="Minutes Section" title="Just Now">
-        {categories.minutes.map(renderResponseRow)}
-      </DropdownSection>
+        <DropdownSection aria-label="Minutes Section" title="Just Now">
+          {categories.minutes.map(renderResponseRow)}
+        </DropdownSection>
 
-      <DropdownSection aria-label="Hours Section" title="Less Than Two Hours Ago">
-        {categories.hours.map(renderResponseRow)}
-      </DropdownSection>
+        <DropdownSection aria-label="Hours Section" title="Less Than Two Hours Ago">
+          {categories.hours.map(renderResponseRow)}
+        </DropdownSection>
 
-      <DropdownSection aria-label="Today Section" title="Today">
-        {categories.today.map(renderResponseRow)}
-      </DropdownSection>
+        <DropdownSection aria-label="Today Section" title="Today">
+          {categories.today.map(renderResponseRow)}
+        </DropdownSection>
 
-      <DropdownSection aria-label="Week Section" title="This Week">
-        {categories.week.map(renderResponseRow)}
-      </DropdownSection>
+        <DropdownSection aria-label="Week Section" title="This Week">
+          {categories.week.map(renderResponseRow)}
+        </DropdownSection>
 
-      <DropdownSection aria-label="Other Section" title="Older Than This Week">
-        {categories.other.map(renderResponseRow)}
-      </DropdownSection>
-    </Dropdown>
+        <DropdownSection aria-label="Other Section" title="Older Than This Week">
+          {categories.other.map(renderResponseRow)}
+        </DropdownSection>
+      </Dropdown>
+      {showUndoHint && (
+        // Anchored to the (relative) pane header, under the history button.
+        <div
+          role="status"
+          className="absolute top-full right-2 z-10 mt-1 flex max-w-64 flex-col gap-2 rounded-sm border border-solid border-(--hl-md) bg-(--color-bg) px-2 py-1.5 text-xs text-(--hl) shadow-md"
+        >
+          <span>Undoing? You can back up to any prior Request/Response here.</span>
+          <Button
+            className="self-end text-xs underline opacity-80 hover:opacity-100"
+            onPress={() => {
+              setShowUndoHint(false);
+              patchSettings({ hideUndoResponseHistoryHint: true });
+            }}
+          >
+            Don&apos;t show again
+          </Button>
+        </div>
+      )}
+    </>
   );
 };

@@ -95,5 +95,6 @@ export function init(): BaseSettings {
     disabledBlockedRoots: [],
     npmRegistryUrl: '',
     enableLegacyUnitTests: false,
+    hideUndoResponseHistoryHint: false,
   };
 }
