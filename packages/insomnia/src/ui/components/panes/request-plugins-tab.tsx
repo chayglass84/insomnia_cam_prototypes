@@ -24,10 +24,15 @@ const SUGGESTED_PLUGINS: { name: string; description: string }[] = [
 
 const docsUrl = (pluginName: string) => `https://developer.konghq.com/plugins/${pluginName}/`;
 
-// PROTOTYPE SHORTCUT: best-effort Konnect Gateway Manager deep link built
-// from region/control-plane/route IDs, not a verified/versioned URL scheme.
-const konnectEditUrl = (region: string, controlPlaneId: string, pluginId: string) =>
-  `https://cloud.konghq.com/${region}/gateway-manager/${controlPlaneId}/plugins/${pluginId}`;
+// PROTOTYPE SHORTCUT: Konnect Gateway Manager deep link copied from the
+// Konnect UI's own edit URL (`.../plugins/<name>/<id>/update`), not a
+// documented/versioned URL scheme, so it may break if Konnect changes it.
+const konnectEditUrl = (region: string, controlPlaneId: string, pluginName: string, pluginId: string) =>
+  `https://cloud.konghq.com/${region}/gateway-manager/${controlPlaneId}/plugins/${pluginName}/${pluginId}/update`;
+
+// PROTOTYPE SHORTCUT: same caveat as konnectEditUrl, copied from the Konnect UI.
+const konnectCreateUrl = (region: string, controlPlaneId: string, pluginName: string) =>
+  `https://cloud.konghq.com/${region}/gateway-manager/${controlPlaneId}/plugins/${pluginName}/create`;
 
 function scopeLabel(plugin: KonnectPlugin): string {
   if (plugin.route) {
@@ -80,7 +85,7 @@ function PluginRow({
         </Button>
         <Button
           className="rounded-xs px-2 py-1 text-(--hl) hover:bg-(--hl-xs) hover:text-(--color-font)"
-          onPress={() => window.main.openInBrowser(konnectEditUrl(region, controlPlaneId, plugin.id))}
+          onPress={() => window.main.openInBrowser(konnectEditUrl(region, controlPlaneId, plugin.name, plugin.id))}
         >
           Edit in Konnect
         </Button>
@@ -189,7 +194,7 @@ export const RequestPluginsTab = ({ activeRequest, activeWorkspace, activeProjec
                 </Button>
                 <Button
                   className="rounded-xs px-2 py-1 text-(--hl) hover:bg-(--hl-xs) hover:text-(--color-font)"
-                  onPress={() => window.main.openInBrowser(konnectEditUrl(link!.region, link!.controlPlaneId, ''))}
+                  onPress={() => window.main.openInBrowser(konnectCreateUrl(link!.region, link!.controlPlaneId, plugin.name))}
                 >
                   Add in Konnect
                 </Button>
