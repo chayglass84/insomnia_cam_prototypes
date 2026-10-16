@@ -15,6 +15,10 @@ interface Props {
   /** null means every model is selected. */
   selectedModelIds: string[] | null;
   onModelsChange: (ids: string[]) => void;
+  /** Skills in the prompts project's Skills folder; empty hides the section. */
+  skills: { id: string; name: string }[];
+  selectedSkillIds: string[];
+  onSkillsChange: (ids: string[]) => void;
   disabled?: boolean;
 }
 
@@ -55,6 +59,9 @@ export const RunnerEvaluatePanel: FC<Props> = ({
   models,
   selectedModelIds,
   onModelsChange,
+  skills,
+  selectedSkillIds,
+  onSkillsChange,
   disabled,
 }) => {
   const requestIds = requests.map(request => request.id);
@@ -76,9 +83,8 @@ export const RunnerEvaluatePanel: FC<Props> = ({
   return (
     <div className="flex flex-col gap-5 overflow-y-auto p-4 text-sm">
       <p className="text-(--hl)">
-        Pick the requests (prompts) to run and the models to run them against. Every selected request runs once on every
-        selected model, so choose requests with different prompts. A rotating alias appears once; the gateway chooses
-        which upstream model answers.
+        Select at least one prompt, which will run for each selected model. Optionally, select skills to include for
+        each run.
       </p>
 
       <section className="flex flex-col gap-2">
@@ -133,6 +139,36 @@ export const RunnerEvaluatePanel: FC<Props> = ({
           })}
         </div>
       </section>
+
+      {skills.length > 0 && (
+        <section className="flex flex-col gap-2">
+          <SectionHeader
+            title="Skills"
+            selected={selectedSkillIds.length}
+            total={skills.length}
+            onSelectAll={() => onSkillsChange(skills.map(skill => skill.id))}
+            onDeselectAll={() => onSkillsChange([])}
+            disabled={disabled}
+          />
+          <div className="flex flex-col gap-2 pl-4">
+            {skills.map(skill => (
+              <label key={skill.id} className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  disabled={disabled}
+                  checked={selectedSkillIds.includes(skill.id)}
+                  onChange={() =>
+                    onSkillsChange(
+                      skills.map(item => item.id).filter(id => (id === skill.id) !== selectedSkillIds.includes(id)),
+                    )
+                  }
+                />
+                <span className="font-semibold">{skill.name}</span>
+              </label>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="flex flex-col gap-2">
         <SectionHeader

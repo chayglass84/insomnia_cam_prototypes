@@ -43,6 +43,9 @@ export function RunnerModelGroups<T extends { aiGateway?: AiGatewayRunInfo }>({
                 {group.info.rotating ? 'rotating — see each result for the model that answered' : group.info.model}
               </span>
               {group.info.route && <span className="font-mono text-xs text-(--hl)">{group.info.route}</span>}
+              {group.info.skills && group.info.skills.length > 0 && (
+                <span className="text-xs text-(--hl)">with skills: {group.info.skills.join(', ')}</span>
+              )}
               {tokens && (
                 <span className="ml-auto text-sm tabular-nums">
                   {'Total Tokens: '}

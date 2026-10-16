@@ -161,6 +161,9 @@ export interface RequestRow {
   modelTarget?: string;
   modelRotating?: boolean;
   modelRoute?: string;
+  /** AI Gateway Evaluate tab: skills added to this send (replaces the request's own Skills tab selection). */
+  evalSkillIds?: string[];
+  evalSkillNames?: string[];
 }
 
 const defaultAdvancedConfig = {
@@ -209,6 +212,7 @@ export const Runner: FC = () => {
     selectedKeys = gatewayModels ? new Set<Key>() : 'all',
     // Kept in the runner context (not local state) so the picks survive switching away from the runner tab.
     selectedModelIds = null,
+    selectedSkillIds = [],
     advancedConfig = defaultAdvancedConfig,
     uploadData = [],
     file,
@@ -225,7 +229,9 @@ export const Runner: FC = () => {
     setClearableDelay(String(delay));
   }, [delay]);
 
-  const { reqList, requestRows, entityMap } = useRunnerRequestList(organizationId, targetFolderId, runnerId);
+  const { reqList, requestRows, skills, entityMap } = useRunnerRequestList(organizationId, targetFolderId, runnerId);
+  // Ignore ids of skills that were deleted since they were checked.
+  const chosenSkills = skills.filter(skill => selectedSkillIds.includes(skill.id));
 
   useEffect(() => {
     if (settings.forceVerticalLayout) {
@@ -352,6 +358,8 @@ export const Runner: FC = () => {
             modelTarget: isRotatingModel(model) ? '' : model.targetModel,
             modelRotating: isRotatingModel(model) || undefined,
             modelRoute: model.paths[0],
+            evalSkillIds: chosenSkills.map(skill => skill.id),
+            evalSkillNames: chosenSkills.map(skill => skill.name),
           })),
         )
       : selectedRequests;
@@ -892,6 +900,9 @@ export const Runner: FC = () => {
                     models={gatewayModels}
                     selectedModelIds={selectedModelIds}
                     onModelsChange={ids => updateRunnerState(organizationId, runnerId, { selectedModelIds: ids })}
+                    skills={skills}
+                    selectedSkillIds={chosenSkills.map(skill => skill.id)}
+                    onSkillsChange={ids => updateRunnerState(organizationId, runnerId, { selectedSkillIds: ids })}
                     disabled={isRunning}
                   />
                 </TabPanel>
@@ -1182,6 +1193,7 @@ export async function clientAction({ request, params }: Route.ClientActionArgs) 
                 alias: targetRequest.modelAlias ?? '',
                 model: targetRequest.modelTarget ?? '',
                 rotating: targetRequest.modelRotating,
+                skills: targetRequest.evalSkillNames?.length ? targetRequest.evalSkillNames : undefined,
               }
             : undefined,
         };
@@ -1264,6 +1276,8 @@ export async function clientAction({ request, params }: Route.ClientActionArgs) 
             runtime,
             transientVariables: testCtx.transientVariables,
             aiGatewayModelId: targetRequest.modelId,
+            // Evaluator runs use only the Evaluate tab's skills, never the request's own Skills tab selection.
+            aiSkillIds: targetRequest.modelId ? (targetRequest.evalSkillIds ?? []) : undefined,
           });
           if (execution?.nextRequestIdOrName) {
             nextRequestIdOrName = execution.nextRequestIdOrName || '';
