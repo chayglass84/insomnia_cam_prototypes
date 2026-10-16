@@ -1,0 +1,1580 @@
+# 3593AI — working log (chronological, verbatim)
+
+> **This is the detailed history.** The condensed, work-item-by-work-item summary is `3593AI.md`; read that first.
+> This file keeps everything we wrote while working, including dead ends, bug post-mortems and superseded plans.
+> Where an older entry here disagrees with a newer one, the newer one wins (and `3593AI.md` states the current truth).
+> Some older sections below say "Pick up here" or "Next session": those are historical, not current.
+
+## What we did each day (index, from commit dates)
+
+| Day | What | Log sections to read |
+|---|---|---|
+| 2026-10-01 | Branch started. Chat bubbles for LLM responses, streaming teaser, structured Chat/Raw body editor, Cmd+Enter hotkey fix | "Implementation notes (chat-bubble detection...)", "(structured Chat compose editor...)", "(Cmd+Enter send-hotkey fix...)" |
+| 2026-10-02 | Live chat bubbles for streaming, summary bar, UX polish, auto-scroll, editable settings bar | "Bug A/B", "Bug C", "chat within the bubble interface", "Connect does nothing", "one-click Enable streaming", "auto-connect", "UX polish round", "mid-conversation system-prompt", "auto-scroll fix + editable settings bar" |
+| 2026-10-05 | Model field dropdown, settings-bar fixes; real Kong AI Gateway unblocked (Colima, port 8500); chat-window state bugs | "model field as a dropdown", "false-positive banner", "Real AI Gateway endpoint", "Session notes 2026-10-05" |
+| 2026-10-06 | Biggest day: gateway sync as projects + catalog, Model Evaluator (fan-out, tokens, cost, ranked summary, grouped results), Konnect Plugins/Policies tab, rotating models, chat totals, one Evaluate tab, no format opinion | "Phase 2 plan", "Phase 1 (AI Gateway sync...)", "Session notes 2026-10-06 evening", the "Engineering handoff" block at the top |
+| 2026-10-07 | Eval exploration, test `detail`, `insomnia.judge()` + Judge tab, response history, Model Scoring tab, structured judge results, three-level scores + runs, Model Evaluator naming | "Session notes 2026-10-07" (four sections) |
+| 2026-10-09 | TODO: use Konnect's real cost once visible (cost is 0 on our test gateway) | "TODO: use Konnect's real cost" |
+| 2026-10-13/14 | Flat Routes and Models folder, local prompts project, prompt model picker, skills (folder, Skills tab, applied on send) | "Session notes 2026-10-13/14", "2026-10-14: skills on prompts" |
+| 2026-10-16 | Skills in the Model Evaluator, judge sees system prompt + skills, judge is a catalog model, Judge section on the Evaluate tab, skill starter judge test | "2026-10-16" (two sections at the end) |
+
+---
+
+# (original title) 3593AI — AI Gateway storytelling in Insomnia
+
+Branch: `3593AI` (off `develop`, synced to upstream `Kong/insomnia` as of 2026-10-01).
+Separate from `3593` (Konnect Plugins/Debugger tabs) — no AI Gateway work there.
+
+## Goal
+
+Make Insomnia help tell the "AI Gateway is Kong's future" story: chat-bubble
+rendering for LLM chat-completion traffic, click-to-inspect token/cost usage,
+model picker, cache-hit badges, and (stretch) MCP-bundled-server debugging —
+building on top of the already-merged upstream streaming/SSE summary work
+(PR #10455, `use-stream-summary.ts`).
+
+## Engineering handoff (last updated 2026-10-06 evening, branch head `6c300df7a`)
+
+**Start here.** Everything below the next heading is the working log; this section is the summary an engineer needs.
+This is a *prototype*: shortcuts are listed explicitly in "Prototype shortcuts" so nothing is mistaken for a decision.
+
+### Pick up here — NEWER STATE (2026-10-14): read the last section of this file first ("Session notes — 2026-10-14: skills on prompts")
+
+Since the 2026-10-06 notes below: gateway collection is now one flat `Routes and Models` folder; sync also creates a second local **prompts project** (Prompts + Skills folders, starter prompts/skill, model picker, Skills tab); skills are applied on send. Pushed through `30dc82e18`. Next: UX polish, then a Skills axis in the Model Evaluator. The 2026-10-06 notes below are still accurate for the evaluator itself.
+
+### Pick up here (state as of the end of 2026-10-06, evening)
+
+- **Everything is committed and pushed** on `3593AI` (fork: `chayglass84/insomnia_cam_prototypes`), head `4c4efd5b6`.
+- **Built this session (see "Session notes — 2026-10-06 evening" below):** Policies tab scoped per route with a `models:` field; rotating models (several `targets`, round-robin) supported
+  everywhere; "Try now" per route on the models tab; chat window shows model/tokens/cost per reply plus conversation totals and an `include_usage` banner; runner is one **Evaluate** tab
+  (requests none-by-default, models all-by-default, >20 runs asks first); no format skipping (gateway rejection = amber note).
+- **Cam's Konnect gateway** (`8fe01e88-8bb7-4467-b8a7-d75f280d7850`) is a test-only gateway, so its policies stay as they are: `test-rate-limit` (rate-limiting, 10,000/min, global) and `test-correlation-id`
+  (correlation-id, attached to `fable` and `sonnet`). Nothing to clean up. Models: opus/fable on `/anthropic`, sonnet on `/other-anthropic`,
+  `nano4.1` on `/rotating-openAI` (ONE model, three round-robin targets: `gpt-4.1-nano`, `gpt-5.4-nano`, `gpt-5-nano`), `4mini` (`gpt-4.1-mini`) on `/might-be-openAI`;
+  local data plane `Cams-AI-Gateway` (Docker/Colima) on host port 8500.
+- Known small open items: Playwright coverage missing; header strip says `Tokens:` while model headings say `Total Tokens:`.
+- **TODO (agreed 2026-10-09): use the gateway's real cost when it becomes visible.** The evaluator's cost is still an estimate; see "TODO: use Konnect's real cost" at the end of this file.
+
+### What it does
+
+Two jobs-to-be-done, both for Kong AI Gateway users inside Insomnia:
+
+1. **Debug / discover one endpoint.** Chat-completion traffic (OpenAI / Anthropic / Gemini shapes) renders as chat
+   bubbles with a model + token summary bar; a structured Chat compose editor edits the request body; streaming (SSE)
+   requests get a live Chat tab with follow-ups. Works against any URL, not just gateways.
+2. **Pick between models.** Konnect Sync also pulls AI Gateways. Each gateway becomes a project with a model catalog,
+   a ready-made folder/request tree, and a collection-runner mode that runs the same requests against many models and
+   ranks them by test pass rate, then cheapest, then output tokens.
+
+### User flow for job 2
+
+Organization > Control Planes > **Sync** -> gateway appears as a project -> its collection opens on a read-only
+**Routes/Models** tab (models grouped by route path, a **Try now** button per route opens the request that hits it) -> **Model Evaluator** -> runner opens on one **Evaluate** tab
+(instructions; Requests checklist, none selected; Models checklist, all selected; select all / deselect all on each; >20 total runs asks to confirm) -> Run -> each selected request runs once per model; rows show alias + actual model + `Tokens: X in, Y out · Cost: $…`;
+header strip = Tokens (+ cost), Tests, Time; a ranked per-model table (Route, Model, In, Out, Cost, Tests passed; ordered tests passed -> cheapest -> output tokens, with a note under it) sits at the top of Results.
+Tests are ordinary after-response scripts (`insomnia.test`) on the gateway's root folder, which applies to every route; sync
+pre-installs two starter tests there (valid response, under 500 tokens).
+
+Terminology: **route = path**. Konnect models carry the route inline; several models can share a path and are told
+apart by `route.model.values` in the request body (`opus`, `fable`, `sonnet`). Never show the Konnect *display name*
+in the UI (user preference) — show the alias and the actual model.
+
+### Where the code is
+
+| Area | Files |
+|---|---|
+| Gateway sync | `insomnia/src/konnect/sync.ts` (`syncAiGateways`, `syncAiGateway`, `ensureAiGatewayTree`, `upsertProjectEnvVars`), `konnect/api.ts` (`fetchAllAiGateways`, `fetchAiGatewayModels`) |
+| Pure logic (all unit-tested) | `konnect/transform.ts`: `groupModelsByPath`, `buildAiGatewayRequestSpec`, `getAiGatewayModelSuggestions`, `applyAiGatewayModelOverride`, `withUsageFromResponseBody` |
+| Data model (no migration, optional keys) | `insomnia-data`: `Project.konnectAiGateway`, `Workspace.konnectAiGatewayModels` (+ `AiGatewayModel`), `RunnerResultPerRequest.aiGateway` (+ `AiGatewayRunInfo`) |
+| Routes/Models tab + button | `ui/components/panes/ai-gateway-models-pane.tsx`, `ui/components/collection-tab.tsx` (`specTabLabel`), `routes/...workspace.$workspaceId.debug.tsx` |
+| Runner fan-out | `routes/...debug.runner.tsx` (Models tab, request x model expansion, `RequestRow.model*`), `ui/components/panes/runner-models-panel.tsx`, `routes/...debug.request.$requestId.send.tsx` (`aiGatewayModelId` option on `sendActionImplementation`) |
+| Cost | `common/llm-cost.ts` (`computeCostUsd`, `formatUsd`, `formatUsdPerMillion`), `konnect/transform.ts` (`pickLlmPrice`, `findCatalogModelBy*`, `withUsageFromResponseBody` takes a price), `AiGatewayModel.inputPerToken/outputPerToken`, `AiGatewayRunInfo.costUsd` |
+| Results UI | `ui/components/panes/request-result-card.tsx`, `runner-model-summary.tsx`, `runner-test-result-pane.tsx`, `common/runner-feedback.ts` (`summarizeModelRuns`, `sumTokenUsage`, `formatTokenUsage`) |
+| Model picker | `ui/components/viewers/chat-settings-bar.tsx` (suggests the route's `model.values` inside a gateway workspace) |
+| Chat window (job 1) | `common/chat-completion.ts`, `chat-request.ts`, `chat-streaming.ts`, `stream-summary.ts`; `ui/components/viewers/response-chat-viewer.tsx`, `chat-settings-bar.tsx`; `ui/components/websockets/realtime-response-pane.tsx` (streaming Chat tab); `ui/components/editors/body/chat-request-editor.tsx`; `ui/utils/chat-turn-meta-cache.ts`, `pending-auto-connect.ts` |
+| Tests | `konnect/__tests__/ai-gateway*.test.ts`, `common/__tests__/runner-feedback-tokens.test.ts`, `common/chat-*.test.ts`, `stream-summary.test.ts`; Playwright `insomnia-smoke-test/tests/smoke/ai-chat-streaming-response-pane.test.ts` (+ mock SSE server in `smoke-test/server/index.ts`) |
+
+### How the pieces work
+
+- **Sync** (`syncAiGateways`, runs after the control-plane pass on the same Sync button): `GET /v1/ai-gateways` per region,
+  then `GET /v1/ai-gateways/{id}/models`. A gateway becomes a **Project** that *reuses* `konnectControlPlaneId` (so the
+  existing Konnect-project UI rules — remove-only, no drag, no delete — apply) plus `konnectAiGateway: true`. The control-plane
+  sync filters on that flag so it doesn't delete gateway projects as stale. Each gateway gets its own environment
+  (`proxy_host`) and one collection holding the catalog (`Workspace.konnectAiGatewayModels`).
+- **Request tree** (`ensureAiGatewayTree`): root folder (gateway name) -> one folder per route path -> one streaming chat
+  request per route. **Create-only**, keyed `ai:<gatewayId>:<path>` in `konnectRouteId` / `konnectRouteKey`; sync never edits
+  or deletes them, so user prompts and folder-level scripts survive re-sync. (The control-plane sync, by contrast, *does*
+  delete user-added requests in synced workspaces — `deleteStaleRequests` — which is why gateways don't reuse it.)
+- **Runner fan-out**: the UI expands selected requests x chosen models into runner rows (`modelId`, alias, target, route).
+  `sendActionImplementation({ aiGatewayModelId })` rewrites the loaded request **in memory only** via
+  `applyAiGatewayModelOverride` (route path swapped, body `model` = route's model value, `stream: false`, `Accept: application/json`);
+  nothing is saved. It returns a skip reason (-> row marked skipped) for: URL not on a catalog route, non-chat body, or a
+  request/model **format mismatch** (body shapes differ per format).
+- **Tokens**: because streaming is off, usage is plain JSON in the response. `withUsageFromResponseBody` reads it (and the
+  provider-reported `model`) after the send. **Gotcha:** `services.helpers.getResponseBodyBuffer` returns a `Uint8Array` over
+  Electron IPC, not a `Buffer`; use `bodyBufferToUtf8`, not `.toString()` (that bug shipped once and hid all tokens).
+- **Summary**: `summarizeModelRuns` totals per (route, alias) across all requests/iterations (the model string is display-only); rank = pass rate desc,
+  then cost asc (cheapest first), then output tokens asc; untested models last, unpriced models after priced ones within a tie; skipped
+  rows ignored. A note under the table states the order (keep it in sync with `summarizeModelRuns`). Persisted run history reuses the same component.
+- **Results layout**: `<h2>` per iteration, `<h3>` per gateway model (alias, actual model, route, tokens) with that model's requests
+  listed under it (`groupRowsByModel`, `RunnerModelGroups`; used by both the live pane and the finished Results pane). Skipped rows
+  carry a plain-English reason (set in `applyAiGatewayModelOverride`, shown on the card). Clicking a model in the summary table
+  scrolls to its iteration-1 section (`modelAnchorId`). Non-gateway runs keep the old flat layout under the iteration heading.
+
+### Prototype shortcuts (each is a deliberate fake — replace for production)
+
+| Shortcut | Where | Production fix |
+|---|---|---|
+| Format -> endpoint path is a hardcoded 2-entry map (`anthropic` -> `/v1/messages`, `openai` -> `/chat/completions` — **no `/v1`** for OpenAI-format gateway routes, confirmed live; the provider's own path differs from the gateway's); other formats get the bare route path | `transform.ts` `AI_FORMAT_ENDPOINTS` | Konnect exposes only `formats[].type`, not paths. Needs a real source (Konnect API addition, or a maintained map incl. gemini/bedrock/cohere/huggingface) |
+| Generated URLs hardcode `http://` | `ensureAiGatewayTree` | Derive from the data plane's `proxy_urls` protocol |
+| Hybrid gateways report `proxy_urls: []`; `proxy_host` defaults to `localhost:8000` (only filled when unset) | `upsertProjectEnvVars` fallback | Real data-plane address discovery / explicit setup step |
+| `max_tokens` is a literal `4096` in the generated body | `buildAiGatewayRequestSpec` | See "Open question — max tokens as an env var": the chat parser `JSON.parse`s the *unrendered* body, so `{{ _.var }}` breaks bubbles/compose. Needs a template-tolerant parser or a send-time default |
+| System prompt / first prompt are fixed strings | `transform.ts` | Product copy / templates |
+| Starter tests (valid response + under-500-token cap) are pre-installed on the gateway's root folder so delete + re-add doesn't mean re-pasting; create-only (set when the folder is first created, never overwritten) | `transform.ts` `AI_GATEWAY_STARTER_AFTER_RESPONSE_SCRIPT`, `ensureAiGatewayTree` | Prototype convenience only — ship real eval templates / a snippets picker, not a hardcoded script |
+| Cost = tokens x Konnect's per-token price, fetched at sync and stored on each catalog model (`inputPerToken`/`outputPerToken`). Matched by exact upstream model id; provider *type* is not consulted (a provider-entity-name tiebreak only). Prices are a snapshot from the last sync; a run's `costUsd` is frozen at send time | `konnect/transform.ts` `pickLlmPrice`, `konnect/api.ts` `fetchLlmCostPrices`, `common/llm-cost.ts` | The price endpoint is beta and **its path `/v3/openmeter/llm-cost/prices` is not yet confirmed live** (taken from Kong's API reference); a failure is swallowed (console.info) and the UI just shows no cost. Production should resolve provider type properly, honor `list_llm_cost_overrides` (negotiated rates), and cover cache read/write tokens (prices exist; we ignore them) |
+| Mixed formats on one path use the first model's format for the starter request | `buildAiGatewayRequestSpec` | Per-model requests or a warning |
+| Fan-out not mirrored in `inso` (`cli.ts`); runner comment says to keep them in sync | — | Port `applyAiGatewayModelOverride` + usage extraction to the CLI path (`send-request.node.ts`) |
+| Chat history/turn meta cache is in-memory only | `chat-turn-meta-cache.ts` | Real per-message model/usage fields |
+| No `syncAiGateways` end-to-end test beyond env behavior; no Playwright test for the runner comparison | tests | Add smoke coverage (mock gateway on the existing mock server) |
+
+### Known gaps and open bugs
+
+- **Chat-tab flicker** while typing in the non-streaming request-body Chat compose editor: visual only, no data loss. Needs a
+  live debugging pass (React profiler / render counts). Last recorded 2026-10-05; not re-checked since.
+- Gemini request bodies: prior turns don't show as bubbles (`extractRequestMessages` handles OpenAI/Anthropic only).
+- Stream token/model extraction depends on provider chunk shapes actually seen; a gateway that omits or reshapes usage shows no numbers (no error).
+- Cumulative token usage across a whole multi-turn chat is not built (only the latest turn).
+- Follow-up box: Cmd+Enter does not send (only the Send button) — deliberate, revisit with real use.
+- The header strip still says `Tokens:` (it is the run total) while model headings say `Total Tokens:`; make them match if that reads oddly.
+- Test % in the summary counts tests only. A run that errors out has no tests, so an always-erroring model shows "—", not 0%.
+- Re-sync never updates existing generated requests/folders (create-only), so a changed path or format in Konnect does not
+  propagate. New paths do get new folders. Existing pre-handoff gateway projects must be removed and re-synced to get the folder tree.
+
+### Verification status
+
+- **Live-verified (by the user in the real app against "Cam's AI Gateway", hybrid, Docker/Colima data plane on :8500):**
+  sync, project + environment, Routes/Models tab and grouping, folder tree, SSE requests, model dropdown, runner Models tab and
+  fan-out (Opus/Fable on `/anthropic`, Sonnet on `/other-anthropic`), tokens per row, summary header, ranked table.
+  **OpenAI format** (added later the same day): route `/might-be-openAI` with aliases `nano4.1` (`gpt-4.1-nano`) and `4mini`
+  (`gpt-4.1-mini`). The user confirmed the OpenAI request and the multi-model comparison work in the app. Separately, the
+  gateway path was verified by curl: `POST /might-be-openAI/chat/completions` -> 200, `usage.prompt_tokens/completion_tokens`,
+  provider-reported models are dated variants (`gpt-4.1-nano-2025-04-14`), which the runner rows show. (The author of this
+  doc did not observe the runner's cross-format skip rows directly; the user reported it working.)
+- **Unit-tested only:** retargeting/skip logic, format map, usage extraction (string and `Uint8Array`), ranking, environment preservation.
+- **NOT yet verified:** the LLM cost price REST path (`/v3/openmeter/llm-cost/prices`) and the sync's price fetch against real Konnect (unit-tested with a mock only; sync logs `[konnect] LLM cost prices unavailable` and shows no cost if it 404s); serverless gateways with real `proxy_urls`; multiple gateways / multiple regions; behavior when a
+  gateway is deleted in Konnect; plan/entitlement gating (the AI Gateway endpoints' 403/404 are silently ignored on the *list*
+  call only); non-OpenAI/Anthropic formats (gemini, bedrock, cohere, huggingface get only a bare-path request); the OpenAI
+  provider key header (`Authorization: Bearer ...`) is user-configured in Konnect and not validated by Insomnia.
+- Quality gates, run from the repo root on 2026-10-06 at `90d2cc858` (all code in this branch; later commits are docs only): `npm run type-check` (all workspaces)
+  0 errors; `npm run lint` 0 errors (existing warnings elsewhere); `npm test` all workspaces pass — insomnia: 182 files / 2628 passed, 15 skipped (pre-existing
+  skips). The Playwright smoke suite (`npm run test:smoke:dev`) was **not** re-run, and there is no Playwright coverage for the runner comparison yet.
+
+### Gotchas worth knowing (found the hard way)
+
+- NeDB `{ $ne: null }` also matches documents where the key is **absent**, so optional-key queries must be post-filtered in JS
+  (the environment workspace matched a "has catalog" query until it was).
+- Environments have two edit modes: the JSON ("Raw Edit") editor writes only `data`, the table editor writes `data` **and** `kvPairData`.
+  Anything that reads/rebuilds env vars must treat `data` as authoritative and merge into it — rebuilding from a missing/stale
+  `kvPairData` wiped a user's edited `proxy_host`. Fixed in `upsertProjectEnvVars`; covered by `ai-gateway-sync.test.ts`.
+- **Identify a model by route + alias, never by its model string.** A row's `aiGateway.model` starts as the catalog target
+  (`gpt-4.1-nano`) and is overwritten with the provider-reported, often dated id (`gpt-4.1-nano-2025-04-14`) once a response
+  arrives; skipped rows never get the update. Grouping/summarizing/anchoring on that string split each OpenAI model into two
+  sections (Claude models don't, since they echo the catalog id). `groupRowsByModel`, `summarizeModelRuns` and `modelAnchorId`
+  now key on `route + alias` and display the model from a row that actually ran. Covered in `runner-feedback-tokens.test.ts`.
+- The gateway's endpoint path is **not** the provider's: Anthropic keeps `/v1/messages`, OpenAI-format routes are `/chat/completions`
+  (a `/v1/...` path 404s with Kong's "no Route matched"). Debug a gateway 404 by: (1) control request to a known-good route,
+  (2) data-plane `config_sync` via `list_ai_gateway_nodes` (`STATE_IN_SYNC`, matching `config_version`), (3) diff the failing
+  model entity against a working one (`list_ai_gateway_models`), (4) the gateway's own example cURL in Konnect.
+- `deleteStaleRequests` (control-plane sync) deletes user-added requests; never reuse it for user-authored content.
+- `Konnect AI Gateway` is a separate resource from a control plane (`list_control_planes` won't list it).
+- A streaming request renders `RealtimeResponsePane`, not `ResponsePane` — the chat UI lives in the former.
+- Insomnia's `CodeEditor` is intentionally uncontrolled (see "Reusable notes" below); macOS loopback port clash with stale
+  local processes (see "Session notes — 2026-10-05").
+- Folder-level scripts: `network.ts` concatenates ancestor folders' after-response scripts, so a script on the gateway's root
+  folder applies to every request beneath it. Collection-level scripts do not exist (a separate ask).
+
+### Not done / possible follow-ups (user de-prioritized for the prototype)
+
+Policies: edit-in-Konnect links and decK; LLM-as-judge evals; an `insomnia.response.usage` helper so scripts needn't handle per-format usage fields; per-model test
+breakdown beyond the summary; prompt x model matrix; showing Konnect LLM *analytics* (production tokens/latency/error rate) next to eval results (prices are already built; see below); competitive look at LiteLLM and
+Postman's Fabric Gateway; template-tolerant chat parser (env-var `max_tokens`).
+
+### Konnect Plugins tab (ported from branch `3593`, 2026-10-06)
+
+The read-only **Konnect Plugins** request tab (plugins on the request's route, plus service-scoped and global ones, with docs/Konnect links, a decK
+snippet modal and suggested plugins) was cherry-picked from the `3593` branch (commit `05e556a89`; its three plugin files are identical at that
+branch's tip, so this is the complete tab). Files: `ui/components/panes/request-plugins-tab.tsx`, `ui/hooks/use-konnect-plugins.ts`,
+`ui/components/modals/deck-command-modal.tsx`, plus plugin fetchers in `konnect/api.ts` and the tab wiring in `ui/components/panes/request-pane.tsx`
+(a green dot marks Konnect-linked requests). Only the Plugins commit was brought over — the **Debugger tab was not** (it lives on `3593`, which also
+records an unresolved waterfall-paint bug). Not the 3593 PRD either; its notes stay on that branch.
+
+- **API Gateway (control plane) requests: works.** Same sync produces `konnectRouteKey` / `konnectServiceId` / `konnectControlPlaneId`, which is what the tab resolves.
+- **AI Gateway requests: shows *policies* instead (built).** AI Gateways don't have plugins; Konnect exposes the same Kong plugin types as **policies** through a
+  separate API. The tab becomes **Konnect Policies** (`ui/components/panes/request-ai-policies-tab.tsx`, `ui/hooks/use-konnect-ai-policies.ts`; `RequestPluginsTab` is now a
+  small wrapper that picks control-plane vs AI view). It lists the policies that affect the request's model: those attached to the model, then the gateway's global ones
+  (`selectAppliedAiGatewayPolicies`; no execution-order claim), each with plugin type, scope, enabled state and a docs link, plus 5 curated suggested AI policy types.
+  The request -> model link is the URL path + body `model` alias (`findCatalogModelByRequest`), the same way the chat model dropdown works.
+  A policy is `{ id, name, display_name, type, enabled, global, config }`; **real shape confirmed** against a policy created via the MCP on 2026-10-06
+  (`test-rate-limit`: `rate-limiting`, 10,000/min, global; verified live on the data plane via `X-RateLimit-Limit-Minute: 10000`). A model's attached policies are stored at sync
+  as `AiGatewayModel.policyRefs` (**policy names** — confirmed live: a model's `policies` is a list of names, and updating a model with a policy *id* is rejected with "policies not found for the given name(s)"; the sync still accepts strings, `{id}` and `{name}` defensively).
+  Not built: edit-in-Konnect deep link and decK for policies (URL scheme unknown); the "available policies" catalog (91 types) is not used for suggestions (internal endpoint, path unconfirmed).
+  **Unconfirmed REST path:** `GET /v1/ai-gateways/{id}/policies` is inferred from the MCP tool name; if it 404s the tab says "Failed to load policies: Konnect API error 404 ...".
+  Test policies on Cam's gateway: `test-rate-limit` (rate-limiting, 10,000/min, **global**) and `test-correlation-id` (correlation-id, model-scoped, attached to the `fable` and `opus` models). Konnect's policy-usage endpoint confirms the attachment, but a `X-Insomnia-Test-Id` header was **not** observed on data-plane responses (config in sync) — unexplained, and irrelevant to the tab, which reads Konnect's config. Semantic cache was not used as a test policy: it requires an embeddings model and a vector DB (Redis/pgvector). Updating a model through the API needs the full body plus `type`, and policies by name.
+  A model-attached policy only shows after a re-sync (it reads `policyRefs` from the catalog); global policies are fetched live each time the tab opens.
+
+### Konnect cost / analytics / billing findings (checked 2026-10-06 via the kong-konnect MCP + docs)
+
+Investigated whether Konnect has billing/monetization worth borrowing. Short answer: **cost prices and LLM analytics yes; Metering & Billing no.**
+
+- **BUILT 2026-10-06** (cost shown wherever tokens are: runner rows, model headings, summary table, header strip, Routes/Models price column, the chat settings bar and each chat bubble's footer; USD). Cost = in x input_per_token + out x output_per_token; chat surfaces look the model up via the workspace catalog (`findCatalogModelByRequest` for the settings bar, `findCatalogModelByResponseModel` for bubbles) so they only show cost inside a synced gateway workspace.
+- **LLM cost prices (beta, "Pre-release Endpoint"): `list_llm_cost_prices`** — 309 entries, USD **per token** (strings), shape
+  `{ provider: {id,name}, model: {id,name}, pricing: {input_per_token, output_per_token, cache_read_per_token, cache_write_per_token}, source: "system", effective_from }`,
+  refreshed daily (many entries updated the same morning). All five gateway models are present, keyed `(provider.id, model.id)`:
+  `anthropic/claude-opus-4-6` $5/$25 per 1M in/out, `anthropic/claude-fable-5` $10/$50, `anthropic/claude-sonnet-5` $2/$10,
+  `openai/gpt-4.1-mini` $0.40/$1.60, `openai/gpt-4.1-nano` $0.10/$0.40 (the OpenAI two match OpenAI's own pricing page). Bedrock/regional
+  variants also exist (`anthropic.claude-fable-5` is priced differently), so match on the provider **type** and the catalog target name, not the
+  response model (dated ids like `gpt-4.1-nano-2025-04-14` won't match). `list_llm_cost_overrides` / `create_llm_cost_override` add per-namespace
+  overrides (negotiated rates). **This replaces the "no price table" shortcut**: cost = in x input_per_token + out x output_per_token. Not built;
+  the REST path is unconfirmed (only the MCP tool name is known), so confirm it the way `/v1/ai-gateways` was. Mapping needed: a model's
+  `targets[].provider` is the *provider entity name* (`claude`, `openai`); the provider's `type` (`anthropic`, `openai`) comes from
+  `list_ai_gateway_model_providers`.
+- **LLM analytics: `query_llm_analytics` / `datasource_config` (datasource `llm_usage`)** — real gateway traffic aggregated over time. Metrics:
+  `prompt_tokens`, `completion_tokens`, `total_tokens`, `ai_request_count`, `cost`, `llm_latency_average`, `time_to_first_token_average`,
+  `time_per_token_average`, `cached_tokens`, `error_rate`. Dimensions include `ai_gateway`, `ai_gateway_model`, `route`, `consumer`, `ai_provider`,
+  `ai_request_model`, `ai_response_model`. Confirmed it recorded this session's runs per model (e.g. 5 models, dated OpenAI response ids, matching what
+  the runner shows). **Caveat: `cost` was 0 for every model** even though prices exist, so cost is apparently not being computed for this gateway
+  (unknown why — maybe needs a setting). Don't build on analytics `cost` until that's understood. Possible use: show "in production" tokens/latency/
+  error rate next to an eval result, or seed an eval from real traffic. Retention ~425 days.
+- **Metering & Billing (OpenMeter backend)** — a product for *charging customers*: attach a "Metering & Billing Policy" with `meter_ai_token_usage: true`
+  to AI models; events `kong.llm_request` carry tokens + model/provider dimensions; meters -> features -> plans/rate cards -> customers/subscriptions
+  (`/v3/openmeter/...`, MCP: `create_meter`, `query_meter`, `create_feature`, billing profiles, customers). Not useful for *choosing between models*;
+  skip for this prototype. The only transferable idea is "meter by model/provider dimensions", which the summary table already does.
+
+### Commits on this branch (newest first)
+
+`6c300df7a` no format opinion in the runner + Evaluate polish + sync names - `a7993cec6` one Evaluate tab - `f5509a465` chat totals + per-reply cost + include_usage banner -
+`99cc4401d` rotating models + Try now links - `a25f90b43` Policies tab per route with models field - `90d2cc858` docs: confirmed `model.policies` shape + test policies - `ea22aeb20` AI Gateway *policies* in the Konnect tab - `52f4d49bf` Konnect Plugins tab ported from `3593` -
+`6bfd8f6eb`/`cd26edd55` rank summary by pass rate -> cheapest -> tokens, with a note - `264484951` USD cost wherever tokens show (needs a re-sync for prices) -
+`0a349d8b0` Konnect cost/analytics/billing findings - `e5ef8722d` full-repo validation results - `bc44ef4a4` one section per model (group by route+alias),
+stronger model headings - `22d077b47` results grouped by iteration and model, skip reasons, jump link, fixed table widths - `a88ff3c4b` OpenAI-format routes use
+`/chat/completions` (no `/v1`) - `62a15ff37` starter tests pre-installed on the root folder - `e4ea25187` this handoff section - `d6f10a258` ranked per-model summary -
+`096018026` alias/actual model/tokens in runner results - `f4a176ce2` evaluate multiple models from the runner - `22c3f08e8` sync AI Gateways as projects with a
+model catalog - earlier: chat-bubble / streaming / compose-editor / real-gateway fixes (see log below).
+
+### Manual smoke test (5 minutes)
+
+1. Sync; gateway project appears with a `{{ _.proxy_host }}` env (set it to your data-plane host:port).
+2. Open the collection: Routes/Models tab lists models by path; folder tree has one request per route; send one (SSE).
+3. The root folder's After-response script already has two starter tests (valid response; under 500 tokens total) — open the
+   folder's Scripts to see or edit them (re-sync never overwrites them).
+4. Model Evaluator -> Run: expect rows per request x model, tokens per row, header Tokens/Tests/Time, ranked table.
+
+---
+
+## Status
+
+**Current (2026-10-06):** unblocked and working end to end against a real hybrid AI Gateway; see "Engineering handoff" above.
+The paragraphs below this line, through "TODO: once Docker access is granted", are **historical** (written while blocked on
+Docker/hybrid-gateway access, resolved 2026-10-05) and kept for context only.
+
+*Historical:* AI Gateway 2.x only runs in hybrid mode — Konnect-managed control plane + self-managed data plane (confirmed
+via developer.konghq.com/ai-gateway/architecture/); it does not work with Konnect serverless/cloud gateways.
+
+## TODO: once Docker access is granted
+
+> **Reminder for Claude:** when picking this back up, check whether the user
+> now has Docker access before re-suggesting direct-Anthropic testing — ask
+> first rather than assuming either way.
+
+1. Install Docker Desktop, make sure the daemon is running.
+2. Get a Konnect PAT (cloud.konghq.com → avatar → Personal Access Tokens),
+   then run the quickstart (creates a new hybrid control plane `ai-quickstart`
+   + local data plane container):
+   ```bash
+   export KONNECT_TOKEN='<your Konnect PAT>'
+   curl -Ls https://get.konghq.com/ai | bash -s -- -k $KONNECT_TOKEN
+   ```
+   Copy the printed exports (`AI_GATEWAY_ID`, `KONNECT_CONTROL_PLANE_URL`,
+   `KONNECT_PROXY_URL`, etc.) into your shell.
+3. Install `kongctl` 1.16.0+, set your Anthropic key:
+   ```bash
+   export ANTHROPIC_API_KEY='<rotate — the key pasted earlier in this
+     session's chat should be treated as burned and rotated before use>'
+   ```
+4. Create the AI Model Provider:
+   ```bash
+   kongctl apply -f - --auto-approve --pat "$KONNECT_TOKEN" << 'EOF'
+   ai_gateway_model_providers:
+     - ref: anthropic-provider
+       ai_gateway: !lookup {id: !env AI_GATEWAY_ID}
+       name: anthropic-provider
+       display_name: "anthropic-provider"
+       type: anthropic
+       config:
+         auth:
+           type: basic
+           headers:
+           - name: x-api-key
+             value: !secret {source: !env ANTHROPIC_API_KEY}
+   EOF
+   ```
+5. Create the AI Model (streaming enabled) and smoke-test it:
+   ```bash
+   kongctl apply -f - --auto-approve --pat "$KONNECT_TOKEN" << 'EOF'
+   ai_gateway_models:
+     - ref: claude-sonnet-5-chat
+       ai_gateway: !lookup {id: !env AI_GATEWAY_ID}
+       name: claude-sonnet-5-chat
+       display_name: "claude-sonnet-5-chat"
+       type: model
+       formats:
+         - type: anthropic
+       config:
+         response_streaming: allow
+         route:
+           paths:
+             - /ai/anthropic-chat
+       targets:
+         - name: claude-sonnet-5
+           provider: anthropic-provider
+           config:
+             type: anthropic
+             version: "2023-06-01"
+             max_tokens: 4096
+       policies: []
+       capabilities:
+         - generate
+   EOF
+
+   curl -N -X POST "$KONNECT_PROXY_URL/ai/anthropic-chat" \
+     -H "Content-Type: application/json" \
+     -H "x-api-key: $ANTHROPIC_API_KEY" \
+     -H "anthropic-version: 2023-06-01" \
+     -d '{"model":"claude-sonnet-5","max_tokens":100,"stream":true,"messages":[{"role":"user","content":"Say this is a test!"}]}'
+   ```
+6. Once that streams back a real response, ask Claude to build the
+   full-featured `curl` for Insomnia (system prompt, temperature, top_p,
+   stop sequences, streaming toggle) against the confirmed `KONNECT_PROXY_URL`,
+   and swap the Insomnia-side testing over from direct-Anthropic to the real
+   Kong AI Gateway endpoint.
+7. Clean up the quickstart resources when done:
+   ```bash
+   curl -Ls https://get.konghq.com/ai | bash -s -- -d
+   ```
+
+## Decisions / notes
+
+- No MCP server bundling work started yet — deferred until the chat-bubble
+  core is working, and scoped to "Insomnia as debugging client" only (list
+  tools, invoke, inspect JSON-RPC), not managing bundled servers.
+- Identity/per-caller billing explicitly out of scope — that's a
+  gateway-side governance concern, not useful inside a single dev's request
+  client.
+- Future: look at LiteLLM and Postman's new AI Gateway
+  (https://app.fabricgateway.ai/) as reference points before going further
+  than the current chat-bubble/streaming-teaser/compose-editor phase, to make
+  sure Insomnia's take is differentiated rather than just catching up. Not
+  yet investigated as of 2026-10-01.
+
+## Implementation notes (chat-bubble detection + streaming teaser, phase 1)
+
+Landed: `packages/insomnia/src/common/chat-completion.ts` (shape detector,
+OpenAI/Anthropic/Gemini, folds the request's `messages`/`system` in ahead of
+the response's assistant turn), `response-chat-viewer.tsx` (bubble renderer,
+click-to-expand per-bubble inspector: role, model, stop reason, tokens, raw
+JSON), wired into `response-viewer.tsx`'s existing `application/json` Preview
+branch (falls through to the normal `CodeEditor` when the shape doesn't
+match — zero behavior change for ordinary JSON responses), plus a dismissible
+"this endpoint supports streaming" teaser banner in `response-pane.tsx` that
+patches both the request body (`stream: true`) and headers
+(`Accept: text/event-stream`) in one action, with a toast naming exactly what
+changed and an Undo button.
+
+- Detection is purely response-shape-based for now (non-streaming only, per
+  the "non-streaming is basically free, ship it first" call) — it does not
+  yet reuse the streaming/SSE fragment-accumulation path from
+  `stream-summary.ts`, so a bubble does not fill in live token-by-token yet.
+  That's the natural Phase 2, picked up once someone clicks "Enable
+  streaming".
+- Real bug caught during live verification and fixed before landing: the
+  streaming-teaser header patch originally checked for an existing header
+  with value exactly `text/event-stream` before appending a new `Accept`
+  header — but every new Insomnia request already ships a default
+  `Accept: */*` header, so the original code appended a *second* `Accept`
+  header instead of replacing the first (confirmed via screenshot, then
+  fixed to find-and-replace any existing `Accept` header by name instead).
+  Worth remembering as a general gotcha for any future "patch this header"
+  feature in this codebase: always check by header *name*, not by name+value.
+- Verified live (Electron app launched via Playwright `_electron` against an
+  isolated `--user-data-dir`, pointed at a throwaway local mock HTTP server
+  serving an Anthropic-shaped response) rather than against a real Anthropic
+  key: bubble rendering, the streaming teaser banner, the "Enable streaming"
+  action correctly patching body+header, and the undo toast all confirmed
+  working end-to-end via screenshot. Did not get a clean screenshot of the
+  non-chat-JSON fallthrough live (test harness ended up reopening an
+  already-SSE-converted request from an earlier run rather than a fresh one)
+  — that path is instead covered deterministically by
+  `chat-completion.test.ts`'s "returns null for non-matching JSON" case plus
+  the fact that `response-viewer.tsx` only branches into the chat viewer
+  when the detector returns non-null, leaving the existing `CodeEditor` path
+  completely untouched otherwise.
+- The inline per-bubble click-to-expand inspector was visually confirmed
+  rendering correctly, but the expand/collapse interaction itself wasn't
+  exercised live (test harness's generic text-based click helper grabbed an
+  unrelated element instead of the bubble's own button). It's a plain
+  `useState` toggle with no data dependencies, type-checks and lints clean —
+  low risk, but worth a manual click-test before calling Phase 1 fully done.
+
+## Implementation notes (structured Chat compose editor on the request body)
+
+Landed: `packages/insomnia/src/common/chat-request.ts` (`parseChatRequestBody`/
+`serializeChatRequestBody`, OpenAI/Anthropic/Gemini, reuses `ChatMessage` from
+`chat-completion.ts`), `chat-request-editor.tsx` (Chat/Raw tab toggle over the
+same `request.body.text`, wired into `body-editor.tsx`'s existing JSON branch
+— falls through to the unchanged `<RawEditor>` when the body doesn't match a
+chat shape). Chat tab is the default when detected; Raw tab is the exact same
+editor as before, fully editable, unchanged behavior.
+
+- `serializeChatRequestBody` merges edited fields into the *existing* parsed
+  body object rather than rebuilding it from scratch, so fields the
+  structured UI doesn't expose (`max_tokens`, `temperature`, `stream`, etc.)
+  survive edits untouched. Verified both by unit test and live: edited the
+  model field and added a message via the Chat tab, switched to Raw, and
+  `max_tokens` was still present alongside the edit.
+- **Real bug, found by the user, not caught by automated verification:** the
+  original `ChatCompose` used `key={bodyText}` on its wrapping `TabPanel` to
+  stay in sync with external edits (e.g. the Raw tab). Since every keystroke
+  patches the body, which changes `bodyText`, this forced a full remount of
+  `ChatCompose` on every single character typed — destroying and recreating
+  the DOM `<textarea>` being typed into, which drops browser focus after the
+  first keystroke. Reported symptom: clicking "Add message" then typing
+  immediately sent a single stray character somewhere unexpected, because
+  the new row's textarea was never focused to begin with and the first
+  keystroke's remount compounded it. Fixed by having `ChatCompose` own real
+  state and track `lastEmittedBodyText` in a ref: it only re-syncs from props
+  when the incoming `bodyText` differs from what it itself last produced
+  (i.e. an external change, like hand-editing Raw), never on its own edits.
+  Also added auto-focus on a newly-added message row via a ref array, so
+  "Add message" actually places the cursor where you'd type next.
+  **Process note:** the prior live-verification pass exercised "click Add
+  message" and "edit the model field" as separate steps but never typed
+  *into* a newly-added message row — the exact gap where this bug lived.
+  Worth remembering generally: verifying a compose/editor UI must include
+  typing multiple characters into a freshly-created field, not just
+  single-field edits or single clicks in isolation.
+- **Gotcha hit during live verification, worth remembering:** this dev build's
+  app data does **not** honor Electron's `--user-data-dir` flag — Insomnia
+  hardcodes its userData path to a fixed `insomnia-app` directory (under the
+  OS's normal app-support location) regardless of that flag, and the local
+  "Scratch Pad" workspace is further ephemeral *within* that — its contents
+  don't survive an app relaunch. Don't rely on `--user-data-dir` for a fresh,
+  isolated profile with this app; do all related UI steps in one continuous
+  driver-script session instead of relaunching between steps.
+- **Gotcha:** this app's text inputs are CodeMirror-backed with a real
+  `<textarea>` in the DOM (e.g. `#raw-editor`), but calling `.focus()` on that
+  textarea directly via `page.evaluate` does **not** move real DOM focus —
+  keyboard input kept landing in the URL bar (also CodeMirror-backed) instead.
+  What worked: find the visible placeholder element (the `...` text CodeMirror
+  renders in an empty editor) via `document.querySelectorAll`, get its
+  `getBoundingClientRect()`, and do a real `page.mouse.click()` at that
+  position before `page.keyboard.type()`. Coordinate-clicking generic
+  `.CodeMirror`/`.cm-content` bounding boxes was unreliable (multiple
+  instances exist in the DOM, including ones for other body-type editors);
+  anchoring to the actual visible placeholder text was what made it reliable.
+- Verified live end-to-end in the running app (Electron launched via
+  Playwright `_electron`, local Scratch Pad, no login needed): created an
+  HTTP request, set JSON body type, typed an Anthropic-shaped body (`model` +
+  `system` + `messages`) — Chat tab appeared by default showing the system
+  and user messages and an editable Model field; edited the model field and
+  clicked "Add message"; switched to Raw and confirmed the JSON reflected the
+  edit, the new empty message, and preserved `max_tokens` untouched. Also
+  created a second request with a plain non-chat JSON body (`{"foo":"bar"}`)
+  and confirmed no Chat/Raw tabs appear at all — single unchanged editor,
+  zero behavior change for ordinary JSON bodies.
+- Tests: `chat-request.test.ts` (9 tests) plus `chat-completion.test.ts` (9)
+  and `stream-summary.test.ts` (27) all passing, no regressions.
+  `type-check` and `eslint` clean on all touched/created files.
+- Not yet built: per-row drag-to-reorder for messages, and a dedicated UI for
+  sampling params (`temperature`, `top_p`, `max_tokens`) — deferred; they stay
+  fully editable via the Raw tab in the meantime.
+
+## Implementation notes (Cmd+Enter send-hotkey fix + streaming/non-streaming split)
+
+**Bug:** typing in the Chat compose message textarea could fire a real "Send
+Request" mid-edit. Root cause: `keydown-binder.ts`'s `useKeyboardShortcuts`
+binds global hotkeys via `tinykeys(window, keyBindingMap, { capture: true })`
+— a native capture-phase listener on `window`. Per DOM event dispatch order, a
+capture-phase listener on `window` always fires *before* the event reaches any
+descendant element, so `event.stopPropagation()` called from inside the
+textarea's own handler cannot prevent it — the global send had already fired
+by the time our handler would run. The fix had to live in the global handler
+itself (`request-url-bar.tsx`'s `request_send` callback), which now checks
+`document.activeElement?.closest('[data-ignore-send-hotkey]')` before calling
+`sendOrConnect()`. The Chat compose editor's wrapping `<div>` now carries that
+attribute. This is a small, deliberate addition to a shared/global file.
+
+**Redesign (by agreement):** the structured Chat compose editor no longer
+renders at all when the request is in event-stream/streaming mode
+(`models.request.isEventStreamRequest`) — `body-editor.tsx` falls through to
+the plain Raw editor in that case, so sampling params stay editable there.
+Continuing a streaming conversation instead happens via a new follow-up
+compose box in the response pane's Preview tab (shown when the response is a
+detected chat completion *and* the request is in event-stream mode): a
+textarea + explicit Send button that appends a `{role: 'user', content}` turn
+via `parseChatRequestBody`/`serializeChatRequestBody`, patches the body, and
+reconnects using the same `renderRealtimeConnectPayload` +
+`useRequestConnectActionFetcher` machinery `request-url-bar.tsx`'s own
+Send/Connect button already uses (not a parallel send mechanism). That box
+also carries `data-ignore-send-hotkey`, since its own explicit Send button is
+the primary affordance and Cmd+Enter wasn't separately wired to it — composing
+a reply there should never risk firing the *request's own* global send/
+reconnect out from under the user.
+
+Verified: `tsc --noEmit` clean, `eslint` clean on all touched files, and
+`chat-completion.test.ts` (9), `chat-request.test.ts` (9), and
+`stream-summary.test.ts` (27) all still passing — 45/45, no regressions.
+
+**Not live-click-verified this round:** a dev-build Electron instance from
+this same repo was already running locally when this phase started (likely
+the user's own manual test session from the previous phase) — launching a
+second Playwright-controlled instance against the same `insomnia-app`
+userData directory risked colliding with that live session, so it was
+skipped rather than risk disrupting it. The Cmd+Enter fix and the
+streaming/non-streaming split are both logically verified (reasoned from the
+DOM event order and `isEventStreamRequest`'s existing single header check)
+and type/lint/test clean, but worth a manual click-test same as the bubble
+expand/collapse flagged in the first phase.
+
+## Implementation notes (two more real bugs, both found by the user's manual testing, neither caught by automated verification)
+
+**Bug A — Chat compose textarea lost focus after the first keystroke.**
+`ChatCompose` used `key={bodyText}` on its wrapping `TabPanel` so it would
+re-sync when the body changed externally (e.g. hand-edited on the Raw tab).
+But every keystroke also patches the body, changing `bodyText`, which forced
+a full remount on every character typed — destroying and recreating the DOM
+`<textarea>` being typed into, dropping focus after the first keystroke.
+Reported as: click "Add message," type, and the input doesn't land where
+expected. Fixed: `ChatCompose` now owns real state and tracks
+`lastEmittedBodyText` in a ref, only re-syncing from props when the incoming
+`bodyText` differs from what it itself last produced (an external change,
+never its own edit). Also added auto-focus on a freshly-added message row via
+a ref array, so "Add message" places the cursor where you'd type next.
+
+**Bug B — the actual "it's sending while I type" symptom, with zero real sends
+involved.** After Bug A's fix, the user reported it was *still* "creating a
+chat bubble the moment I press a single letter" — this turned out to be a
+different bug, and not a send at all. `response-pane.tsx`'s
+`chatCompletionSummary` (and the `requestBodyText` prop threaded into
+`response-viewer.tsx`, which is what actually decides whether to render
+`ResponseChatViewer`) both derived from the **live** `activeRequest.body?.text`
+— so with an existing response already on screen, every keystroke made while
+composing the *next*, not-yet-sent message in the request body's Chat tab
+immediately re-ran `extractChatCompletion`'s request-message folding and
+re-rendered the response pane's bubble view with the in-progress edit treated
+as a new conversation turn. No network call ever fired; it only looked like
+one. Fixed by freezing a snapshot of `activeRequest.body?.text` into
+component state the moment `activeResponse._id` changes (the
+React-sanctioned "adjust state during render when a prop changes" pattern,
+no extra `useEffect`/render flash), and reading only that frozen snapshot
+in both `chatCompletionSummary` and the `requestBodyText` prop — live edits
+to the request body no longer bleed into how an already-received response is
+displayed.
+
+**Known limitation, scoped out for now:** this snapshot is taken from
+whatever `activeRequest.body.text` happens to be at the moment a response
+becomes active in the UI, not from `activeResponse.requestVersionId` (Insomnia
+does keep an exact historical snapshot of the request as it was actually
+sent, as a compressed `RequestVersion` — see
+`packages/insomnia-data/node-src/services/request-version.ts`'s
+`decompressObject`/`restore`, already used by `response-history-dropdown.tsx`).
+In the normal flow (send, then compose a reply) these are identical. They
+could diverge if the user browses to an *older* response from history after
+further editing the body — a smaller, pre-existing edge case, not newly
+introduced here. The more correct long-term fix is decompressing
+`requestVersionId` via that existing service and threading it through the
+route loader as actual historical data, rather than a live-request snapshot;
+deferred as out of scope for this pass.
+
+**Process note, worth remembering generally:** two real bugs in a row slipped
+past automated live-verification because the verification script tested
+individual actions (click Add message; edit the model field) in isolation,
+never the combination that actually breaks (type several real keystrokes
+into a freshly-created field *while an existing response is already
+showing*). Compose/editor UI verification needs to include that combined,
+realistic sequence, not just each step checked separately.
+
+Verified: `tsc --noEmit` clean, `eslint` clean on `chat-request-editor.tsx`
+and `response-pane.tsx`, and all 45 existing chat-related tests still
+passing. Both fixes still need a real manual click-test from the user before
+calling this phase done — not re-delegated to another background pass this
+time, given the last two rounds of "verified live" claims both missed the
+actual bug.
+
+## Implementation notes (Bug C — intermittent dropped/overwritten keystrokes)
+
+After Bug B's fix, the user reported the message textarea was "refreshing on
+every keystroke" with flaky character display — sometimes a typed letter
+showed up, sometimes it didn't. Root cause: `ChatCompose` called
+`onChange` (→ `patchRequest`, an async round trip) on *every single
+keystroke* with no debouncing. Fast typing fired multiple concurrent async
+patches; if their responses/loader-revalidations landed out of order, an
+older in-flight patch's stale `bodyText` could arrive after a newer one and
+trip the Bug-A fix's "external change" resync check, overwriting
+whatever the user had typed in the meantime with stale content. The
+CodeMirror-backed Raw editor already avoids this exact class of problem via
+`misc.debounce` (`code-editor.tsx` wraps its change handler before calling
+`onChange`) — our plain `<textarea>`/`<input>` fields had no such debounce.
+Fixed by wrapping the outgoing `onChange` call in `ChatCompose` with the same
+`misc.debounce` utility at the same 100ms default (`DEBOUNCE_MILLIS`); the
+displayed value (local state) still updates instantly on every keystroke,
+only the backend patch is debounced, matching the Raw editor's existing
+behavior exactly rather than inventing a new pattern.
+
+This is the **third** real bug in the Chat compose editor found only by the
+user actually typing into it — see the process note above; it continues to
+apply. Verified: `tsc --noEmit` and `eslint` clean on
+`chat-request-editor.tsx`, all 45 chat-related tests still passing.
+
+**Follow-up fix the same session:** the keystroke-drop symptom was gone, but
+the user then reported visible flicker while typing (no longer losing
+characters, just a visual flash). Cause: the "is this an external change"
+check compared the raw `bodyText` *string* — but a save round trip isn't
+guaranteed to come back byte-identical (whitespace/formatting can shift),
+so the component's own just-saved edit kept getting misread as an external
+change and needlessly re-syncing local state. Fixed by comparing the parsed
+`{model, messages}` *by value* (`JSON.stringify` of just that shape) instead
+of the raw body string.
+
+**Status: not fully resolved.** After that fix the user still sees
+"flickers a lot but catches every keystroke" — no data loss, visual-only,
+and usable via copy/paste in the meantime. Deprioritized to pick up fresh
+rather than keep guessing blind; **next session should treat this as a
+live debugging task** (React DevTools profiler / render-count logging on
+`ChatCompose` while typing, rather than further static code reading) before
+attempting another fix. Candidate suspects not yet ruled out: whether
+`react-aria-components`' `Tabs`/`TabPanel` keeps the inactive Raw tab's
+`RawEditor` (CodeMirror) mounted and re-rendering in the background on every
+`bodyText` change; whether the debounce's trailing-edge `setTimeout` is
+somehow still causing a parent-level re-render tied to this component's own
+key/identity; or a CSS transition/animation on the bordered message row
+(`transition-colors` classes elsewhere in this file) misfiring on unrelated
+re-renders.
+
+## Implementation notes (chat within the bubble interface + token/model summary bar)
+
+**Root cause finally found for why the streaming follow-up box was never reachable:**
+the parent route (`...debug.tsx`, `isRealtimeRequest`) sends every
+`isEventStreamRequest` request to `RealtimeResponsePane`
+(`websockets/realtime-response-pane.tsx`), never to `ResponsePane`
+(`panes/response-pane.tsx`). The entire `isEventStreamChat` follow-up
+compose box + chat bubble wiring added in earlier phases lived in
+`response-pane.tsx` and was therefore **dead code** — it could never render
+for an actual streaming chat request, which is exactly why every past
+"live-click-verify" attempt on it either got skipped or silently tested
+nothing. This also explains why Bug A/B/C's fixes, though real and still
+needed for the non-streaming case, never actually fixed "chat within the
+bubble interface" for streaming — the code path they were fixing wasn't the
+one that runs.
+
+**Fix:** moved the chat UI to where streaming requests actually render.
+`realtime-response-pane.tsx` now has a `Chat` tab (shown first/default
+whenever the request body parses as a chat shape via
+`parseChatRequestBody`, regardless of URL — deliberately not gated on
+`supportsStreaming(url)`'s hardcoded path table, so this also works against
+a custom Kong AI Gateway route like `/ai/anthropic-chat` once Docker access
+unblocks real-endpoint testing) that:
+- Reuses the already-live `useStreamSummary` SSE-delta accumulator
+  (`stream-summary.ts`) for the assistant bubble's text, so it now
+  genuinely fills in token-by-token during an active connection — this was
+  Phase 2's original core ask, not done until now.
+- Reuses `extractRequestMessages` (newly exported from
+  `chat-completion.ts`) to fold in the request's prior turns, exactly like
+  the non-streaming viewer does.
+- Adds a new `extractStreamChatMeta` (`stream-summary.ts`) that scans every
+  SSE chunk seen so far for known model/usage/stop-reason shapes across
+  OpenAI, Anthropic, and Gemini (e.g. Anthropic splits input tokens into
+  `message_start` and output tokens into `message_delta` — later sightings
+  simply overwrite earlier ones, landing on the final value once the stream
+  completes).
+- Carries the same follow-up compose box (textarea + Send), now actually
+  wired to the real `useRequestConnectActionFetcher` +
+  `renderRealtimeConnectPayload` machinery and reachable for the first time.
+
+**New: `ChatSummaryBar`** (`viewers/chat-summary-bar.tsx`) — a persistent bar
+at the top of the chat view showing model, input/output/total token counts,
+stop reason, and a streaming spinner while connected. Shared between the
+non-streaming `ResponseChatViewer` and the new streaming Chat tab, rather
+than only surfacing this info in the per-bubble tooltip/inspector as before.
+
+**Also fixed while here:** the non-streaming follow-up composer in
+`response-pane.tsx` (used for one-shot JSON chat completions, since that
+pane never sees event-stream requests) was still wired to the realtime
+*connect* action from the original dead-code version — for a plain
+`application/json` response that's a no-op at best. Changed to a plain
+re-send via `useDebugRequestSendActionFetcher`, with the body patch
+persisted directly through `services.request.update` and awaited before
+sending (fire-and-forget `patchRequest` would race the send action's fresh
+DB read otherwise).
+
+**Verified live** (Playwright `_electron`, dev build, against two new fixture
+endpoints added to the smoke-test mock server — `POST /v1/messages`
+streaming a real Anthropic-shaped SSE sequence, `POST /v1/messages-sync`
+echoing the request's last message non-streaming) in two new smoke tests,
+`ai-chat-streaming-response-pane.test.ts`:
+1. Streaming case: Connect → Chat tab appears and is auto-selected → the
+   folded-in request message and the live-accumulated assistant reply both
+   render as bubbles → summary bar shows the correct final model/tokens/stop
+   reason → follow-up composer is present.
+2. Non-streaming case: Send → bubble shows the echoed reply → typing into
+   the follow-up composer and clicking Send actually triggers a second real
+   request and a new bubble appears with the second echo — confirming the
+   connect→send fix actually works, not just type-checks.
+Also re-ran the two pre-existing `event-stream-response-pane.test.ts` tests
+to confirm the routing/tab changes didn't regress plain (non-chat)
+event-stream responses — both still pass.
+Ran `tsc --noEmit` and `eslint` clean across all workspaces, and the full
+`vitest` suite for `packages/insomnia` (40 files, 612 passed, 2 skipped,
+0 failed) including 4 new `extractStreamChatMeta` unit tests
+(`stream-summary.test.ts`, now 31 tests).
+
+**Known gaps, scoped out for now:**
+- `extractRequestMessages` still only understands OpenAI/Anthropic request
+  shapes (`messages`/`system`), not Gemini's `contents` — a Gemini chat
+  request's prior turns won't show as bubbles, assistant-only. Pre-existing
+  limitation, not introduced or worsened this round.
+- The streaming-path's token/model extraction (`extractStreamChatMeta`)
+  depends on the same chunks that happen to arrive; a provider or gateway
+  that omits usage entirely (or sends it in a wholly different shape) will
+  just show no numbers rather than erroring — not exhaustively tried against
+  every real provider's actual wire format, only the shapes documented in
+  each provider's streaming API reference.
+- Cumulative token usage across the *whole* multi-turn conversation (vs.
+  just the latest turn/response) was floated as an idea but not built —
+  each turn's response is a separate `Response`/curl-connection document,
+  and summing across response history would need iterating
+  `responses`/`requestVersions` (already available in both panes' loader
+  data). Worth doing if "total session cost" becomes a real ask.
+
+## Implementation notes (real bug found by the user's manual testing: "Connect does nothing")
+
+First real-world test against a live Anthropic key surfaced a genuine bug the mock-server tests
+above didn't catch (the mock always streamed unconditionally — see below): a request that already
+had `Accept: text/event-stream` manually set (from a "yesterday" duplicate, not through the
+"Enable streaming" teaser) but was missing `"stream": true` in the body looked completely broken —
+response time ticked up, the Connect button never flipped state, nothing ever rendered. Root cause:
+most providers (OpenAI, Anthropic) only send real SSE chunks when the body opts in with
+`"stream": true` — the `Accept` header alone is necessary but not sufficient. Without the body
+flag, Anthropic generates the *entire* reply as one normal blocking JSON response before sending
+anything, which this app's curl-connection plumbing isn't built to progressively show, so it just
+looked hung. (A manually-fixed sibling request with `stream: true` in the body worked fine over the
+same real Anthropic key, confirming the Chat tab/summary bar pipeline itself is sound — this was
+purely a missing-body-flag issue.)
+
+**Fix (per the user's "just fix all three" instruction):** rather than only handling the
+already-covered case (neither header nor body flag set, via the pre-send "Enable streaming"
+teaser), added shared idempotent helpers (`common/chat-streaming.ts`:
+`hasStreamingBodyFlag`/`ensureStreamingBodyFlag`/`ensureEventStreamAcceptHeader`) and used them in
+**both** places so all three starting states (neither set / header-only / body-only) self-correct:
+- `response-pane.tsx`'s existing pre-send teaser, refactored onto the shared helpers (same
+  behavior, now also correctly idempotent — it used to always overwrite the body text through a
+  JSON round-trip even when `stream: true` was already present).
+- **New:** a banner in `realtime-response-pane.tsx`'s Chat tab for the case the bug actually
+  was — Accept header already set (so the request is already routed here, already shows
+  "Connect") but the body is missing the flag. Shown via `isMissingStreamingBodyFlag` (skipped for
+  Gemini, which streams via a URL suffix rather than a body flag), with an "Add `"stream": true`"
+  button that patches the body directly (`services.request.update`, same durability pattern as the
+  non-streaming follow-up fix) and a toast with Undo.
+
+**Verified live:** extended `/v1/messages` in the smoke-test mock server to actually mirror real
+provider behavior — only streams real SSE if the body has `stream: true`, otherwise returns one
+normal non-SSE JSON reply — and added a third smoke test,
+`AI Gateway chat: missing "stream": true in the body is detected and fixable from the Chat tab`
+(`ai-chat-streaming-response-pane.test.ts`), that reproduces the exact bug end-to-end: connects
+with the flag missing, confirms the assistant reply does NOT render (the inferred `$.delta.text`
+JSONPath correctly finds nothing in a non-streaming shape) and the fix banner is visible, clicks
+the fix button, reconnects, and confirms it now streams for real and the banner is gone. All 3
+tests in that file pass, plus the 2 pre-existing `event-stream-response-pane.test.ts` tests still
+pass (no regression). New unit tests for the shared helpers in `chat-streaming.test.ts` (9 tests).
+`tsc --noEmit` and `eslint` clean across all workspaces.
+
+## Implementation notes (one-click "Enable streaming" + toast UX, per user feedback)
+
+Following the missing-`stream:true` bug above, the user asked for two more things: (1) the
+original pre-send "Enable streaming" teaser should fix the same body+header problem *and*
+auto-connect in one click, since that's "almost certainly" what clicking it means; (2) the
+persistent confirmation toast should list all three things it did as bullet points, and sit higher
+on screen so it stops covering the chat follow-up composer's Send button (both this teaser's toast
+and the Chat tab's "Add stream:true" banner's toast sit bottom-right, same spot as that button).
+
+- `response-pane.tsx`'s `handleEnableStreaming` now: persists the body+header fix directly via
+  `services.request.update` (awaited, same durability pattern as elsewhere this session), shows the
+  toast, then immediately builds a connect payload via `renderRealtimeConnectPayload` and submits it
+  through `useRequestConnectActionFetcher` — the same real connect machinery the URL bar's own
+  Connect button and the Chat tab's follow-up composer both use, not a parallel mechanism. No second
+  click needed.
+- Toast description is now a `<ul>` of 3 `<li>` bullets: body flag, Accept header, "Reconnecting…"
+  (each line reports its real outcome — e.g. "Body already had `stream: true`" if nothing needed
+  changing there — rather than always claiming all three happened).
+- Added a `raised` option to the shared `RAToastContent` type (`toast-notification.tsx`): pulls a
+  persistent toast up via `mb-24` (~1in) instead of sitting flush in the bottom-right corner, where
+  it would otherwise sit directly over a response-pane composer's Send button. Applied to both this
+  toast and the Chat tab's "Add stream:true" banner's toast (same corner, same problem).
+
+**Verified live:** new smoke test
+`AI Gateway chat: "Enable streaming" fixes the header and body and auto-connects` — plain
+non-streaming POST (no Accept header, no `stream:true`) → Send → gets the mock's non-stream reply →
+click "Enable streaming" once → toast confirms all 3 bullets → **no second Connect click** → ends
+up actually connected with the Chat tab showing the real streamed reply. All 4 tests in
+`ai-chat-streaming-response-pane.test.ts` pass, the 2 pre-existing `event-stream-response-pane.test.ts`
+tests still pass, `tsc --noEmit` and `eslint` clean, full `vitest` suite (54 files / 817 passed, 14
+skipped, 0 failed) including the `chat-streaming.test.ts` unit tests from the prior round.
+
+One real mistake caught before committing to it: my first version of this smoke test scoped the
+toast assertion to `responsePane.getByText(...)`, which never matched — the toast renders in a
+global portal outside the response pane's own DOM subtree, not nested inside it. Fixed by asserting
+against `page.getByRole('alertdialog', ...)` instead. Worth remembering: **toasts in this app are
+never a descendant of the triggering component's pane — scope toast assertions to `page`, not to a
+pane locator.**
+
+## Implementation notes (auto-connect didn't actually connect — real bug, found live again)
+
+The one-click "Enable streaming" above looked right in the mock-server smoke test but **didn't
+actually connect** against the user's real Anthropic key — the toast appeared (confirming the
+body+header fix landed) but no connection ever opened. Root cause: patching the headers to flip
+`isEventStreamRequest` makes the parent route swap `ResponsePane` out for `RealtimeResponsePane`
+on its very next render — **unmounting the component that was running `handleEnableStreaming`**
+mid-handler. React Router's `useFetcher()` is scoped to its calling component by default and
+aborts its own in-flight submission when the last component subscribed to that fetcher key
+unmounts, so the connect fetcher's `.submit()` call was a race against its own component's
+disappearance. (A naive fix of just adding a stable `key` to the fetcher doesn't solve this on its
+own — if no other mounted component is subscribed to that same key, it still gets cleaned up/
+aborted once the only subscriber unmounts.)
+
+**Real fix:** stopped trying to connect from the about-to-unmount component entirely. Added
+`ui/utils/pending-auto-connect.ts` — a tiny module-level `Set` of request IDs — so
+`handleEnableStreaming` just calls `markPendingAutoConnect(activeRequest._id)` after persisting the
+body/header fix, and `realtime-response-pane.tsx` (the long-lived component that will actually be
+mounted once the route switches) checks `consumePendingAutoConnect(activeRequest._id)` in a
+mount-effect and performs the connect itself, using its own already-stable, already-mounted connect
+fetcher — the identical machinery its own follow-up composer already uses. No cross-component
+fetcher-lifecycle race is possible this way, since the component that submits the connect is the
+same component that will still be mounted when the response arrives.
+
+Also fixed from the same round of feedback: the toast's third bullet said "Reconnecting…", which
+is wrong wording for what's actually a *first* connection (there's nothing to "re"-connect from) —
+changed to "Connecting…".
+
+**Verified live:** mock-server smoke test for the one-click flow re-passed after the fix (4/4 in
+`ai-chat-streaming-response-pane.test.ts`, plus the 2 pre-existing event-stream tests, `tsc`,
+`eslint` all clean) — though note the mock's near-instant local responses may not reproduce the
+exact unmount-timing race as reliably as a real network round-trip would, so this is a case where
+the fix is trusted primarily because the race is now structurally impossible (the submitting
+component's lifecycle no longer matters), not because the test independently proves the race no
+longer occurs. **Confirmed working by the user against their real Anthropic key** — one click of "Enable
+streaming" now reliably fixes body+header and actually connects. This phase is closed.
+
+## Implementation notes (UX polish round, from a real screenshot of a multi-turn conversation)
+
+The user sent a screenshot of an actual multi-turn chat session and flagged a list of issues.
+Investigating turned up a real correctness bug underneath the most confusing symptom.
+
+**Real bug found: broken conversation threading.** "Both answers in the same grey bubble" wasn't
+a rendering issue — `handleSendFollowUp` only ever appended the *new* user turn to the request
+body's `messages` array, never writing the *previous* turn's assistant reply back in (that reply
+only ever existed as live-accumulated SSE text in `realtime-response-pane.tsx`'s own state, never
+persisted anywhere with structure). So after a few follow-ups, the "conversation" sent to the
+model was actually just a run of consecutive user messages with zero assistant turns between them
+— the model, lacking real multi-turn structure, answered the entire run-on history in one reply,
+which is exactly the single giant grey bubble in the screenshot. Fixed: `handleSendFollowUp` now
+appends the just-finished turn's live assistant text as an `assistant`-role message before adding
+the new user turn.
+
+**Other fixes, in the same pass:**
+- **Markdown now renders** in both user and assistant bubbles via the existing `MarkdownPreview`
+  component (already used elsewhere for streaming-summary rendering), replacing raw-text display.
+- **Overflow/alignment bug, root cause found:** the bubble was a react-aria `<Button>` — native
+  `<button>` elements default to a non-wrapping `white-space` behavior per the HTML spec's
+  rendering rules, which fought the `whitespace-pre-wrap` class and let long messages visually
+  overflow their `max-w-[80%]` box instead of wrapping, which in turn made `items-end` alignment
+  look inconsistent once a row's effective content width grew past the container. Restructuring the
+  bubble as a plain `<div>` (needed anyway so markdown-rendered links aren't invalid HTML nested
+  inside a `<button>`) fixed both as one change, plus `break-words` for unbreakable tokens (e.g. a
+  long garbled string with no spaces).
+- **Removed the old click-to-expand/raw-JSON/tooltip inspector** on assistant bubbles — now that
+  content renders as readable markdown and a footer line shows model+tokens inline, the separate
+  "expand for raw JSON + metadata" affordance was mostly redundant and also the thing creating the
+  invalid-nesting hazard above. Flagging this simplification in case the user wants a "view raw"
+  option back for a specific reason.
+- **Per-bubble token/model footer** ("claude-sonnet-5 / 95 tokens in, 8 out") beneath every
+  assistant bubble, not just the latest one. Needed new per-turn metadata since only the *current*
+  turn's usage was ever available (`ChatCompletionSummary`) — past turns' text is never persisted
+  with structure (see the threading bug above). Added `ui/utils/chat-turn-meta-cache.ts`, a
+  deliberately simple in-memory (not persisted, lost on reload) cache keyed by the assistant
+  message's own text content — flagged as a fast/fake shortcut rather than a real per-message data
+  model field, consistent with this prototype's scope conventions.
+- **System prompt now labeled** ("SYSTEM PROMPT" small caps) above its bubble — it previously had
+  no label at all, just italic centered text indistinguishable from a styling choice.
+- **Send button restyled** purple (`bg-(--color-surprise)`, matching the user bubble color and the
+  app's own Send/Connect buttons elsewhere) and stretched to match the textarea's height
+  (`items-end` → `items-stretch` on the row), in both the streaming Chat tab's composer and the
+  non-streaming follow-up composer.
+- **Enter now sends** the follow-up composer (Shift+Enter still inserts a newline) — a deliberate
+  reversal of an earlier explicit design choice ("only the Send button, not Cmd+Enter") once real
+  usage showed the user wanted it.
+- **Real bug: a persistent toast could permanently block the composer's Send button**, not just
+  visually overlap it. Root cause, found via a Playwright actionability-check failure message
+  pointing at the exact element: react-aria's `<ToastRegion>` renders through the browser's native
+  "top layer" (`data-react-aria-top-layer`), which always paints above the *entire* normal page
+  regardless of any z-index — so an earlier z-index bump on the composer (tried first) could never
+  win a click back from it. The toast region's own bounding box is also larger than any single
+  toast card inside it, so even a `raised` toast could still intercept clicks in the gap it opened
+  up underneath. Real fix: `pointer-events-none` on the `<ToastRegion>` itself, with
+  `pointer-events-auto` restored only on each individual `<Toast>` card — so only the actually-
+  visible card ever captures a click, and the rest of the region's box passes clicks straight
+  through to whatever's underneath it.
+
+**Verified live:** two new smoke tests in `ai-chat-streaming-response-pane.test.ts` (now 5 tests,
+all passing): one reproduces the exact threading bug via a new `?reportThreading=1` mock-server
+mode on `/v1/messages` that reports how many assistant turns and what the latest user turn the
+*request* body actually contained, confirms it's wrong before the fix reasoning and right after,
+and submits its follow-up via `Enter` (not a Send click) to also cover that fix in the same pass.
+The other extends the existing "Enable streaming" test to type into and click Send on the
+follow-up composer *while the confirmation toast is still open* (previously this literally
+timed out with Playwright's actionability check correctly reporting the toast region as the
+element intercepting the click — the same failure a real user would hit). Also re-ran the 2
+pre-existing `event-stream-response-pane.test.ts` tests (still pass), full `vitest` suite
+(177 files / 2567 passed, 15 skipped, 0 failed), `tsc --noEmit`, and `eslint` — all clean.
+
+**Not yet addressed / deferred:** the old Chat-tab flicker bug in the non-streaming request-body
+compose editor (separate code path, see earlier implementation notes) is still open and unrelated
+to this round.
+
+## Investigation (mid-conversation system-prompt edit not visibly changing model behavior)
+
+User report: editing the system prompt mid-conversation (via the Raw body editor — the Chat/Raw
+compose editor doesn't render for event-stream requests, so Raw is the only way) to "speak like a
+pirate" didn't produce an obviously different reply. The System-prompt bubble itself *did* visibly
+update to the new text, so the question was whether the edit actually reaches the next request
+Insomnia sends, or gets lost somewhere between the Raw editor and the follow-up composer.
+
+**Verified, not assumed:** wrote a unit test (`chat-request.test.ts`) mirroring
+`handleSendFollowUp`'s exact logic (parse → append previous reply + new user turn → serialize)
+across a simulated system-prompt edit between two turns — passes, the edited system value is
+carried through correctly. Then wrote a full end-to-end smoke test
+(`ai-chat-streaming-response-pane.test.ts`, now 6 tests) that does the real thing: connects, gets a
+reply, edits the system field via the actual Raw CodeMirror editor, sends a follow-up, and asserts
+on what the *mock server actually received* in that next request (extended `?reportThreading=1` to
+also report the `system` field back). **Passes** — the edited system prompt does reach the next
+request Insomnia sends.
+
+**Conclusion: this is not a bug in Insomnia's handling.** The edit is correctly captured, displayed,
+and sent. Given that, the most likely explanation for not seeing an "obvious" pirate-voice shift is
+a real Claude behavior characteristic, not a plumbing issue — a system-prompt change mid-conversation
+competes with several prior turns of established plain-English assistant replies already in context,
+and models can weight that established conversational register fairly heavily against a single new
+instruction. Not independently confirmed against the real API in this investigation (no live key
+available here), but the mechanism Insomnia uses to deliver the edit is verified correct.
+
+**Gotcha worth remembering for future Raw-editor smoke tests:** the `id` prop passed to `CodeEditor`
+(e.g. `id="raw-editor"`) lands on CodeMirror 5's *hidden* source `<textarea>`, not a wrapping
+container — the real, visible editing surface is a `.CodeMirror` div CodeMirror creates as a
+**sibling** of that textarea, not a descendant. A selector like `#raw-editor .CodeMirror` will never
+match. Scope to the surrounding tabpanel instead (e.g.
+`requestPane.getByRole('tabpanel', { name: 'Body' }).locator('.CodeMirror')`) and make sure the
+relevant tab is actually selected first — body content only renders after clicking its tab.
+
+## Implementation notes (auto-scroll fix + editable settings bar with reconnect warning)
+
+Two more UX asks: (1) the chat message list didn't stay scrolled to the bottom as a reply grew
+past the pane's visible height; (2) move the system prompt (and model/temperature/max_tokens) into
+the summary bar as editable fields, warning when a change needs a reconnect to take effect.
+
+**Auto-scroll, two real implementation attempts before landing:**
+- First attempt: a plain `useEffect` keyed on `[messages.length, lastMessage.content]` calling
+  `el.scrollTop = el.scrollHeight`. Looked right, but `MarkdownPreview` compiles markdown
+  **asynchronously** (its own effect sets `dangerouslySetInnerHTML` on a *later* render) — so by
+  the time this effect ran, the DOM's final height wasn't known yet, and the scroll undershot.
+  Caught by a live smoke test, not by reasoning about it — the test's own reading of
+  `scrollTop`/`scrollHeight` landed at the exact same wrong numbers twice in a row, which is what
+  pointed at "the effect itself isn't the problem, the content height it reads is stale."
+- Second attempt: a `ResizeObserver` on a dedicated content-wrapper div (not the scroll container,
+  whose own box size is fixed by its flex parent). Still failed the smoke test after 5s of polling
+  — never got a chance to root-cause exactly why (possibly a flex-box-specific resize-notification
+  quirk), abandoned in favor of a more direct mechanism.
+- **Landed:** a `MutationObserver` on the content wrapper (`childList`/`subtree`/`characterData`)
+  — reacts directly to the markdown DOM swap itself rather than waiting on a resize notification —
+  with the actual `scrollTop` set deferred one `requestAnimationFrame` so it reads the
+  post-mutation layout instead of racing it. Also tracks whether the viewport was already
+  pinned to the bottom via a `scroll` listener, so a user who's deliberately scrolled up to reread
+  earlier messages isn't yanked back down; resets to pinned whenever the request/response changes.
+- Verified live with a smoke test using a new mock-server mode (`?longReply=1` on `/v1/messages`,
+  60 lines) that polls `scrollTop + clientHeight >= scrollHeight` via `expect.poll` (not a single
+  read — `toBeVisible()` doesn't itself wait for scroll-into-view within an overflow container, and
+  a mutation-driven scroll is inherently async relative to the text becoming visible).
+- Learned along the way: 60 literal `\n`-separated lines render as **one** CommonMark paragraph
+  (a single newline isn't a hard break) — doesn't affect the fix, but explains why the rendered
+  DOM looked different than expected when first investigating.
+
+**Editable settings bar:** replaced `chat-summary-bar.tsx` with `chat-settings-bar.tsx`
+(`ChatSettingsBar`) — same read-only token/model/stop-reason/streaming display, plus editable
+Model, System prompt, Temperature, and Max tokens fields (uncontrolled inputs committing on
+blur/Enter, same pattern as the existing stream-summary JSONPath field). Sampling params are new:
+`chat-request.ts` gained `parseChatSamplingParams`/`applyChatSamplingParams` — `temperature`/
+`max_tokens` are literal top-level keys shared by OpenAI and Anthropic, so these work for both;
+hidden entirely for Gemini, which nests the equivalent under a differently-shaped
+`generationConfig` object neither this bar nor these helpers handle.
+
+- The system-prompt bubble is gone from the message list — filtered out of `ResponseChatViewer`'s
+  rendered messages now that it lives in the bar instead.
+- **Real bug found and fixed before this could ship:** the first version of the "Reconnect" action
+  read `activeRequest` directly, which doesn't necessarily reflect the just-applied settings patch
+  yet (same class of staleness as the earlier auto-connect race this session — `activeRequest`
+  only updates once the router loader revalidates, which isn't guaranteed to have happened by the
+  time the user reacts to the notice and clicks it). Fixed by tracking the just-applied body in a
+  ref and having both "Reconnect" and the follow-up composer prefer it over `activeRequest.body`.
+  Caught by the smoke test, not by review — looked correct until actually exercised.
+- Fully editable + warn-and-reconnect wiring landed in `realtime-response-pane.tsx` (the Chat tab,
+  where "reconnect" is literal). The non-streaming `response-viewer.tsx` path renders the bar in
+  **read-only** mode (an `onApply`-less fallback added to `ChatSettingsBar` itself) rather than
+  threading request-patching plumbing through the generic, multi-purpose `ResponseViewer` component
+  for a secondary use case — noted as a deliberate scope cut, not an oversight.
+
+**Verified live:** 2 more smoke tests (8 total now in `ai-chat-streaming-response-pane.test.ts`):
+one for the auto-scroll fix (above), one confirming editing the system prompt shows the "reconnect
+to use them" warning and that clicking Reconnect actually sends the new value (mock server confirms
+via the same `?reportThreading=1` mode used earlier this session). Full `vitest` suite (177 files /
+2571 passed, 15 skipped, 0 failed), `tsc --noEmit`, `eslint` all clean. The 2 pre-existing
+`event-stream-response-pane.test.ts` tests still pass.
+
+## Implementation notes (model field as a dropdown)
+
+Quick follow-up ask: make the model field a dropdown so the user doesn't have to guess at names.
+Swapped the plain `<input>` for a react-aria-components `ComboBox` (`allowsCustomValue`) in
+`chat-settings-bar.tsx`, with a per-format curated suggestion list (`MODEL_SUGGESTIONS`, keyed by
+`openai`/`anthropic`/`gemini`) — but typing a custom value is still fully supported, since new
+models ship constantly and a self-hosted or Kong-AI-Gateway-fronted model will never be in any
+fixed list. Anthropic's list is sourced from this environment's own real current model IDs.
+
+- Real bug caught before shipping (reasoned about, not found live): selecting a suggestion fires
+  `onSelectionChange` before React has necessarily flushed the combobox's own (batched) update to
+  the input's DOM value, so reading `modelRef.current.value` synchronously inside that handler
+  could read the stale pre-selection text. Fixed by having `onSelectionChange` pass the selected
+  key directly into `commit()` as an explicit override rather than relying on the ref read for that
+  one path; blur/Enter (typing a custom value) still reads the ref as before.
+- **Verified live, and immediately hit the same portal gotcha as the toast earlier this
+  session:** the ComboBox's popover (the actual dropdown list) renders outside the response pane's
+  DOM subtree, so a test scoped to `responsePane.getByRole('option', ...)` timed out even though
+  the option was genuinely on screen — same fix as before, scope to `page` instead. Added to
+  [[project_insomnia_smoke_test_gotchas]] as a reusable rule: **any react-aria-components overlay
+  (Popover, ToastRegion, modal, etc.) should be assumed portal-rendered until proven otherwise.**
+- New smoke test (9 total now): opens the dropdown, picks `claude-opus-5-5`, confirms the "reconnect
+  to use them" warning appears, reconnects, and confirms the mock server's `/v1/messages` (extended
+  to also report the request's `model` field) actually received the newly selected model.
+
+Full `vitest` suite, `tsc --noEmit`, `eslint` all clean; pre-existing event-stream smoke tests
+still pass.
+
+## Implementation notes (false-positive "settings changed" banner + relayout with labels)
+
+Two more quick fixes: (1) the "reconnect to use them" banner could appear even when nothing was
+actually edited; (2) move temperature/max tokens/stop reason off the crowded model/usage line onto
+their own line, with real text labels now that there's room (plus label the system prompt field
+itself, per a follow-up ask in the same message).
+
+- **Real bug, found by re-reading the diff, not live-testing:** the "did anything actually change"
+  check compared `next.systemPrompt`/`next.model` (already trimmed, coming out of the settings
+  bar's own fields) against `chatSettingsValues.systemPrompt`/`.model` (raw, straight from the
+  parsed request body, **not** trimmed). Any system prompt or model with incidental surrounding
+  whitespace — easy to pick up from hand-typed/pasted text or JSON formatting — would always look
+  "changed" even with zero edits, since one side was normalized and the other wasn't. Fixed by
+  normalizing both sides with the same function before comparing.
+- Layout: row 1 is now just Model + token usage; row 2 holds Temp/Max tokens/Stop reason (and the
+  streaming indicator), each with an actual text label instead of just an icon; the system prompt
+  textarea gained its own `<label>` ("System prompt") above it, in both the editable and read-only
+  variants of the bar.
+- Verified live: extended the existing settings-bar smoke test to click into and blur the system
+  prompt field *without editing it* and assert the banner does **not** appear, before making a real
+  edit and confirming it still does. Hit two more portal-adjacent gotchas while writing that
+  assertion: the mock's own echoed reply text contains "Be terse." as a literal substring (so a
+  loose `getByText` match "found" it in the wrong place — needed `{ exact: true }`), and
+  `getByLabel` didn't resolve the implicit-label-wrapped textarea even though the accessible name
+  was correct in the ARIA snapshot — switched to `getByRole('textbox', { name, exact: true })`,
+  which resolved it reliably.
+
+All 9 tests in `ai-chat-streaming-response-pane.test.ts` pass, pre-existing event-stream tests
+still pass, full `vitest` suite clean, `tsc --noEmit` and `eslint` clean.
+
+## Real AI Gateway endpoint — unblocked 2026-10-05
+
+User got Docker working via **Colima** (not Docker Desktop) and stood up a real local hybrid
+data plane. Docker/Colima access is no longer the blocker — this phase of the TODO list above is
+done; the setup steps in that section are now historical/reference only, not a live blocker.
+
+**Real config, confirmed via the `kong-konnect` MCP** (do not re-derive from the old placeholder
+kongctl YAML earlier in this doc — that was written before real access and doesn't match what the
+user actually built):
+- AI Gateway: **"Cam's AI Gateway"** (hybrid), id `8fe01e88-8bb7-4467-b8a7-d75f280d7850`, separate
+  from the pre-existing serverless CP `Insomnia-Airlines` — `list_control_planes` does **not**
+  show AI Gateways; use `list_ai_gateways` instead (they're a distinct Konnect resource type).
+- Provider: `claude` (type `anthropic`, `x-api-key` header basic auth).
+- Model: display name "Cam's Opus Yar Har", target `claude-opus-4-6` via provider `claude`.
+- **Route: path `/anthropic`, `strip_path: true`, AND `route.model.values: ["opus"]`** — Kong only
+  matches this route when the request body's `model` field matches `"opus"`, *in addition to* the
+  path matching. This is the single most likely source of a 404 if the Insomnia request's `model`
+  field doesn't line up — a 404 from Kong (vs. connection-refused/timeout) means the data plane is
+  up and reachable but nothing matched, not a connectivity problem.
+- User reports the local data plane listens on **port 8000**, confirmed correct-looking in the
+  Konnect UI.
+
+**In progress when the session paused:** user is about to share the exact curl/request they're
+sending from Insomnia so the model-value / path can be checked against the above. Next step:
+compare their request's URL + `model` field against `/anthropic` + `"opus"` before looking at
+anything else (auth headers, streaming flags, etc.) — the 404 pattern points squarely at a
+route-matching mismatch, not a deeper issue.
+
+## Next session
+
+> **Superseded 2026-10-06:** item 1 (real-endpoint pass) is done; the remaining items are carried in
+> "Engineering handoff" at the top of this file (Known gaps / Not done). Kept below for history.
+
+"Chat within the bubble interface" (Phase 2: live token-by-token bubble
+fill-in + reachable follow-up box) is now actually done and live-verified —
+see the implementation notes above. Real remaining items:
+
+1. **Real-endpoint pass once Docker access lands.** Everything so far is
+   verified against the mock SSE server and direct-Anthropic, never a real
+   Kong AI Gateway route. Once unblocked, re-run the TODO list near the top
+   of this doc, then specifically confirm the Chat tab, summary bar, and
+   follow-up box all work against the actual `$KONNECT_PROXY_URL/ai/...`
+   route — this is exactly the case `showChatTab` was deliberately built to
+   not depend on URL-path matching for, but it's still unconfirmed against a
+   real gateway response shape.
+2. Cumulative/session-total token usage across multiple turns (not just the
+   latest one) — see "Known gaps" above. Floated by the user this session as
+   a nice-to-have; not built.
+3. Revisit whether the follow-up box's own Cmd+Enter should submit (currently
+   it doesn't — only the explicit Send button does, by deliberate choice)
+   once real usage shows whether that's annoying.
+4. The Chat-tab flicker bug (non-streaming compose editor) is still open —
+   doesn't block anything above (it's a different code path: the
+   non-streaming request-body Chat/Raw editor, not the response-side bubble
+   view), but shouldn't be forgotten. Needs a live debugging pass (React
+   DevTools profiler / render-count logging), not more static guessing.
+5. Competitive landscape (LiteLLM, Postman Fabric Gateway) still not
+   investigated — see "Decisions / notes" above.
+
+## Session notes — 2026-10-05, real AI Gateway debugging + chat-window rework
+
+The real Kong AI Gateway endpoint (Docker, local data plane) is now actually
+working end to end — REST and SSE both verified against it, in the real
+Electron UI, via the project's own smoke-test harness. Several real bugs
+found and fixed along the way:
+
+**Local gateway wasn't reachable at all (not a code bug).** `localhost:8000`
+was being silently answered by a *stale, three-weeks-old* `uvicorn` mock
+process (the smoke-test echo server, left running since a prior session) —
+on macOS a process bound to `127.0.0.1:8000` wins over Docker's `0.0.0.0:8000`
+publish for loopback connections, so every request silently hit the wrong
+server. Moved the AI Gateway container's published port to **8500** to avoid
+the conflict (`docker run ... -p 8500:8000 ...`, recreated preserving the
+same mTLS cluster cert/key so Konnect kept treating it as the same node).
+
+**`inferStreamSummaryPath` fixed to use `endsWith` instead of exact pathname
+match** (`stream-summary.ts`) — it was matching `/v1/messages` exactly, which
+missed Kong's `/anthropic/v1/messages` (gateway-prefixed) path entirely, so
+no chat bubble ever rendered for a real gateway response even though the SSE
+stream itself parsed fine.
+
+**Chat window bugs, several rounds:**
+- A follow-up resent the *entire* event log (not just the new turn's), so
+  the previous reply stayed visible, concatenated with the new one, with no
+  loading indicator. Fixed via a `clearEventsBefore` cutoff applied to the
+  live-turn accumulator, plus an `isAwaitingFollowUpReply` spinner bubble.
+- Chatting used to auto-persist every follow-up onto the request's saved
+  body. Decoupled: chat history now lives in local-only
+  `localConversation`/`sessionUserMessages` state; two new buttons —
+  **"Save as Default Body"** (appends only this session's *typed* user
+  messages, never assistant replies, never the seeded question) and
+  **"Clear Chat Window"** (wipes everything, including the seeded
+  question/reply) — are the only things that touch it.
+- **Real bug found via direct DB inspection + curl repro**: an early version
+  of Save persisted a body ending on an *assistant* turn, which Anthropic
+  flatly 400s (`"This model does not support assistant message prefill"`).
+  Current Save always appends user messages last, so it can't recreate this.
+- **The actual root cause of "Save sometimes disabled, messages missing"**:
+  the seed-on-connect effect was keyed on `response._id`, but a follow-up
+  *also* creates a new `response` row — so it fired again after every
+  follow-up and silently wiped the conversation it had just built. Fixed
+  with a `skipNextChatSeedRef`, set right before a follow-up's own
+  `connectRequestFetcher.submit`, consumed by the reset effect to
+  distinguish "a new response I caused myself" from a real new connection.
+
+**Added regression coverage** in
+`packages/insomnia-smoke-test/tests/smoke/ai-chat-streaming-response-pane.test.ts`
+for both new buttons; all 11 tests in that file (9 pre-existing + 2 new) pass.
+
+### Reusable notes (not just this task)
+
+- **macOS Docker port gotcha**: a stray process bound to `127.0.0.1:<port>`
+  silently wins over a Docker container's `0.0.0.0:<port>` publish for *that
+  same port* on loopback connections — no bind error, no warning, just wrong
+  routing. If a dockerized service "isn't responding right" on localhost,
+  `lsof -nP -iTCP:<port> -sTCP:LISTEN` first.
+- **Konnect's AI Gateway is a distinct resource type from a regular Control
+  Plane** in the `kong-konnect` MCP — `list_control_planes` won't show it.
+  Use `get_control_plane_or_ai_gateway_by_name`, `list_ai_gateways`,
+  `list_ai_gateway_models`, `list_ai_gateway_nodes` (the last one's
+  `config_sync`/`compatibility_status` confirms whether a local data plane
+  is actually in sync with what Konnect thinks is deployed).
+- **Insomnia's `CodeEditor` (CodeMirror wrapper) is intentionally
+  uncontrolled** — `defaultValue`, keyed by `historyKey`/`uniqueKey`, read
+  once per mount. A body update from outside normal typing (a settings-bar
+  apply, this session's "Save as Default Body", etc.) won't visually refresh
+  an already-mounted Body tab; switching tabs away and back forces the
+  remount that picks it up. This is shared, foundational, and deliberately
+  not touched — don't "fix" it per-feature.
+- **A realtime-pane follow-up reconnect creates a new `response` row, same
+  as the original connect.** Any component state keyed on `response._id` to
+  detect "a genuinely new connection" needs a way to tell that apart from a
+  reconnect it triggered itself (see `skipNextChatSeedRef` pattern above), or
+  it'll silently reset on every follow-up.
+- **`packages/insomnia-smoke-test`** (Playwright + Electron, mock Anthropic
+  echo server on port 4010, `npm run test:smoke:dev -- <title substring>`)
+  is the safe way to click-test this app's UI — isolated from a live dev
+  session's real NeDB store, unlike driving the already-running app directly.
+
+## Phase 2 plan — model comparison (agreed 2026-10-06, stays on 3593AI, core app)
+
+JTBD: help people pick between models — run the same request/collection against many models
+and compare token usage + eval (test) results.
+
+**Decisions**
+- Cost = **token usage only** for now. TODO (later): investigate Konnect metering/billing
+  (OpenMeter, acquired ~a year ago) as a real cost source. No price table in this phase.
+- Stays on branch 3593AI. Core-app changes are the default.
+- Vocabulary: **route = path**. Gateway "Cam's AI Gateway" has 2 routes / 3 models, and the UI
+  lists models **grouped by path**: `/anthropic` -> opus, fable; `/other-anthropic` -> sonnet.
+
+**Gateway data (from kong-konnect MCP)**: models carry the route inline
+(`config.route.paths`, `config.route.model.values`, `targets[].name`). Hybrid gateways report
+`proxy_urls: []`, so the data-plane URL must come from the `proxy_host` project var.
+
+**Phases**: (1) sync gateway -> project/workspace with model catalog (read-only, must NOT
+touch user requests; current `deleteStaleRequests` would delete them); (2) runner fan-out
+request x model; (3) usage in script context + prompt x model summary matrix; (4) eval
+snippets + LLM-as-judge.
+
+## Implementation notes — Phase 1 (AI Gateway sync + catalog), 2026-10-06
+
+- **Sync:** `syncAiGateways` in `konnect/sync.ts`, after the control-plane pass. Gateway = Project (reuses
+  `konnectControlPlaneId` for the gateway id so existing Konnect-project UI rules apply, plus
+  `konnectAiGateway: true` so the CP sync doesn't delete it as stale). REST: `GET /v1/ai-gateways` (confirmed
+  with a real PAT); `GET /v1/ai-gateways/{id}/models` is inferred from the MCP tool name (confirmed only by a 404 not
+  surfacing). The model entity carries the route inline (`config.route.paths`, `config.route.model.values`).
+- **Catalog:** stored on the gateway's collection as `Workspace.konnectAiGatewayModels`; shown read-only
+  (grouped by path) in the empty state, under a tab renamed "Routes/Models" (`CollectionTab specTabLabel`).
+- **Tree:** root folder (gateway name) -> one folder per route path -> one streaming chat request per route.
+  All **create-only**, matched by `konnectRouteId`/`konnectRouteKey` = `ai:<gatewayId>:<path>`. Never edited or
+  deleted by sync, so user prompts/folder scripts survive. Re-sync only adds new paths. Existing synced
+  gateway projects from before this change must be removed + re-synced to get folders.
+- **Endpoint:** Konnect gives `formats[].type`, not the path. Hardcoded map in `konnect/transform.ts`
+  (`anthropic` -> `/v1/messages`, `openai` -> `/v1/chat/completions`; others get the bare route path). PROTOTYPE SHORTCUT.
+- **Model dropdown:** `ChatSettingsBar` suggests the route's `model.values` (e.g. `opus`, `fable`) when the request
+  URL matches a catalog path (`getAiGatewayModelSuggestions`), else the generic provider list.
+- **Shortcuts to flag:** `http://` hardcoded in generated URLs; `proxy_host` defaults to `localhost:8000` for
+  hybrid gateways; mixed formats on one path use the first model's format; no `syncAiGateways` integration test.
+
+## Open question — max tokens as an env var (decided 2026-10-06: stay with literal 4096)
+
+Generated requests hardcode `"max_tokens": 4096` (plus system prompt "Be a helpful assistant." and first prompt
+"Tell me how Kong AI Gateway can help me, in five concise bullet points."). An env var (`default_max_tokens`) was wanted but
+NOT done, because of Insomnia, not the gateway: Insomnia renders `{{ _.var }}` before sending, so the gateway would
+get a plain number. The blocker is that the chat window (`common/chat-request.ts`: `parseChatRequestBody`,
+`parseChatSamplingParams`, `applyChatSamplingParams`, `serializeChatRequestBody`) `JSON.parse`s the *stored,
+unrendered* body, and an unquoted template isn't valid JSON, so bubbles / Chat compose / Max tokens field all turn
+off. A quoted template parses but would send the string "4096", and the Max tokens field wouldn't read it.
+
+If revisited: (a) make the chat parser template-tolerant (swap `{{ }}` for a placeholder before parsing, restore on
+write) — also unlocks env-var numeric fields like temperature and would help Phase 2 runner overrides; or (b) a
+setting / collection-level default applied at send time. User may test this with customers before deciding.
+
+## Session notes — 2026-10-06 evening (rotating models, chat totals, Evaluate tab)
+
+**Policies tab:** lists global policies plus those attached to at least one model on the request's route (route = longest matching path via `findCatalogModelsByPath`), each with `models: <all>` or the
+attached models' aliases. No intro sentence. Not filtered by the request's body model (the tab doesn't re-render when the body changes).
+
+**Rotating models:** one Konnect model entity can have several `targets` (round-robin). `AiGatewayModel.targets` keeps all (first still mirrored in `targetModel`/`provider`/prices); `modelTargets()`,
+`isRotatingModel()`, `findTargetByResponseModel()` in `konnect/transform.ts`. Models tab = a row per target; runner picker = one checkbox with a "rotates between N models" badge + target list; runner
+rows for a rotating alias carry `rotating: true` and `model: ''` until a response names the answering model; the summary table splits a rotating alias into one row per model that answered
+(`summarizeModelRuns` key includes the model only when rotating), priced from that target. Nothing can force which target answers; users raise iterations to sample more.
+
+**Chat window:** every assistant reply has `model / N tokens in, M out / $cost`; header has `Total (N replies): in / out (sum) · $cost` (`common/chat-totals.ts`, sums replies because each reply's input already
+counts the prompt + history). Pricing via `priceChatTurn`: answering model first, else request route+alias, rotating alias with no answering model => "cost n/a (alias rotates...)". Earlier replies' usage is in
+an in-memory content-keyed cache (`chat-turn-meta-cache.ts`) — lost on reload, and the totals say so. **OpenAI-format streams report NO usage unless the body has `stream_options.include_usage: true`** (verified
+against the gateway), so a banner offers "Add include_usage" (not auto-injected).
+
+**Runner Evaluate tab:** `runner-evaluate-panel.tsx` (requests + models in one tab; Request Order tab hidden for gateway collections, so no drag-reorder there). Defaults none/all set in
+`use-runner-request-list.tsx`. >20 runs (`AI_GATEWAY_RUN_WARNING_THRESHOLD`) shows an AlertModal ("Run anyway"). Request rows show method + name; collection/folder names are a follow-cursor Tooltip with bold
+"Collection:"/"Folder:" lines; list sorted by folder path.
+
+**No format opinion:** `applyAiGatewayModelOverride` no longer skips cross-format pairs (still skips: URL matches no route, body not a chat request). It returns `formatMismatch`; if the gateway answers 3xx-5xx
+for such a pair, the run gets `aiGateway.gatewayNote` (amber note + amber tag, gateway's own error text via `gatewayErrorText`), the request's tests are dropped, and the summary shows "N declined by gateway". The
+URL suffix is NOT rewritten per format (an Anthropic request keeps `/v1/messages` on an OpenAI route) — deliberate "no opinion".
+
+**Sync naming:** route folders `Route: <path>`, starter requests named `<path>` (no "Chat —"); create-only so only new gateway projects get them.
+
+**Gotchas found:** the `Tooltip` component wrapped around a full-width element anchors to the whole row (use `followCursor`); `findCatalogModelByRequest` needs a scheme in the URL (`http://{{ _.proxy_host }}/…`);
+Konnect MCP `update_ai_gateway_model` needs the full body (fetch, drop id/created_at/updated_at, set `policies` by name); Prettier was already failing on `transform.ts` before this work (left alone).
+
+## Session notes — 2026-10-07 (eval exploration, decided to stay in the runner)
+
+**Idea:** evals as ordinary after-response tests. A "judge" is a second model (a different gateway route) called from the script via `await insomnia.sendRequest(...)`; its verdict feeds `insomnia.test`, so the existing
+pass-rate ranking works unchanged. Preferred shape is a **checklist judge** (a few narrow yes/no criteria as JSON; score = fraction passed) over a raw "0-1 how good?" score, which is noisy and unanchored.
+A real `insomnia.score()` channel only earns its place if a holistic, non-decomposable number is wanted.
+
+**Ladder (not built):** step 0 hand-written judge test in a folder's after-response script; step 1 helpers (`insomnia.response.text()` / `.usage`, `insomnia.judge(prompt, {model})` returning `{pass, reason}`, a
+per-test x per-model breakdown in the results); step 2 numeric scores, prompt x model matrix (check whether runner iteration data already does it), repeats/variance. Not worth it yet: persisted experiment
+history, tracing UI, datasets UI, `inso` port.
+
+**What we learned:**
+- Generated gateway requests carry no auth headers (the gateway holds provider keys), so a bare `sendRequest` to a gateway route needs no credentials.
+- `sendRequest` (`insomnia-scripting-environment/src/objects/send-request.ts`) returns a promise when no callback is passed (rejects on transport error) and accepts `{url, method, header, body: {mode:'raw', raw}}`;
+  the TS signature still lists `cb` as required.
+- **Working judge test (confirmed live 2026-10-07, on the `/anthropic` request, run from the runner):** checklist judge on `/might-be-openAI` (`4mini`), full script below. Async `insomnia.test` callbacks ARE
+  awaited by the runner (judge failures surfaced as test errors), and a bare `sendRequest` to the gateway works with `insomnia.variables.get('proxy_host')`.
+- The first failures were **my script's fault, then a copy-paste artifact**: (1) it indexed `choices[0]` without checking the judge's HTTP status, so a gateway error showed as an unhelpful `TypeError`;
+  (2) the runner shows only `ACTUAL/EXPECTED` for assertion failures and drops the message, so use `throw new Error(...)` to surface the judge's status/URL/body; (3) the 404 `no Route matched` was a
+  space inserted into the URL path (`might-be-ope nAI`) by copying a wrapped script out of the terminal. Lesson: hand over scripts as a file / clipboard, not a terminal copy; put the path in a
+  constant and print it with `JSON.stringify` in errors so stray whitespace is visible.
+- **Individual streaming (SSE) requests have no Tests tab, and probably never run after-response scripts.** Pre-existing upstream gap, not ours: `realtime-response-pane.tsx` only has Events/Summary tabs, and
+  `tryToExecuteAfterResponseScript` is called only from the HTTP send route and `send-request.node.ts`, not (as far as grep shows) the curl/streaming path. The runner works because it forces `stream: false`.
+  Options if wanted: a "Run as eval" button reusing the runner's non-streaming path (cheap), or run scripts when the stream finishes plus a Tests tab (real, touches core).
+- Reading the dev app's data: `~/Library/Application Support/insomnia-app/insomnia.<Model>.db` (the `Insomnia/` sibling is the packaged app). Files are append-only JSON lines; replay them and drop `$$deleted`.
+  Read-only is safe; do not write while the app runs (it holds the data in memory).
+
+**Decision (user):** don't build a single-request eval path; use the runner. Eval tests are pasted by hand into a request/folder after-response script for now.
+
+**Working judge test (reference):**
+
+```js
+insomnia.test('Judge checklist: Kong AI Gateway answer', async () => {
+  const JUDGE_PATH = '/might-be-openAI/chat/completions';
+  const body = insomnia.response.json();
+  const answer = body.content
+    ? body.content.filter(b => b.type === 'text').map(b => b.text).join('')
+    : body.choices?.[0]?.message?.content;
+  const judgeUrl = `http://${insomnia.variables.get('proxy_host')}${JUDGE_PATH}`;
+  const judged = await insomnia.sendRequest({
+    url: judgeUrl,
+    method: 'POST',
+    header: { 'Content-Type': 'application/json' },
+    body: { mode: 'raw', raw: JSON.stringify({
+      model: '4mini',
+      stream: false,
+      messages: [{ role: 'user', content: `Answer to grade:\n---\n${answer}\n---\nReply with JSON only: {"five_bullets": bool, "mentions_ai_gateway_feature": bool, "concise": bool, "reason": "one sentence"}` }],
+    }) },
+  });
+  const text = judged.text();
+  if (judged.code !== 200) throw new Error(`judge ${judged.code} from ${JSON.stringify(judgeUrl)}: ${text.slice(0, 300)}`);
+  const raw = JSON.parse(text).choices[0].message.content;
+  const result = JSON.parse(raw.replace(/^```json|```$/g, '').trim());
+  insomnia.expect(result.five_bullets && result.mentions_ai_gateway_feature && result.concise, result.reason).to.be.true;
+});
+```
+
+**Fixed 2026-10-07:** Evaluate model picks now live in the runner context (`RunnerState.selectedModelIds`), so they survive switching away from the runner tab (request picks already did). They reset when the runner tab is closed, by design.
+
+**Test `detail` (built 2026-10-07, click-tested by the user):** a test callback may `return` a string; `test()` stores it on the result as `RequestTestResult.detail` (optional key, no migration) and
+`request-test-result-pane.tsx` prints it under the test name (`whitespace-pre-wrap`). Works for passed tests; a failing test shows its thrown `Error` text via `errorMessage` instead, so judge scripts should
+throw the same text on failure and return it on success (see the judge script above, now returning a per-check summary + the judge's reason). Files: `insomnia-data/src/models/runner-test-result.ts`,
+`insomnia-scripting-environment/src/objects/test.ts` (+ `insomnia.ts` handler types, `__tests__/test.test.ts`), `insomnia/src/ui/components/panes/request-test-result-pane.tsx`. Results are spread
+(`...result`) everywhere between the sandbox and the UI, so no other plumbing was needed. Not checked: persisted run history and any other pane that renders test results itself.
+
+**Also fixed 2026-10-07:** `RunnerEvaluatePanel`'s model picks now live in the runner context (`RunnerState.selectedModelIds`). Gotcha from that fix: moving a value into a destructure further down while an earlier
+line still reads it is a use-before-init that `tsc` does NOT catch inside an immediately-invoked arrow (`chosenModels`); it crashed the runner on open. Declare derived values after the destructure.
+
+## Session notes — 2026-10-07 (later): judge helper, Judge tab, response history, Model Evaluator
+
+**Built (all click-tested by the user except where noted):**
+- **`insomnia.judge(criteria, options?)`** (`insomnia-scripting-environment/src/objects/judge.ts`, method on `InsomniaObject`): a second model grades the current response against a checklist and returns
+  `{ checks, passed, total, allPassed, reason, summary, raw }`. A skipped/non-boolean criterion counts as failed. The built-in prompt owns the grader role and the JSON reply format; user instructions
+  are appended. `options` (`url`, `model`, `system`, `headers`, `body`, `answer`, `question`) override the collection settings; `answer`/`question` grade fixed text (used by the control tests).
+  Scripts return `verdict.summary` to show it under the test name (`RequestTestResult.detail`) and `throw new Error(...)` on failure.
+- **Judge tab** on gateway collections (`ui/components/panes/ai-judge-pane.tsx`): pick a request as the judge + editable "Extra instructions" with a sensible default
+  (`common/ai-judge.ts`, `DEFAULT_JUDGE_INSTRUCTIONS`; unsaved = default, saved empty = nothing extra; "Reset to default"). Stored on `Workspace.aiJudge` (`{ requestId, system }`, optional key, no migration).
+  The tab is switched by `?collectionTab=judge` on the debug route (no new route, so no tab-system registration). The judge request is left out of the runner's request list.
+- **Host side**: `network.ts` `resolveJudgeConfig` renders the judge request (so `{{ _.proxy_host }}` resolves) and `network/judge-config.ts` `toJudgeConfig` turns it into `{ url, headers, body template, system }`
+  (SSE `Accept` header replaced with JSON); it rides into the sandbox as `RequestContext.judge` for after-response scripts only. The body is a template: model/params kept, `stream:false`, messages replaced,
+  OpenAI vs Anthropic shape guessed from the URL (`/messages`) or a top-level `system`.
+- **Response history on streaming requests**: `realtime-response-pane.tsx` hands off to the regular `ResponsePane` when the active response has an ordinary body (not an NDJSON event log;
+  `common/stream-event-log.ts`, which mirrors `isCurlEvent` from `main/network/curl.ts` because that file can't be imported in the renderer). Picking a runner response from a streaming request's history now shows chat bubbles.
+- **Clickable request name** on each runner result row (dotted underline; plain text when the run has no response): sets the request's `activeResponseId` and opens the request. Result rows now carry optional `requestId`/`responseId`
+  (`RunnerResultPerRequest`, `RunnerLiveItem`). Older saved runs have none (the name is plain text). A response that fell out of history (`maxHistoryResponses`) gives a "Response not available" toast.
+- **Runner tab renamed "Model Evaluator"** for AI Gateway collections only (tab name in `use-insomnia-tab.ts`, breadcrumb in `use-workspace-breadcrumb.tsx`); regular collections keep "Runner". Tabs already open keep the old name until reopened.
+- **Smaller:** `test()` no longer prints `ACTUAL: undefined | EXPECTED: undefined` for non-assertion errors; Evaluate model picks live in the runner context (see above).
+
+**Verified:** unit tests for judge parsing/prompt building/format handling, `toJudgeConfig`, `isStreamEventLog`, the default-instructions fallback and the `test()` change; live by the user: judge settings tab,
+control scripts (accepts a good canned answer, rejects "I like bananas", checklist verdict with reasons), response history in the chat window, the jump from a result row to its response.
+**Not verified:** Anthropic-format judge request (only the OpenAI-format `/might-be-openAI` route was exercised; the Anthropic body shape is unit-tested only); a judge request with auth set on its Auth tab.
+
+**Prototype shortcuts / gaps (add to the table above when productizing):**
+- Judge request auth (the Auth tab, as opposed to headers) is not applied; format (OpenAI vs Anthropic) is guessed; judge calls are not counted in the runner's cost column and show up as ordinary gateway traffic;
+  `4mini` (or any model under test) can judge itself — nothing warns about it yet.
+- Not mirrored in `inso` (`send-request.node.ts`): no judge settings reach CLI runs.
+- The runner's request list is computed when the runner tab opens: change the judge request while it is open and the list is stale until the tab is reopened.
+- "Test judge" box in the Judge tab was cut: the main window has no request sender for scripting code (`window.bridge.curlRequest` exists only in the hidden script window; the main window has `window.main.curlRequest`).
+  The scripted controls (`insomnia.judge(criteria, { answer })`) cover the need.
+- The Judge tab is gateway-collections-only (the tab strip is, too).
+
+**Gotchas found:**
+- Writing a workspace straight through `services.workspace.update` from a component does NOT refresh `useWorkspaceLoaderData` (only a router action does); call `useRevalidator().revalidate()` after the write and keep the
+  edited values in local state, or later saves overwrite earlier ones with stale data.
+- `window.bridge` is only in the hidden script window; scripting-package `sendRequest` cannot be used from the main window.
+- `getResponseBodyBuffer` gives `Uint8Array`; a streamed response's `bodyPath` is an NDJSON event log regardless of content type, so decide by content, never by content-type.
+- BSD `sed -i` needs `-i ''` (use Python for scripted edits). Prettier `--stdin-filepath` checks are unreliable; run `--write` and inspect the diff when the file wasn't clean to begin with (it reformatted ~70 lines of an existing file once).
+
+**(Done, see "Model Scoring" below.) Was next:** the **Model Scoring** tab on the collection: a script (default shipped visibly, e.g. 70% tests / 30% cost) run once at the very end of a run over all per-model results, returning a score per
+model; scores frozen with the run (like cost); fallback to the current ranking with a visible error if the script throws. Open design point: the scoring script needs *structured* judge results (the fraction of checks
+passed), not just the `detail` string, so `insomnia.judge` should record them on the test result; decide when building it.
+
+## Session notes — 2026-10-07 (evening): Model Scoring
+
+**Built (user confirmed the Score column works in the app):**
+- **Model Scoring tab** on gateway collections (`ui/components/panes/ai-scoring-pane.tsx`, `?collectionTab=scoring` on the debug route, like Judge): an editable script, saved on blur to
+  `Workspace.aiScoring.script` (optional key; absent = default; "Reset to default" clears it). A plain monospace `TextArea`, not the code editor (uncontrolled; needs remounting to refresh).
+- **Default script** (`common/ai-scoring.ts`, `DEFAULT_SCORING_SCRIPT`, shown in the tab so nothing is hidden): `score = 0.7 * passRate + 0.3 * (cheapestCost / modelCost)`, unpriced models get 0 for the cost part,
+  each score carries a `note` explaining the blend.
+- **Runtime** (`common/ai-scoring.ts` `runScoring`, `network/network.ts` `scoreFinishedRun`): at the end of a run (in `debug.runner.tsx` `clientAction`'s `finally`, just before the result is saved) the per-model totals
+  (`summarizeModelRuns`, now with a stable `id` = route|alias[|model for rotating]) go to the script as `models`; it must `return [{ id, score, note? }]`. The user's script is wrapped as the body of an async function:
+  input goes in through `iterationData` (JSON string), the return value comes back as an environment variable, so no sandbox changes were needed. Failures never block a run: `scoreFinishedRun` returns
+  `{ scoringError }` and the run still saves.
+- **Results**: scores are saved with the run (`RunnerTestResult.modelScores` / `scoringError`, frozen like cost). `RunnerModelSummary` shows a **Score** column (third: Route, Model, Score) with a header tooltip pointing at
+  the tab and each score's note on hover; the table is ranked by score (`rankByScore`; unscored models last). Without scores (older runs) it keeps the old ranking and note. A script error shows an amber banner.
+- **Also fixed:** a runner tab saved before the Model Evaluator rename kept the stored name "Runner" (the strip draws `tab.name` from persisted tab data). `useInsomniaTab` now renames a runner tab to match its collection when you visit it.
+
+**Verified:** unit tests incl. the default script and custom/async/throwing/no-return scripts run through the REAL script engine (node `runScript`, `common/__tests__/ai-scoring.test.ts`), output validation,
+ranking, summary ids, and a persistence regression test; live by the user: tab, run, Score column.
+**Not verified:** the scoring script under the QuickJS sandbox mode specifically (the app ran it fine in the user's mode); error banner in the app (tested only through the unit path).
+
+**Prototype shortcuts / gaps:**
+- ~~The script cannot see *structured* judge results~~ (fixed, see "Structured judge results" below); it used to see: a judge test is one pass/fail in `testsPassed`/`testsTotal`, so the fraction of checks passed is invisible to scoring. Next step is for `insomnia.judge` to record its
+  checks on the test result and expose them in `models` (then `checksPassed/checksTotal`, or a per-model judge average).
+- Not mirrored in `inso` (`cli.ts`), same as the rest of the evaluator. Scores are per whole run; no per-request scoring. (The script box is now the real code editor, see below.)
+- Each scoring run appends to a log file `scoring_<workspaceId>` under the response timeline dir (console output from the script goes there); it is never shown or cleaned up.
+
+**Gotchas found:**
+- **The data layer silently prunes top-level fields a model does not declare** (`insomnia-data/node-src/database/init-model/index.ts`): a field must be in the model's `init()` defaults or its exported
+  `optionalKeys`, or `create`/`update` drops it with no error. `modelScores`/`scoringError` vanished this way until `optionalKeys` was added to `runner-test-result.ts` (`aiJudge`/`aiScoring` on the workspace were fine because
+  `workspace.ts` already had the list). Nested fields (e.g. inside `iterationResults`) are not pruned. It runs in the main process, so adding a key needs an app restart, not a hot reload. Always add a save-and-read-back test.
+- A test that runs a script through the real engine caught an empty placeholder request URL crashing the scripting object ("Request URL is not specified"); mocks would have missed it.
+
+## Session notes — 2026-10-07 (night): code editor for scoring, structured judge results, model chips
+
+**Model summary chips:** the "declined by gateway" and "rotating" chips sit on their own line inside the Model cell so the column stops growing (pushed).
+
+**Code editor for the scoring script** (`ai-scoring-pane.tsx`): the real `CodeEditor` (JS mode) with JSHint linting (`models`/`insomnia`/`console`/`_`/`require` as globals). The editor is uncontrolled, so the text lives in
+the editor and is saved from its debounced `onChange` (re-reading the workspace first, since the loader's copy can be stale); saving text equal to the default clears the setting so later improvements to the default still
+reach the collection; "Reset to default" calls `setValue` on the editor ref. JSHint accepts a top-level `return` and still catches typos/undefined variables, but wrongly flags a top-level `await` (the script runs as the
+body of an async function, so it works); the pane says so. Prettify button off (unverified on a body with top-level `return`).
+
+**Structured judge results:** a test that `return`s an `insomnia.judge()` verdict now records `RequestTestResult.checks = { passed, total }` (nested optional field, so the data layer's top-level pruning does not apply)
+and shows the verdict summary as `detail`. A test that throws via the new `verdict.expectAllPassed()` (message = summary, verdict attached as `error.judgeVerdict`) still records its checks, so a failing judge counts.
+Attribution is explicit (the test that returns/throws the verdict owns it), which avoids guessing which test a judge call belongs to when tests run concurrently.
+**Controls are excluded:** a verdict from `insomnia.judge(criteria, { answer })` has `control: true` and its checks are not recorded, so the accept/reject control tests never skew a model's numbers.
+`summarizeModelRuns` sums `checksPassed`/`checksTotal`/`checkRate` per model; the scoring script's `models` entries now include them; the results table shows a **Judge checks** column when any model has some.
+The DEFAULT scoring formula is unchanged (70% tests, 30% cost); judge checks are visible to scripts but not used by the default. Deciding how much they should count is the open product question.
+Scripts: `verdict.expectAllPassed(); return verdict;` (the old `if (!verdict.allPassed) throw new Error(...); return verdict.summary;` still works but records no checks).
+Tests: `judge.test.ts`, `test.test.ts`, `ai-scoring.test.ts` (a script scoring on `checkRate` through the real engine).
+
+**Process gotcha:** in zsh an unquoted `$var` holding newline-separated paths is NOT word-split (unquoted `$(cmd)` is), so `npx eslint $files` gets one giant pattern and fails with "No files matching the pattern"; use `xargs`.
+Run ESLint per package (`cd packages/<pkg>`), not from the repo root. Prettier `--write` on a file that was not already Prettier-clean reformats unrelated lines; check `git diff` for deletions afterwards (this bit `test.test.ts` and `use-runner-request-list.tsx`).
+
+**Judge confidence (agreed with the user): three-level scores + repeat runs, all in public.**
+- The judge now scores each criterion **0, 0.5 or 1** (prompt in `judge.ts`; other numbers are snapped to the nearest half and clamped, a legacy `pass` boolean still parses, a skipped/malformed criterion is 0, never a pass).
+- **Runs per judgment** (Judge tab field, `Workspace.aiJudge.runs`, default 1, max `MAX_JUDGE_RUNS` = 10, also clamped in the helper; `options.runs` overrides per call): the judge is asked that many times **in parallel**
+  and each criterion's score is the **average** (0.5 and 1 average 0.75). Any failing run fails the call. Every run is a model call, so it multiplies judge cost per request x model; the tab says so.
+- **Pass stays strict:** a criterion `pass`es only when its average is exactly 1, so `verdict.allPassed`/`expectAllPassed()` mean "every run said yes". Partial credit goes into `verdict.score` (sum of the averages), which is what a test
+  records as `RequestTestResult.checks.passed` (so `checksPassed` in the scoring input can be fractional; `checkRate` is `checksPassed / checksTotal`). `verdict.passed` is still the integer count of outright passes.
+- **Work in public:** `verdict.summary` marks each criterion ✓ / ◐ / ✗ with its average, and with more than one run prints every run's score next to it (`◐ concise — average score 0.75 (runs: 1, 0.5)`; a single partial run prints `◐ concise — score 0.5`), then a blank line and each run's reason on its own line (`Run 1: …`, `Run 2: …`; one run prints `Judge: …`), because a mean of 0.5
+  can be "one run said partial" or "one run passed, one failed" and those are different. The results table shows `Judge checks` with the fractional credit.
+- The default judge instructions now say "score 0.5 at most when vague or unsure" (the old "mark it not met" no longer fits a three-level scale); collections that saved their own instructions keep them.
+- Not done: a per-check agreement/spread value (the runs are visible in the summary but not as a number to scripts) and any use of the check rate in the default scoring formula.
+
+**Model Evaluator naming (final):** the button on a gateway collection's Routes/Models screen (was "Evaluate Multiple Models") and the sidebar context-menu item (was "Run API Collection") now both say **Model Evaluator**,
+joining the tab name and breadcrumb. All four are gated on `konnectAiGatewayModels`, so regular collections keep "Run API Collection" / "Runner" (the smoke tests in `runner.test.ts` rely on those).
+
+**Default scoring now uses the structured test results (user's design):** `ModelRunSummary`/the scoring input gain `testsScore` and `testsScoreRate`: each test counts 1 if it passed and 0 if not, except a test that returned
+an `insomnia.judge()` verdict, which counts the share of its own checks passed (`checks.passed / checks.total`). The default script's 70% is now `testsScoreRate` (the naive mean of the per-test scores), so
+a model with tests of 1, 1 and 0.75 gets 2.75 / 3, about 92%, for that part (then 30% on cost vs the cheapest priced model, as before). `passRate`/`testsPassed` stay plain pass/fail, so a judge test that averaged 0.75 still
+reads as failed there (strict) but earns 0.75 in the score. Built from the results in `summarizeModelRuns` because per-test fractions cannot be rebuilt from the per-model totals when judge tests have different numbers of criteria.
+Only collections that never saved their own script pick up the new default; a saved script is untouched. Test: `ai-scoring.test.ts` runs the 1, 1, 0.75 example through the real script engine.
+Caveats: control tests (the accept/reject judge controls) are still ordinary tests, so while they exist they add equally to every model's `testsTotal`/`testsScore` (delete them after checking the judge); a skipped test counts 0.
+The Tests passed column in the results table is still the plain pass/fail share, so it can read lower than the score's test part; the score's hover note shows the part actually used.
+
+**Tooltips in the results table:** the Score header hint, each score's note and the Judge checks header use the app's `Tooltip` component (`ui/components/tooltip.tsx`), not the HTML `title` attribute: native `title`
+tooltips did not show in the desktop app. The older `title`s in the same table (the model-name jump button and the declined/rotating chips) are still native and likely have the same problem.
+
+## TODO: use Konnect's real cost (agreed 2026-10-09; do this when the data is reachable)
+
+**Why:** every cost we show (runner rows, model headings, summary table, chat bubbles, the score's cost part) is an *estimate*: tokens x the catalog price snapshot taken at sync (`common/llm-cost.ts`
+`computeCostUsd`, `konnect/transform.ts` `pickLlmPrice`/`withUsageFromResponseBody`, `konnect/api.ts` `fetchLlmCostPrices`, stored as `AiGatewayRunInfo.costUsd`, frozen at send time). Konnect's AI Cost Management
+beta (announced Oct 2026) is meant to compute cost on the gateway, including negotiated-rate overrides, so its number is what finance sees. When we can read it, the evaluator should use it (or at least reconcile against it).
+
+**Status on 2026-10-09 (checked via the kong-konnect MCP):** not reachable. `query_llm_analytics` (7d, by `ai_gateway_model`) on Cam's test gateway shows 340 requests and ~146k tokens but **`cost` = 0 for all five models**.
+The MCP has no budget, cost-tag, export or usage-event tools; only `list_llm_cost_prices`/overrides (beta), `list_metering_events` and LLM analytics. Why cost is 0 is unknown (feature may need enabling, or beta access).
+
+**To do, in order:**
+1. Ask the Konnect team how to turn cost computation on for a gateway, and what the beta *usage events* API returns per request (cost per request? a request id we could join on? latency of availability?).
+2. Re-run the check: `query_llm_analytics` with metrics `cost,total_tokens,ai_request_count`, dimension `ai_gateway_model`; the gateway needs a non-zero `cost` before anything below is worth building.
+3. Decide the integration. Options: (a) after a run, look up the gateway's cost for the run's requests and replace `AiGatewayRunInfo.costUsd` (needs a per-request join key, possibly the correlation-id the gateway can add); (b) keep our estimate and show the gateway's total next to it as a reconciliation; (c) at minimum use `list_llm_cost_prices` *with overrides applied* (it already returns prices with overrides applied) so the estimate honours negotiated rates. (c) may be doable now, since the REST path just needs confirming.
+4. If per-run costs can arrive late (analytics are aggregated, usage events may lag), costs are no longer "frozen at send time": decide how a saved run is updated, and keep the scoring script's `costUsd` input consistent with whichever number is shown.
+
+**Related, when the pieces exist:** budget enforcement rejections would show as the amber "declined by gateway" note (and be left out of the pass rate, so those models are scored on fewer tests; `declined` is in the scoring input but the default script ignores it);
+cost tags could separate evaluator and judge traffic from production spend (needs a setting for the tag header); an estimated cost before a run is possible today from prices + the last run's average tokens.
+Memory pointer: `reference_konnect_cost_management_beta.md`.
+
+## Session notes — 2026-10-13/14: prompts project, flat routes folder, model picker (JTBD 3 groundwork)
+
+Plan agreed with Cam after solution-engineer feedback: three jobs (configure/debug gateway, test prompts across models, test a skill with/without). Gateway project = source of truth for routes and models; a second **local** project (Git later) holds prompts and skills.
+
+- **Gateway collection is now flat:** one `Routes and Models` folder (konnectRouteId keeps the legacy `ai:<gw>:root` key) with one request per route and the starter tests on the folder. No per-route folders. Existing gateway projects must be removed and re-synced.
+- **Prompts project** (`ensureAiGatewayPromptsProject`, `konnect/sync.ts`): plain local project `<gateway> prompts`, marked by `Project.konnectAiGatewayPromptsFor = gatewayId` (no `konnectControlPlaneId`, so CP sync and remove-only rules ignore it). One collection with `Prompts` (starter tests + "My first prompt test", created only with the folder) and an empty `Skills` folder. Create-only. Its `proxy_host` is copied from the gateway project on first sync only (fill-only; later gateway edits do not propagate). The gateway's model catalog is **copied onto the prompts workspace** (`konnectAiGatewayModels`) every sync, so runner, Models tab and picker work there unchanged.
+- **Adoption fallback:** if no project carries the marker, sync adopts an unmarked local project named `<gateway> prompts` and stamps it (prototype shortcut: name-matched).
+- **Gotcha (cost an hour):** a new model field must be in the model's `optionalKeys` AND the Electron **main process must be restarted**. The renderer hot-reloads but the data layer in main does not, and `init-model` silently prunes unknown keys, so the field vanished on save (symptom: duplicate projects, missing UI gated on the field). Unit tests run on source and cannot catch this.
+- **Prompt model picker** (`ui/components/panes/ai-gateway-prompt-model-picker.tsx`, mounted via `RequestUrlBar` `leading` / `urlReplacement` slots in `request-pane.tsx`; shown only when the project has the marker and the workspace has a catalog): a "Pick model / Enter URL" dropdown at the URL bar's left edge (default model, remembered in localStorage `aiGatewayPromptTarget`) and a model dropdown replacing the URL editor. Picking a model rewrites URL path + body `model` and saves (`applyAiGatewayModelOverride(..., { keepStreaming: true })`); no format opinion, body shape is left alone. Built on the shared `base/dropdown` components so spacing matches the verb dropdown (a React Aria `Select` copied item markup into the closed button as unspaced text).
+- **Skills design (not built):** skills are Markdown files in the `Skills` folder (read-only highlighted viewer is enough; the evaluator is the value). Evaluator gains a skills checkbox axis (requests x models x skills, "no skill" baseline always included). Build **A** first (skill text added to the system prompt, reply scored by tests/judge); cheap **B** = judge also sees the task (and optionally the skill) to grade a generated prompt; full B = opt-in second stage that runs the written prompt. TODO: check what the judge receives today (reply only, or request too).
+- **Not done:** runner Models list does not default to the picked model; no Playwright coverage; skills work not started.
+
+## Session notes — 2026-10-14: skills on prompts (JTBD 3, per-request first)
+
+Next up (agreed with Cam): UX polish pass, then a Skills axis in the Model Evaluator (requests x models x skills, "no skill" baseline always included; build **A** = skill text added to the system prompt, reply scored by tests/judge; cheap **B** = judge also sees the task and optionally the skill via a `context` option; full B = opt-in second stage that runs the written prompt).
+
+- **A skill is a request under a prompts project's `Skills` folder; its Markdown is the request's `description`** (deliberate shortcut, flagged in `common/ai-skills.ts`; no real Markdown-file item type). `isSkillRequest` walks the folder chain. A skill opens in `SkillPane` (Markdown editor/preview, no URL bar, no response pane); the sidebar hides its HTTP method badge (`isSkill` on collection-child flat items). Sync adds the example skill "Concise answers" whenever the Skills folder has no skills (also backfills existing projects; once the user has any skill it is not re-added).
+- **Skills tab on prompt requests** (first tab; `request-skills-tab.tsx`): checkboxes per skill, saved as `Request.aiSkillIds` (optional key, so restart the Electron main process after adding it). Count badge on the tab. Chat header chip "N skills included" with names on hover (`SkillsChip` in `chat-settings-bar.tsx`); it reflects the **current** selection, not what an older response was sent with (not tracked per response).
+- **Applied per send, in memory, never saved:** `ui/utils/apply-request-skills.ts` (`bodyTextWithRequestSkills`) -> `common/ai-skills.ts` (`applySkillsToChatBody`). Anthropic: appended to top-level `system`; OpenAI: system message merged/prepended; Gemini and other formats are skipped (silently, console only). The route's real format comes from the gateway catalog because body shape alone cannot tell OpenAI from Anthropic (a user-only message list parses as Anthropic).
+- **Gotcha (cost an hour):** requests with `Accept: text/event-stream` (both starter prompts) do NOT go through `sendActionImplementation`. `request-url-bar` sends them through the **connect** action (`...debug.request.$requestId.connect.tsx` -> `window.main.curl.open`), which sends `renderedRequest.body.text`. Anything that edits a request at send time must be applied in both places. Skills initially only covered the plain send path, so streaming prompts silently got no skill. Diagnostic: every send with skills checked logs `[skills] ...` in the renderer console, and the response's `.timeline` file (app data `responses/`) shows the exact body sent (`DataOut`); grep it for `## Skill`.
+- **Verified live (Cam, 2026-10-14):** "Test the Concise answers skill" on Sonnet: ~1500 -> ~170 tokens with the skill checked; console showed `added "Concise answers" to the system prompt (anthropic)`.
+- **Starter prompts** (created with the Prompts folder only, so existing prompts projects need delete + re-sync): "My first prompt test" and "Test the Concise answers skill" (asks for HTTP caching, request-level test "Answers in under 80 words", skill left unchecked).
+- **Tooling lesson:** when moving JSX by script, never find a block's end by a bare `)}` match (it matched an inner one and nested every tab inside the Skills tab: "Tab cannot be rendered outside a collection"). `tsc` did not catch it because the JSX stayed balanced. Prefer a real edit with a unique anchor.
+- **Not done:** skills axis in the evaluator; judge `context` option; per-response skill record; Gemini/other-format skills; Playwright coverage.
+
+## Session notes — 2026-10-16: skills in the Model Evaluator
+
+Design settled with Cam (simpler than the "skills axis" planned on 2026-10-14): **no skills dimension.** The Evaluate tab lists Requests, Skills, Models. Every selected request runs on every selected model as before, and every checked skill is added to the system prompt of every send, so run count and the results table are unchanged. To compare with and without a skill, run twice.
+
+- **Evaluator ignores a request's own Skills tab.** `sendActionImplementation` takes `aiSkillIds`; when present (the runner always passes it for gateway runs, possibly empty) it replaces the request's `aiSkillIds`. The runner uses the plain send path, so the event-stream connect path is not involved. The Skills tab on a request is unchanged and only affects chat.
+- **State:** `selectedSkillIds` in the runner context (survives tab switches, none by default). Selected skills ride on each `RequestRow` as `evalSkillIds`/`evalSkillNames` through the runner action JSON.
+- **Skills no longer appear as prompts** in the Evaluate request list (`useRunnerRequestList` filters `isSkillRequest` and returns `skills`).
+- **Recorded on results:** `AiGatewayRunInfo.skills` (names) on saved results; model headings show "with skills: ...". Optional field inside the result JSON, but restart the Electron main process after pulling since the type lives in insomnia-data.
+- **UI copy** kept deliberately short: "Select at least one prompt, which will run for each selected model. Optionally, select skills to include for each run." The old rotating-alias sentence was dropped (Models list already says "rotates between N models").
+- **Deliberately punted for the prototype (decided with Cam, 2026-10-16):** **skills only work on OpenAI-format and Anthropic-format routes.** On Gemini (and any other format) the skill is silently NOT added (console `[skills] not applied ...` only), in chat and in the evaluator, so those models run as if no skill were checked and a with/without comparison on them is meaningless. Fix = add a format branch in `applySkillsToChatBody` (`common/ai-skills.ts`); Gemini puts it in `systemInstruction`. Also punted: judge `context` option (judge does not see the task or skill), per-chat-response skill record, Playwright/unit coverage for the evaluator skills path.
+- **Verified:** Cam click-tested the evaluator skills flow on 2026-10-16.
+
+## Session notes — 2026-10-16 (later): judge sees the system prompt and skills, judge is a model
+
+- **Judge input:** the judge now also gets "Instructions the model was given" (the request's system prompt, which already includes any skills because they are applied at send time), shown before the question. `extractSystemText` in `insomnia-scripting-environment/src/objects/judge.ts` reads Anthropic top-level `system` or OpenAI `system`/`developer` messages; `options.systemPrompt` overrides it. The built-in judge prompt says these are grading context, never instructions to the judge. (Before this the judge saw only the last user message and the reply.)
+- **Judge tab:** "What the judge sees" list added at the top. The judge is now a **catalog model** (`Workspace.aiJudge.modelId`, nested so no new top-level key), not a request: `resolveJudgeConfig` (`network/network.ts`) builds the chat request with `buildAiGatewayRequestSpec` and renders it through the scripted request so `{{ _.proxy_host }}` resolves. An older `aiJudge.requestId` still works until a model is chosen (the tab says so). Judge calls are ordinary gateway traffic.
+- **Evaluate tab:** a Judge section under Models shows the configured judge, links to the Judge tab, and says that a model judging itself is not best practice. **Decision (Cam): self-judging is allowed, never blocked or warned.**
+- **Starter skill prompt** has a second test, "Follows the Concise answers skill", that asks the judge four criteria; the first ("the instructions the model was given include a Concise answers skill") fails when the skill is unchecked, which shows the judge sees the skill. It needs a judge chosen on the Judge tab. Existing prompts projects need delete + re-sync to get it.
+- **Known limit (upstream, unchanged):** a single streaming prompt has no Tests tab and runs no after-response scripts, so these tests only show in the Model Evaluator (see the 2026-10-07 notes). Worth raising with engineering.
+- **Verified:** unit tests for `extractSystemText` and the judge prompt; Cam click-tested the judge working live.
