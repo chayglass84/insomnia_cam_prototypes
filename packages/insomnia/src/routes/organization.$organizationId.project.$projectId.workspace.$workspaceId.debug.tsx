@@ -35,6 +35,7 @@ import { ImportModal } from '~/ui/components/modals/import-modal/import-modal';
 import { PasteCurlModal } from '~/ui/components/modals/paste-curl-modal';
 import { PromptModal } from '~/ui/components/modals/prompt-modal';
 import { RequestSettingsModal } from '~/ui/components/modals/request-settings-modal';
+import { AiEvaluatePane } from '~/ui/components/panes/ai-evaluate-pane';
 import { AiGatewayModelsPane } from '~/ui/components/panes/ai-gateway-models-pane';
 import { AiJudgePane } from '~/ui/components/panes/ai-judge-pane';
 import { AiScoringPane } from '~/ui/components/panes/ai-scoring-pane';
@@ -176,6 +177,8 @@ const Debug = () => {
     grpcRequests,
     collection: _collection,
   } = useWorkspaceLoaderData()!;
+  // Prototype (3593AI): the testing project (prompts, skills, evaluator); the gateway project only shows models and prices.
+  const isPromptsProject = Boolean(activeProject.konnectAiGatewayPromptsFor);
   const {
     gitSyncRulesetPath,
     isConnectedGitProject,
@@ -551,28 +554,31 @@ const Debug = () => {
                             projectId={projectId}
                             workspaceId={workspaceId}
                             activeItemId={
-                              activeWorkspace.konnectAiGatewayModels && searchParams.get('collectionTab') === 'judge'
+                              isPromptsProject && searchParams.get('collectionTab') === 'judge'
                                 ? 'judge'
-                                : activeWorkspace.konnectAiGatewayModels &&
-                                    searchParams.get('collectionTab') === 'scoring'
+                                : isPromptsProject && searchParams.get('collectionTab') === 'scoring'
                                   ? 'scoring'
                                   : 'spec'
                             }
-                            specTabLabel={activeWorkspace.konnectAiGatewayModels ? 'Routes/Models' : undefined}
-                            showJudgeTab={Boolean(activeWorkspace.konnectAiGatewayModels)}
-                            showScoringTab={Boolean(activeWorkspace.konnectAiGatewayModels)}
+                            specTabLabel={
+                              isPromptsProject ? 'Evaluate' : activeWorkspace.konnectAiGatewayModels ? 'Models & Pricing' : undefined
+                            }
+                            showJudgeTab={isPromptsProject}
+                            showScoringTab={isPromptsProject}
                             enableLegacyUnitTests={settings.enableLegacyUnitTests}
                             hasLegacyUnitTests={hasLegacyUnitTests}
                           />
                           <div className="min-h-0 flex-1">
-                            {activeWorkspace.konnectAiGatewayModels ? (
+                            {isPromptsProject ? (
                               searchParams.get('collectionTab') === 'judge' ? (
                                 <AiJudgePane key={activeWorkspace._id} />
                               ) : searchParams.get('collectionTab') === 'scoring' ? (
                                 <AiScoringPane key={activeWorkspace._id} />
                               ) : (
-                                <AiGatewayModelsPane models={activeWorkspace.konnectAiGatewayModels} />
+                                <AiEvaluatePane />
                               )
+                            ) : activeWorkspace.konnectAiGatewayModels ? (
+                              <AiGatewayModelsPane models={activeWorkspace.konnectAiGatewayModels} />
                             ) : (
                               <SpecView
                                 organizationId={organizationId}

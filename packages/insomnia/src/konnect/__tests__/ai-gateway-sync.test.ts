@@ -196,6 +196,14 @@ describe('AI Gateway prompts project', () => {
     expect((await insoservices.project.list({ parentId: ORG_ID })).filter(p => p.konnectAiGatewayPromptsFor)).toHaveLength(1);
   });
 
+  it('names the gateway project "Models for ..." and the prompts project "Testing for ..."', async () => {
+    vi.stubGlobal('fetch', mockFetch());
+    await syncKonnect({ pat: 'kpat_test', organizationId: ORG_ID });
+    const all = await insoservices.project.list({ parentId: ORG_ID });
+    expect(all.find(p => p.konnectAiGateway)?.name).toBe('Models for My Gateway');
+    expect((await getPromptsProject())?.name).toBe('Testing for My Gateway');
+  });
+
   it('adopts an existing unmarked project with the generated name instead of creating a duplicate', async () => {
     vi.stubGlobal('fetch', mockFetch());
     await syncKonnect({ pat: 'kpat_test', organizationId: ORG_ID });
@@ -206,7 +214,7 @@ describe('AI Gateway prompts project', () => {
 
     await syncKonnect({ pat: 'kpat_test', organizationId: ORG_ID });
     const all = await insoservices.project.list({ parentId: ORG_ID });
-    expect(all.filter(p => p.name === 'My Gateway prompts')).toHaveLength(1);
+    expect(all.filter(p => p.name === 'Testing for My Gateway')).toHaveLength(1);
     expect((await getPromptsProject())?._id).toBe(marked._id);
   });
 

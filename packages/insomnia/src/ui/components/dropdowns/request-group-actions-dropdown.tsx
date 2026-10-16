@@ -370,8 +370,8 @@ export const RequestGroupActionsDropdown = ({
           icon: 'trash',
           action: () => handleDeleteFolder(),
         },
-        // Nothing to run in a Skills folder.
-        ...(aiFolderKind === 'skills'
+        // Nothing to run in a Skills folder, and the Model Evaluator is not offered from the gateway project.
+        ...(aiFolderKind === 'skills' || aiFolderKind === 'models'
           ? []
           : [
               {

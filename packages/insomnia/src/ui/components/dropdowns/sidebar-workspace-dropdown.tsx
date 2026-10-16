@@ -238,7 +238,8 @@ export const SidebarWorkspaceDropdown = ({
   );
   const createSections: ActionSection[] = [
     ...(isCollectionLike && !isAiCollection ? [createSection, importSection] : []),
-    ...(isCollectionLike ? [runSection] : []),
+    // The Model Evaluator lives in the testing project only; the gateway project just shows models and prices.
+    ...(isCollectionLike && !project.konnectAiGateway ? [runSection] : []),
   ];
 
   const actionSection: ActionSection = {

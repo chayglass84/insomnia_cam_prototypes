@@ -12,7 +12,7 @@ interface Props {
   enableLegacyUnitTests: boolean;
   hasLegacyUnitTests: boolean;
   className?: string;
-  /** Overrides the first tab's label, e.g. 'Routes/Models' for synced AI Gateway collections. */
+  /** Overrides the first tab's label, e.g. 'Models & Pricing' or 'Evaluate' for the synced AI Gateway projects. */
   specTabLabel?: string;
   /** Shows the Judge tab (settings for `insomnia.judge()`); synced AI Gateway collections only. Prototype (3593AI). */
   showJudgeTab?: boolean;
