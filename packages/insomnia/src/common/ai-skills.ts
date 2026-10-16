@@ -96,7 +96,7 @@ export const applySkillsToChatBody = (
 };
 
 /** Starter prompt that wants a long answer, so the Concise answers skill visibly changes the outcome. */
-export const CONCISE_SKILL_PROMPT_NAME = 'Test the Concise answers skill';
+export const CONCISE_SKILL_PROMPT_NAME = 'Skill Testing Demo';
 export const CONCISE_SKILL_PROMPT_QUESTION = 'Explain how HTTP caching works.';
 export const CONCISE_SKILL_PROMPT_DESCRIPTION =
   'Send this as is, then check **Concise answers** on the Skills tab and send again. The first test counts words. The second asks the judge (pick one on the collection\'s Judge tab), which also sees the skill the model was given, so it fails when the skill is missing or ignored.';
