@@ -6,6 +6,7 @@ import { Button, GridListItem } from 'react-aria-components';
 
 import { scopeToBgColorMap, scopeToIconMap, scopeToTextColorMap } from '~/common/get-workspace-label';
 import type { WorkspaceFileIssue } from '~/main/git-service';
+import { aiBadgeClassNames,type AiBadgeKind } from '~/ui/components/tags/method-tag';
 import { scrollElementIntoView } from '~/ui/utils';
 
 import { useInsomniaTabContext } from '../../context/app/insomnia-tab-context';
@@ -38,6 +39,8 @@ export interface BaseTab {
   // method is used to display the tag color
   tag?: string;
   method?: string;
+  /** Prototype (3593AI): skill/prompt/model chip colour for requests in the AI Gateway projects. */
+  aiBadge?: AiBadgeKind;
   temporary?: boolean;
 }
 
@@ -104,7 +107,7 @@ export const InsomniaTab = ({ tab, fileIssue }: { tab: BaseTab; fileIssue?: Work
       return (
         <span
           aria-label="Tab Tag"
-          className={`flex w-10 shrink-0 items-center justify-center rounded-xs border border-solid border-(--hl-sm) text-[0.65rem] ${REQUEST_METHOD_STYLE_MAP[tab?.method || tab?.tag || '']}`}
+          className={`flex w-10 shrink-0 items-center justify-center rounded-xs border border-solid border-(--hl-sm) text-[0.65rem] ${tab.aiBadge ? aiBadgeClassNames[tab.aiBadge] : REQUEST_METHOD_STYLE_MAP[tab?.method || tab?.tag || '']}`}
         >
           {tab.tag}
         </span>

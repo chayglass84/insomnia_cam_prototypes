@@ -31,6 +31,32 @@ const requestBadgeClassNames: Record<string, string> = {
   MCP: 'bg-[rgba(var(--color-info-rgb),0.5)] text-(--color-font-info)',
 };
 
+/**
+ * Prototype (3593AI): requests in the AI Gateway projects get their own chip colours, so skills, prompts and models
+ * (which are all SSE or POST underneath) read apart in the sidebar, tabs and breadcrumb, and from a plain SSE request.
+ */
+export type AiBadgeKind = 'skill' | 'prompt' | 'model';
+
+export const aiBadgeClassNames: Record<AiBadgeKind, string> = {
+  skill: 'bg-[rgba(var(--color-notice-rgb),0.5)] text-(--color-font-notice)',
+  prompt: 'bg-[rgba(var(--color-surprise-rgb),0.5)] text-(--color-font-surprise)',
+  model: 'bg-[rgba(var(--color-info-rgb),0.5)] text-(--color-font-info)',
+};
+
+/** The chip kind for a request: a skill anywhere, otherwise prompt/model by the project it lives in; none elsewhere. */
+export const getAiBadgeKind = (
+  project: { konnectAiGateway?: boolean | null; konnectAiGatewayPromptsFor?: string | null } | null | undefined,
+  isSkill: boolean,
+): AiBadgeKind | undefined => {
+  if (isSkill) {
+    return 'skill';
+  }
+  if (project?.konnectAiGatewayPromptsFor) {
+    return 'prompt';
+  }
+  return project?.konnectAiGateway ? 'model' : undefined;
+};
+
 export const getRequestBadgeClassName = (badge: string) => {
   return requestBadgeClassNames[badge] || 'bg-(--hl-md) text-(--color-font)';
 };

@@ -3,10 +3,12 @@ import { useMemo } from 'react';
 import { useParams } from 'react-router';
 
 import { Icon } from '~/basic-components/icon';
+import { isSkillRequest } from '~/common/ai-skills';
 import { useWorkspaceLoaderData } from '~/routes/organization.$organizationId.project.$projectId.workspace.$workspaceId';
 import { useRequestLoaderData } from '~/routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request.$requestId';
 import { useRequestGroupLoaderData } from '~/routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request-group.$requestGroupId';
 import type { PaneBreadcrumb } from '~/ui/components/pane-header';
+import { getAiBadgeKind } from '~/ui/components/tags/method-tag';
 import { ResourceIcon } from '~/ui/components/workspace/resource-icon';
 import { buildResourceUrl, useInsomniaNavigation } from '~/ui/hooks/use-insomnia-navigation';
 
@@ -42,6 +44,18 @@ export function useWorkspaceBreadcrumbs() {
       .map((id: string) => resourcesById.get(id))
       .filter(Boolean) as (typeof collection)[number]['doc'][];
   }, [reqOrGrp, resourcesById]);
+
+  // Prototype (3593AI): skills, prompts and models get their own chip colours (skills read "SKL").
+  const activeRequestAiBadge = useMemo(
+    () =>
+      activeRequest && models.request.isRequest(activeRequest)
+        ? getAiBadgeKind(
+            activeProject,
+            isSkillRequest(activeRequest, ancestors.filter(models.requestGroup.isRequestGroup)),
+          )
+        : undefined,
+    [activeRequest, activeProject, ancestors],
+  );
 
   const breadcrumbs: PaneBreadcrumb[] = useMemo(() => {
     const crumbs: PaneBreadcrumb[] = [
@@ -87,7 +101,7 @@ export function useWorkspaceBreadcrumbs() {
       crumbs.push({
         id: activeRequest._id,
         label: activeRequest.name || 'Untitled request',
-        icon: <ResourceIcon resource={activeRequest} />,
+        icon: <ResourceIcon resource={activeRequest} aiBadge={activeRequestAiBadge} />,
       });
     } else if (folder) {
       crumbs.push({
@@ -116,6 +130,7 @@ export function useWorkspaceBreadcrumbs() {
     return crumbs;
   }, [
     activeProject,
+    activeRequestAiBadge,
     activeWorkspace,
     ancestors,
     activeRequest,

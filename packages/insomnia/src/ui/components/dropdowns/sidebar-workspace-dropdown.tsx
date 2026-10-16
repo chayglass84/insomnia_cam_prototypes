@@ -232,8 +232,12 @@ export const SidebarWorkspaceDropdown = ({
     ],
   };
 
+  // Prototype (3593AI): the synced AI Gateway collections arrive fully set up, so nothing can be added at their root.
+  const isAiCollection = Boolean(
+    workspace.konnectAiGatewayModels || project.konnectAiGateway || project.konnectAiGatewayPromptsFor,
+  );
   const createSections: ActionSection[] = [
-    ...(isCollectionLike ? [createSection, importSection] : []),
+    ...(isCollectionLike && !isAiCollection ? [createSection, importSection] : []),
     ...(isCollectionLike ? [runSection] : []),
   ];
 

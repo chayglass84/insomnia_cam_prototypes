@@ -21,7 +21,13 @@ import type {
   CollectionChildFlatItem,
   PinnedRequestFlatItem,
 } from '~/ui/components/sidebar/project-navigation-sidebar/types';
-import { getMethodShortHand, getRequestMethodShortHand } from '~/ui/components/tags/method-tag';
+import {
+  aiBadgeClassNames,
+  type AiBadgeKind,
+  getAiBadgeKind,
+  getMethodShortHand,
+  getRequestMethodShortHand,
+} from '~/ui/components/tags/method-tag';
 import { useExecutionState } from '~/ui/hooks/use-execution-state';
 import { useReadyState } from '~/ui/hooks/use-ready-state';
 import { useRequestGroupPatcher, useRequestMetaPatcher, useRequestPatcher } from '~/ui/hooks/use-request';
@@ -29,7 +35,13 @@ import { useRequestGroupPatcher, useRequestMetaPatcher, useRequestPatcher } from
 import { Icon } from '../../icon';
 import { ACTIVE_BORDER_CLASS, GUIDE_LINE_CSS, ICON_CLASS, ROW_CLASS, TOGGLE_BTN_CLASS } from './styles';
 
-function MethodBadge({ doc }: { doc: Request | WebSocketRequest | GrpcRequest | SocketIORequest | McpRequest }) {
+function MethodBadge({
+  doc,
+  aiKind,
+}: {
+  doc: Request | WebSocketRequest | GrpcRequest | SocketIORequest | McpRequest;
+  aiKind?: AiBadgeKind;
+}) {
   if (models.request.isRequest(doc)) {
     const methodColorMap: Record<string, string> = {
       GET: 'bg-[rgba(var(--color-surprise-rgb),0.5)] text-(--color-font-surprise)',
@@ -43,9 +55,9 @@ function MethodBadge({ doc }: { doc: Request | WebSocketRequest | GrpcRequest | 
     };
     return (
       <span
-        className={`flex w-10 shrink-0 items-center justify-center rounded-xs border border-solid border-(--hl-sm) text-[0.65rem] ${methodColorMap[doc.method] || 'bg-(--hl-md) text-(--color-font)'}`}
+        className={`flex w-10 shrink-0 items-center justify-center rounded-xs border border-solid border-(--hl-sm) text-[0.65rem] ${aiKind ? aiBadgeClassNames[aiKind] : methodColorMap[doc.method] || 'bg-(--hl-md) text-(--color-font)'}`}
       >
-        {getMethodShortHand(doc)}
+        {aiKind === 'skill' ? 'SKL' : getMethodShortHand(doc)}
       </span>
     );
   }
@@ -162,7 +174,7 @@ export const RequestNode = ({ item, onToggleFolder, className, depthOffset = 0 }
         </Button>
       )}
       <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-xs px-2 py-1 text-left transition-colors">
-        {isFolder ? <Icon icon="folder" className={ICON_CLASS} /> : isSkill ? null : <MethodBadge doc={doc} />}
+        {isFolder ? <Icon icon="folder" className={ICON_CLASS} /> : <MethodBadge doc={doc} aiKind={getAiBadgeKind(project, isSkill)} />}
         <EditableInput
           value={getRequestNameOrFallback(doc)}
           name="request name"
@@ -215,6 +227,7 @@ export const RequestNode = ({ item, onToggleFolder, className, depthOffset = 0 }
           }
           activeProject={project}
           activeWorkspace={workspace}
+          aiFolderKind={'aiFolderKind' in item ? item.aiFolderKind : undefined}
           isOpen={isContextMenuOpen}
           onOpenChange={setIsContextMenuOpen}
         />

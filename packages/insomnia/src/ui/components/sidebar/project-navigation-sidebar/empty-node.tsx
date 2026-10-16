@@ -1,12 +1,13 @@
 import type { IconName, IconProp } from '@fortawesome/fontawesome-svg-core';
 import type { StorageRules } from 'insomnia-api';
-import type { WorkspaceScope } from 'insomnia-data';
+import type { Request, WorkspaceScope } from 'insomnia-data';
 import { useState } from 'react';
 import { Button, Menu, MenuItem, MenuTrigger, Popover } from 'react-aria-components';
 
 import { scopeToBgColorMap, scopeToTextColorMap } from '~/common/get-workspace-label';
 import { useRequestNewActionFetcher } from '~/routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request.new';
 import { useRequestGroupNewActionFetcher } from '~/routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request-group.new';
+import { createAiFolderActionItems } from '~/ui/components/dropdowns/actions/create-actions';
 import { showModal } from '~/ui/components/modals';
 import { NewWorkspaceModal } from '~/ui/components/modals/new-workspace-modal';
 import { PromptModal } from '~/ui/components/modals/prompt-modal';
@@ -33,7 +34,7 @@ interface ActionItem {
 }
 
 export const EmptyNode = ({ item, storageRules, depthOffset = 0 }: EmptyNodeProps) => {
-  const { organizationId, project, workspace, requestGroup, level = 0, kind } = item;
+  const { organizationId, project, workspace, requestGroup, level = 0, kind, aiFolderKind } = item;
   const [newWorkspaceModalState, setNewWorkspaceModalState] = useState<{
     scope: WorkspaceScope;
     isOpen: boolean;
@@ -54,7 +55,7 @@ export const EmptyNode = ({ item, storageRules, depthOffset = 0 }: EmptyNodeProp
 
   const parentId = requestGroup?._id || workspace?._id || project._id;
 
-  const createRequest = ({ requestType }: { requestType: CreateRequestType }) => {
+  const createRequest = ({ requestType, req }: { requestType: CreateRequestType; req?: Partial<Request> }) => {
     if (!workspace) return;
     newRequestFetcher.submit({
       organizationId,
@@ -62,6 +63,7 @@ export const EmptyNode = ({ item, storageRules, depthOffset = 0 }: EmptyNodeProp
       workspaceId: workspace._id,
       requestType,
       parentId,
+      req,
     });
   };
 
@@ -146,6 +148,19 @@ export const EmptyNode = ({ item, storageRules, depthOffset = 0 }: EmptyNodeProp
         }),
     },
   ];
+
+  // Prototype (3593AI): the synced AI Gateway projects arrive fully set up. An empty AI folder offers subfolders and its
+  // own kind of request; anything else in those projects offers nothing.
+  const isAiProject = Boolean(project.konnectAiGateway || project.konnectAiGatewayPromptsFor);
+  const aiFolderItems: ActionItem[] | undefined = aiFolderKind
+    ? createAiFolderActionItems({
+        kind: aiFolderKind,
+        createFolder,
+        createRequest: (requestType, req) => createRequest({ requestType, req }),
+      })
+    : undefined;
+  const canCreate = !isAiProject || Boolean(aiFolderItems);
+  const folderItems = aiFolderItems ?? createRequestActionItems;
 
   const createInProjectActionList: ActionItem[] = [
     {
@@ -237,50 +252,52 @@ export const EmptyNode = ({ item, storageRules, depthOffset = 0 }: EmptyNodeProp
         {getLabel()}
       </span>
 
-      <MenuTrigger>
-        <Button
-          aria-label={`Create in ${getAriaLabel()}`}
-          className="flex items-center justify-center gap-1 rounded-xs border border-solid border-(--hl-md) bg-(--hl-xxs) p-1.5 px-2 text-sm text-(--color-font) ring-1 ring-transparent transition-all hover:bg-(--hl-xs) focus:ring-(--hl-md) focus:ring-inset aria-pressed:bg-(--hl-sm)"
-        >
-          <Icon icon="plus" /> <span className="hidden md:block">Create</span>
-        </Button>
-        <Popover className="flex min-w-max flex-col overflow-y-hidden">
-          <Menu
-            aria-label={`Create in ${getAriaLabel()} actions`}
-            selectionMode="single"
-            onAction={key => {
-              const item = (kind === 'emptyProject' ? createInProjectActionList : createRequestActionItems).find(
-                item => item.id === key,
-              );
-              if (item) {
-                item.action();
-              }
-            }}
-            items={kind === 'emptyProject' ? createInProjectActionList : createRequestActionItems}
-            className="min-w-max overflow-y-auto rounded-md border border-solid border-(--hl-sm) bg-(--color-bg) py-2 text-sm shadow-lg select-none focus:outline-hidden"
+      {canCreate && (
+        <MenuTrigger>
+          <Button
+            aria-label={`Create in ${getAriaLabel()}`}
+            className="flex items-center justify-center gap-1 rounded-xs border border-solid border-(--hl-md) bg-(--hl-xxs) p-1.5 px-2 text-sm text-(--color-font) ring-1 ring-transparent transition-all hover:bg-(--hl-xs) focus:ring-(--hl-md) focus:ring-inset aria-pressed:bg-(--hl-sm)"
           >
-            {item => (
-              <MenuItem
-                key={item.id}
-                id={item.id}
-                className="flex h-(--line-height-xs) w-full items-center gap-2 bg-transparent px-(--padding-md) whitespace-nowrap text-(--color-font) transition-colors hover:bg-(--hl-sm) focus:bg-(--hl-xs) focus:outline-hidden disabled:cursor-not-allowed aria-selected:font-bold"
-                aria-label={item.name}
-              >
-                {item.scope ? (
-                  <div
-                    className={`${scopeToBgColorMap[item.scope]} ${scopeToTextColorMap[item.scope]} flex h-4 w-4 items-center justify-center rounded-sm p-1`}
-                  >
-                    <Icon icon={item.icon} className="h-3 w-3 shrink-0" />
-                  </div>
-                ) : (
-                  <Icon icon={item.icon} className="h-4 w-3" />
-                )}
-                <span>{item.name}</span>
-              </MenuItem>
-            )}
-          </Menu>
-        </Popover>
-      </MenuTrigger>
+            <Icon icon="plus" /> <span className="hidden md:block">Create</span>
+          </Button>
+          <Popover className="flex min-w-max flex-col overflow-y-hidden">
+            <Menu
+              aria-label={`Create in ${getAriaLabel()} actions`}
+              selectionMode="single"
+              onAction={key => {
+                const item = (kind === 'emptyProject' ? createInProjectActionList : folderItems).find(
+                  item => item.id === key,
+                );
+                if (item) {
+                  item.action();
+                }
+              }}
+              items={kind === 'emptyProject' ? createInProjectActionList : folderItems}
+              className="min-w-max overflow-y-auto rounded-md border border-solid border-(--hl-sm) bg-(--color-bg) py-2 text-sm shadow-lg select-none focus:outline-hidden"
+            >
+              {item => (
+                <MenuItem
+                  key={item.id}
+                  id={item.id}
+                  className="flex h-(--line-height-xs) w-full items-center gap-2 bg-transparent px-(--padding-md) whitespace-nowrap text-(--color-font) transition-colors hover:bg-(--hl-sm) focus:bg-(--hl-xs) focus:outline-hidden disabled:cursor-not-allowed aria-selected:font-bold"
+                  aria-label={item.name}
+                >
+                  {item.scope ? (
+                    <div
+                      className={`${scopeToBgColorMap[item.scope]} ${scopeToTextColorMap[item.scope]} flex h-4 w-4 items-center justify-center rounded-sm p-1`}
+                    >
+                      <Icon icon={item.icon} className="h-3 w-3 shrink-0" />
+                    </div>
+                  ) : (
+                    <Icon icon={item.icon} className="h-4 w-3" />
+                  )}
+                  <span>{item.name}</span>
+                </MenuItem>
+              )}
+            </Menu>
+          </Popover>
+        </MenuTrigger>
+      )}
       {newWorkspaceModalState?.isOpen && (
         <NewWorkspaceModal
           isOpen
