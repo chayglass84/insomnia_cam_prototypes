@@ -1,4 +1,4 @@
-import { models, services } from 'insomnia-data';
+import { services } from 'insomnia-data';
 import { type FC, Fragment, useState } from 'react';
 import {
   Button,
@@ -32,26 +32,26 @@ export const AiJudgePane: FC = () => {
   // Both values live in local state: the workspace loader only refreshes after revalidation, so reading the saved
   // values back would show stale picks (and a later save would overwrite the earlier one). Text is saved on blur so
   // typing is never interrupted by a re-render.
-  const [requestId, setRequestId] = useState(settings.requestId);
+  const [modelId, setModelId] = useState(settings.modelId);
+  // Older setting (a request as the judge). Kept working until a model is chosen, which replaces it.
+  const [legacyRequestId, setLegacyRequestId] = useState(settings.requestId);
   const [system, setSystem] = useState(settings.system ?? DEFAULT_JUDGE_INSTRUCTIONS);
   const [runs, setRuns] = useState(settings.runs ?? 1);
 
-  const docsById = new Map(collection.map(item => [item.doc._id, item.doc]));
-  const requests = collection
-    .filter(item => models.request.isRequest(item.doc))
-    .map(item => {
-      const folder = docsById.get(item.doc.parentId);
-      const folderName = folder && models.requestGroup.isRequestGroup(folder) ? folder.name : null;
-      return {
-        id: item.doc._id,
-        label: folderName ? `${item.doc.name} (Folder: ${folderName})` : item.doc.name,
-        url: 'url' in item.doc ? item.doc.url : '',
-      };
-    });
-  const selected = requests.find(request => request.id === requestId);
+  const catalogModels = (activeWorkspace.konnectAiGatewayModels ?? [])
+    .filter(model => model.enabled && model.paths[0] && model.routeModelValues[0])
+    .map(model => ({
+      id: model.id,
+      label: `${model.routeModelValues.join(', ')} · ${model.targetModel}`,
+      path: model.paths[0],
+    }));
+  const selected = catalogModels.find(model => model.id === modelId);
+  const legacyRequest = collection.find(item => item.doc._id === legacyRequestId)?.doc;
 
-  const save = async (next: { requestId?: string; system?: string; runs?: number }) => {
-    await services.workspace.update(activeWorkspace, { aiJudge: { requestId, system, runs, ...next } });
+  const save = async (next: { modelId?: string; requestId?: string; system?: string; runs?: number }) => {
+    await services.workspace.update(activeWorkspace, {
+      aiJudge: { modelId, requestId: legacyRequestId, system, runs, ...next },
+    });
     revalidate();
   };
 
@@ -66,32 +66,48 @@ export const AiJudgePane: FC = () => {
         </p>
       </div>
 
+      <div className="flex max-w-xl flex-col gap-1 text-sm">
+        <h3 className="text-sm font-bold">What the judge sees</h3>
+        <ul className="list-disc pl-5 text-(--hl)">
+          <li>Your criteria</li>
+          <li>The answer: the model's reply</li>
+          <li>The question: the last user message of the request</li>
+          <li>The instructions the model was given: the request's system prompt, including any skills added to it</li>
+          <li>The extra instructions below</li>
+        </ul>
+        <p className="text-xs text-(--hl)">
+          It does not see earlier messages in the conversation, token counts, cost, timing, or other tests' results.
+        </p>
+      </div>
+
       <Select
-        aria-label="Judge request"
-        selectedKey={requestId ?? null}
+        aria-label="Judge model"
+        selectedKey={modelId ?? null}
         onSelectionChange={key => {
-          setRequestId(key as string);
-          save({ requestId: key as string });
+          setModelId(key as string);
+          setLegacyRequestId(undefined);
+          save({ modelId: key as string, requestId: undefined });
         }}
         className="flex max-w-xl flex-col gap-2"
       >
-        <Label className="text-sm font-bold">Judge request</Label>
+        <Label className="text-sm font-bold">Judge model</Label>
         <Button className="flex w-full items-center justify-between gap-2 rounded-xs border border-solid border-(--hl-sm) bg-(--color-bg) px-2 py-1 text-(--color-font) ring-1 ring-transparent transition-colors hover:bg-(--hl-xs) focus:ring-1 focus:ring-(--hl-md) focus:outline-hidden focus:ring-inset aria-pressed:bg-(--hl-sm)">
-          <SelectValue className="truncate">{selected ? selected.label : 'Choose a request…'}</SelectValue>
+          <SelectValue className="truncate">{selected ? selected.label : 'Choose a model…'}</SelectValue>
           <Icon icon="caret-down" />
         </Button>
         <Popover className="isolate flex w-(--trigger-width) min-w-max flex-col overflow-hidden rounded-md border border-solid border-(--hl-sm) bg-(--color-bg) text-sm shadow-lg select-none">
-          <ListBox items={requests} className="max-h-80 min-w-max overflow-y-auto py-2 focus:outline-hidden">
-            {request => (
+          <ListBox items={catalogModels} className="max-h-80 min-w-max overflow-y-auto py-2 focus:outline-hidden">
+            {model => (
               <ListBoxItem
-                id={request.id}
-                key={request.id}
-                textValue={request.label}
+                id={model.id}
+                key={model.id}
+                textValue={model.label}
                 className="flex h-(--line-height-xs) w-full items-center gap-2 bg-transparent px-(--padding-md) whitespace-nowrap text-(--color-font) transition-colors hover:bg-(--hl-sm) focus:bg-(--hl-xs) focus:outline-hidden aria-selected:font-bold"
               >
                 {({ isSelected }) => (
                   <Fragment>
-                    <span>{request.label}</span>
+                    <span>{model.label}</span>
+                    <span className="pl-4 font-mono text-(--hl)">{model.path}</span>
                     {isSelected && <Icon icon="check" className="justify-self-end text-(--color-success)" />}
                   </Fragment>
                 )}
@@ -101,9 +117,14 @@ export const AiJudgePane: FC = () => {
         </Popover>
         <p className="text-xs text-(--hl)">
           {selected
-            ? `Sends to ${selected.url}. Its model and settings are used; its messages are replaced and streaming is turned off. It is left out of model comparison runs.`
-            : 'Its URL, headers and model are used. Its messages are replaced and streaming is turned off.'}
+            ? `Judges through the gateway at ${selected.path}, so its calls show up as ordinary gateway traffic. Its messages are replaced by the grading prompt and streaming is turned off.`
+            : 'A model from this gateway\'s catalog. Its messages are replaced by the grading prompt and streaming is turned off.'}
         </p>
+        {!selected && legacyRequest && (
+          <p className="text-xs text-(--hl)">
+            Currently using the request "{legacyRequest.name}" (an older setting). Choose a model to replace it.
+          </p>
+        )}
       </Select>
 
       <NumberField

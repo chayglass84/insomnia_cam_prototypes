@@ -230,6 +230,13 @@ export const Runner: FC = () => {
   }, [delay]);
 
   const { reqList, requestRows, skills, entityMap } = useRunnerRequestList(organizationId, targetFolderId, runnerId);
+  const judgeSettings = activeWorkspace.aiJudge;
+  const judgeModel = activeWorkspace.konnectAiGatewayModels?.find(model => model.id === judgeSettings?.modelId);
+  const judgeLabel = judgeModel
+    ? `${judgeModel.routeModelValues.join(', ')} · ${judgeModel.targetModel}`
+    : judgeSettings?.requestId
+      ? (entityMap.get(judgeSettings.requestId)?.doc.name ?? null)
+      : null;
   // Ignore ids of skills that were deleted since they were checked.
   const chosenSkills = skills.filter(skill => selectedSkillIds.includes(skill.id));
 
@@ -900,6 +907,12 @@ export const Runner: FC = () => {
                     models={gatewayModels}
                     selectedModelIds={selectedModelIds}
                     onModelsChange={ids => updateRunnerState(organizationId, runnerId, { selectedModelIds: ids })}
+                    judgeLabel={judgeLabel}
+                    onOpenJudgeTab={() =>
+                      navigate(
+                        `/organization/${organizationId}/project/${projectId}/workspace/${workspaceId}/debug?collectionTab=judge`,
+                      )
+                    }
                     skills={skills}
                     selectedSkillIds={chosenSkills.map(skill => skill.id)}
                     onSkillsChange={ids => updateRunnerState(organizationId, runnerId, { selectedSkillIds: ids })}

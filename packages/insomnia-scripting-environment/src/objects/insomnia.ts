@@ -12,6 +12,7 @@ import type { RequestContext } from './interfaces';
 import {
   extractAnswerText,
   extractQuestionText,
+  extractSystemText,
   type JudgeConfig,
   type JudgeOptions,
   type JudgeVerdict,
@@ -138,6 +139,7 @@ export class InsomniaObject {
       answer: options?.answer ?? extractAnswerText(answerBody),
       control: options?.answer !== undefined,
       question: options?.question ?? extractQuestionText(this.request.body?.toString()),
+      systemPrompt: options?.systemPrompt ?? extractSystemText(this.request.body?.toString()),
       send: (url, headers, body) =>
         new Promise((resolve, reject) => {
           const requestOptions: RequestOptions = {

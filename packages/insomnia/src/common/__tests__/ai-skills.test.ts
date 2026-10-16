@@ -105,6 +105,7 @@ describe('concise skill starter test', () => {
   const run = (text: string) => {
     const results: { name: string; ok: boolean }[] = [];
     const insomnia = {
+      judge: async () => ({ expectAllPassed: () => {} }),
       response: { json: () => ({ content: [{ type: 'text', text }] }) },
       expect: (value: number) => ({ to: { be: { below: (limit: number) => { if (!(value < limit)) throw new Error('too long'); } } } }),
       test: (name: string, fn: () => void) => {
@@ -117,7 +118,7 @@ describe('concise skill starter test', () => {
       },
     };
     new Function('insomnia', CONCISE_SKILL_AFTER_RESPONSE_SCRIPT)(insomnia);
-    return results;
+    return results.filter(result => result.name === 'Answers in under 80 words');
   };
 
   it('passes a short answer and fails a long one', () => {

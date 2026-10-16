@@ -43,6 +43,7 @@ import { generateId, getContentTypeHeader, getLocationHeader, getSetCookieHeader
 import { getRenderedRequestAndContext } from '../common/render';
 import { summarizeModelRuns } from '../common/runner-feedback';
 import { ascendingFirstIndexStringSort } from '../common/sorting';
+import { buildAiGatewayRequestSpec } from '../konnect/transform';
 import type { ResponsePatch } from '../main/network/libcurl-promise';
 import { QUERY_PARAMS } from './api-key/constants';
 import { getAuthObjectOrNull, isAuthEnabled } from './authentication';
@@ -494,14 +495,35 @@ const resolveJudgeConfig = async ({
   ancestors,
   environment,
   baseEnvironment,
-}: Pick<RequestContextForScript, 'ancestors' | 'environment' | 'baseEnvironment'>) => {
+  request: scriptedRequest,
+}: Pick<RequestContextForScript, 'ancestors' | 'environment' | 'baseEnvironment' | 'request'>) => {
   const workspace = ancestors.find(models.workspace.isWorkspace);
+  const modelId = workspace?.aiJudge?.modelId;
   const requestId = workspace?.aiJudge?.requestId;
-  if (!requestId) {
+  if (!modelId && !requestId) {
     return;
   }
   try {
-    const judgeRequest = await services.request.getById(requestId);
+    const model = modelId ? workspace?.konnectAiGatewayModels?.find(candidate => candidate.id === modelId) : undefined;
+    if (model && model.paths[0]) {
+      // A catalog model judges: build its chat request like a starter route request, and render it through the script's
+      // own request so `{{ _.proxy_host }}` resolves (nothing here is saved or sent as that request).
+      const spec = buildAiGatewayRequestSpec(model.paths[0], [model]);
+      const { request } = await tryToInterpolateRequest({
+        request: {
+          ...scriptedRequest,
+          url: `http://{{ _.proxy_host }}${spec.path}`,
+          headers: [{ name: 'Content-Type', value: 'application/json' }],
+          body: { mimeType: 'application/json', text: spec.body },
+          preRequestScript: '',
+          afterResponseScript: '',
+        },
+        environment,
+        baseEnvironment,
+      });
+      return toJudgeConfig(request, resolveJudgeInstructions(workspace?.aiJudge?.system), workspace?.aiJudge?.runs);
+    }
+    const judgeRequest = requestId ? await services.request.getById(requestId) : undefined;
     if (!judgeRequest) {
       return;
     }
@@ -582,7 +604,9 @@ const tryToExecuteScript = async (context: RequestAndContextAndOptionalResponse)
   }
 
   const judge =
-    eventName === 'prerequest' ? undefined : await resolveJudgeConfig({ ancestors, environment, baseEnvironment });
+    eventName === 'prerequest'
+      ? undefined
+      : await resolveJudgeConfig({ ancestors, environment, baseEnvironment, request });
 
   try {
     const output = await getRuntime().network.runScript({

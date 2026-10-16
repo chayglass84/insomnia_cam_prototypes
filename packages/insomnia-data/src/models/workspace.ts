@@ -60,7 +60,9 @@ export interface AiScoringSettings {
 }
 
 export interface AiJudgeSettings {
-  /** The request (in this collection) whose URL, headers and body template the judge uses. */
+  /** The gateway catalog model that judges (its id in `konnectAiGatewayModels`). Preferred over `requestId`. */
+  modelId?: string;
+  /** Older setting: a request in this collection whose URL, headers and body template the judge uses. */
   requestId?: string;
   /** Extra instructions appended to the built-in judge prompt. */
   system?: string;
