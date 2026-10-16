@@ -12,3 +12,22 @@ export const DEFAULT_JUDGE_INSTRUCTIONS = [
 ].join('\n');
 
 export const resolveJudgeInstructions = (saved?: string | null) => (saved ?? DEFAULT_JUDGE_INSTRUCTIONS).trim();
+
+/** Starter prompt that demos `insomnia.judge()`: a judge grades the reply against a checklist (no skill involved). */
+export const JUDGE_DEMO_PROMPT_NAME = 'Judge Demo';
+export const JUDGE_DEMO_PROMPT_QUESTION = 'What are the main differences between TCP and UDP?';
+export const JUDGE_DEMO_PROMPT_DESCRIPTION =
+  "Pick a judge model on the collection's Judge tab, then run this prompt in the Model Evaluator. After each reply, the judge scores it against the four criteria in this prompt's after-response script, and the result shows each check.";
+export const JUDGE_DEMO_AFTER_RESPONSE_SCRIPT = `// Needs a judge: pick a model on the collection's Judge tab. The judge sees the question, the reply and the
+// instructions the model was given, and scores each criterion 0, 0.5 or 1.
+insomnia.test('Judge: covers the key differences between TCP and UDP', async () => {
+  const verdict = await insomnia.judge([
+    'Says TCP is connection-oriented and reliable (it guarantees delivery and order)',
+    'Says UDP is connectionless and does not guarantee delivery or order',
+    'Gives at least one example use of TCP and one of UDP',
+    'Is organised as a short list or comparison, not one long paragraph',
+  ]);
+  verdict.expectAllPassed();
+  return verdict;
+});
+`;

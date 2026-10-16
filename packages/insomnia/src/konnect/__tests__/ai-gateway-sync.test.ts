@@ -144,11 +144,21 @@ describe('AI Gateway prompts project', () => {
     const prompts = folders.find(f => f.name === 'Prompts');
     expect(prompts.afterResponseScript).toContain("insomnia.test('Got a valid response'");
     const requests = await db.find(models.request.type, { parentId: prompts._id });
-    expect(requests.map(r => r.name)).toEqual(['My first prompt test', 'Test the Concise answers skill']);
-    const concise = requests.find(r => r.name === 'Test the Concise answers skill');
+    // The sidebar orders by metaSortKey; db.find has no defined order.
+    expect([...requests].sort((a, b) => a.metaSortKey - b.metaSortKey).map(r => r.name)).toEqual([
+      'Simple Prompt Test',
+      'Skill Testing Demo',
+      'Judge Demo',
+    ]);
+    const concise = requests.find(r => r.name === 'Skill Testing Demo');
     expect(concise.afterResponseScript).toContain('under 80 words');
     expect(concise.aiSkillIds ?? []).toEqual([]);
     expect(JSON.parse(concise.body.text).messages.at(-1).content).toBe('Explain how HTTP caching works.');
+    const judgeDemo = requests.find(r => r.name === 'Judge Demo');
+    expect(judgeDemo.afterResponseScript).toContain('insomnia.judge(');
+    expect(JSON.parse(judgeDemo.body.text).messages.at(-1).content).toBe(
+      'What are the main differences between TCP and UDP?',
+    );
   });
 
   it('adds the example skill to an empty Skills folder, and not once the user has a skill of their own', async () => {
@@ -187,12 +197,12 @@ describe('AI Gateway prompts project', () => {
   it('is create-only: a deleted starter prompt stays deleted and nothing is duplicated on re-sync', async () => {
     vi.stubGlobal('fetch', mockFetch());
     await syncKonnect({ pat: 'kpat_test', organizationId: ORG_ID });
-    const [request] = await db.find(models.request.type, { name: 'My first prompt test' });
+    const [request] = await db.find(models.request.type, { name: 'Simple Prompt Test' });
     await insoservices.request.remove(request);
 
     await syncKonnect({ pat: 'kpat_test', organizationId: ORG_ID });
-    expect(await db.find(models.request.type, { name: 'My first prompt test' })).toHaveLength(0);
-    expect(await db.find(models.request.type, { name: 'Test the Concise answers skill' })).toHaveLength(1);
+    expect(await db.find(models.request.type, { name: 'Simple Prompt Test' })).toHaveLength(0);
+    expect(await db.find(models.request.type, { name: 'Skill Testing Demo' })).toHaveLength(1);
     expect((await insoservices.project.list({ parentId: ORG_ID })).filter(p => p.konnectAiGatewayPromptsFor)).toHaveLength(1);
   });
 

@@ -11,6 +11,12 @@ import type {
 import { EnvironmentKvPairDataType, models, services as insoservices } from 'insomnia-data';
 
 import {
+  JUDGE_DEMO_AFTER_RESPONSE_SCRIPT,
+  JUDGE_DEMO_PROMPT_DESCRIPTION,
+  JUDGE_DEMO_PROMPT_NAME,
+  JUDGE_DEMO_PROMPT_QUESTION,
+} from '../common/ai-judge';
+import {
   CONCISE_SKILL_AFTER_RESPONSE_SCRIPT,
   CONCISE_SKILL_PROMPT_DESCRIPTION,
   CONCISE_SKILL_PROMPT_NAME,
@@ -991,7 +997,9 @@ async function ensureAiGatewayPromptsProject(
     const spec = buildAiGatewayRequestSpec(firstRoute[0], firstRoute[1]);
     await insoservices.request.create({
       parentId: promptsFolderId,
-      name: 'My first prompt test',
+      name: 'Simple Prompt Test',
+      // Explicit keys: the three starters are created in the same millisecond, so the default (time-based) key would tie.
+      metaSortKey: -300,
       method: 'POST',
       url: `http://{{ _.proxy_host }}${spec.path}`,
       headers: [
@@ -1006,6 +1014,7 @@ async function ensureAiGatewayPromptsProject(
       parentId: promptsFolderId,
       name: CONCISE_SKILL_PROMPT_NAME,
       description: CONCISE_SKILL_PROMPT_DESCRIPTION,
+      metaSortKey: -200,
       method: 'POST',
       url: `http://{{ _.proxy_host }}${spec.path}`,
       headers: [
@@ -1014,6 +1023,22 @@ async function ensureAiGatewayPromptsProject(
       ],
       ...(conciseBody ? { body: { mimeType: 'application/json', text: conciseBody } } : {}),
       afterResponseScript: CONCISE_SKILL_AFTER_RESPONSE_SCRIPT,
+    });
+    // A third prompt that demos the judge on its own (needs a judge chosen on the Judge tab).
+    const judgeBody = withLastUserMessage(spec.body, JUDGE_DEMO_PROMPT_QUESTION);
+    await insoservices.request.create({
+      parentId: promptsFolderId,
+      name: JUDGE_DEMO_PROMPT_NAME,
+      description: JUDGE_DEMO_PROMPT_DESCRIPTION,
+      metaSortKey: -100,
+      method: 'POST',
+      url: `http://{{ _.proxy_host }}${spec.path}`,
+      headers: [
+        { name: 'Content-Type', value: 'application/json' },
+        { name: 'Accept', value: 'text/event-stream' },
+      ],
+      ...(judgeBody ? { body: { mimeType: 'application/json', text: judgeBody } } : {}),
+      afterResponseScript: JUDGE_DEMO_AFTER_RESPONSE_SCRIPT,
     });
   }
 }
