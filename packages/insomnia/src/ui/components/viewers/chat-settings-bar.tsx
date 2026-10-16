@@ -57,23 +57,28 @@ interface Props {
 }
 
 /**
- * Prototype (3593AI): "N skills included" with the names on hover. Reflects the request's skills as they are checked
- * now, which is what the next send uses; a response sent earlier with a different selection isn't tracked.
+ * Prototype (3593AI): "N skills included" with the names on hover. Shows the skills the active response was actually
+ * sent with (recorded on the response); for a response without a record (older ones) or no response yet, it shows the
+ * skills checked now. When those differ, the tooltip also says what the next send will use.
  */
 const SkillsChip: FC = () => {
   const collection = useWorkspaceLoaderData()?.collection;
-  const activeRequest = useRequestLoaderData()?.activeRequest;
+  const loaderData = useRequestLoaderData();
+  const activeRequest = loaderData?.activeRequest;
+  const recorded = (loaderData?.activeResponse as { aiSkillNames?: string[] | null } | null | undefined)?.aiSkillNames;
   const aiSkillIds = activeRequest && models.request.isRequest(activeRequest) ? activeRequest.aiSkillIds : undefined;
-  if (!collection || !aiSkillIds?.length) {
+  if (!collection) {
     return null;
   }
   const docs = collection.map(item => item.doc);
   const folders = docs.filter(models.requestGroup.isRequestGroup);
-  const names = docs
+  const checkedNow = docs
     .filter(models.request.isRequest)
-    .filter(doc => aiSkillIds.includes(doc._id) && isSkillRequest(doc, folders))
+    .filter(doc => (aiSkillIds ?? []).includes(doc._id) && isSkillRequest(doc, folders))
     .map(doc => doc.name || 'Untitled skill');
-  if (names.length === 0) {
+  const names = recorded ?? checkedNow;
+  const nextSendDiffers = recorded != null && recorded.join('\n') !== checkedNow.join('\n');
+  if (names.length === 0 && checkedNow.length === 0) {
     return null;
   }
   return (
@@ -83,17 +88,23 @@ const SkillsChip: FC = () => {
         data-testid="chat-skills"
       >
         <Icon icon="puzzle-piece" />
-        {names.length} {names.length === 1 ? 'skill' : 'skills'} included
+        {names.length === 0 ? 'No skills' : `${names.length} ${names.length === 1 ? 'skill' : 'skills'} included`}
       </Button>
       <Tooltip
         offset={8}
         className="rounded-md border border-solid border-(--hl-sm) bg-(--color-bg) px-2 py-1 text-base text-(--color-font) shadow-lg select-none focus:outline-hidden"
       >
         <ul className="list-none">
+          {names.length === 0 && <li>This reply was sent without skills</li>}
           {names.map(name => (
             <li key={name}>{name}</li>
           ))}
         </ul>
+        {nextSendDiffers && (
+          <p className="mt-1 text-xs text-(--hl)">
+            Checked now, used on the next send: {checkedNow.length === 0 ? 'none' : checkedNow.join(', ')}
+          </p>
+        )}
       </Tooltip>
     </TooltipTrigger>
   );

@@ -13,7 +13,7 @@ import { href } from 'react-router';
 import type { RenderedRequest } from '~/common/templating/types';
 import { invariant } from '~/common/utils/invariant';
 import { AnalyticsEvent } from '~/ui/analytics';
-import { bodyTextWithRequestSkills } from '~/ui/utils/apply-request-skills';
+import { applyRequestSkills } from '~/ui/utils/apply-request-skills';
 import { createFetcherSubmitHook } from '~/ui/utils/router';
 
 import type { Route } from './+types/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request.$requestId.connect';
@@ -89,14 +89,13 @@ export async function clientAction({ params, request }: Route.ClientActionArgs) 
     const renderedRequest = { ...req, ...rendered } as RenderedRequest;
     console.info('[skills] connect action, skills checked:', (renderedRequest as any).aiSkillIds?.length ?? 0);
     // Prototype (3593AI): event-stream prompts send through here, not the plain send action, so add skills here too.
-    const bodyWithSkills = await bodyTextWithRequestSkills(
-      renderedRequest,
-      (await services.workspace.getById(workspaceId))?.konnectAiGatewayModels,
-    );
+    const catalog = (await services.workspace.getById(workspaceId))?.konnectAiGatewayModels;
+    const { bodyText: bodyWithSkills, skillNames } = await applyRequestSkills(renderedRequest, catalog);
     if (bodyWithSkills !== undefined) {
       renderedRequest.body = { ...renderedRequest.body, text: bodyWithSkills };
     }
-    window.main.curl.open({ workspaceId, renderedRequest });
+    // Recorded on the response (chat header chip); gateway workspaces only.
+    window.main.curl.open({ workspaceId, renderedRequest, ...(catalog ? { aiSkillNames: skillNames } : {}) });
     window.main.trackAnalyticsEvent({
       event: AnalyticsEvent.requestExecuted,
       properties: { request_type: 'Event Stream' },
