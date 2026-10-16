@@ -94,7 +94,7 @@ export const RunnerEvaluatePanel: FC<Props> = ({
 
       <section className="flex flex-col gap-2">
         <SectionHeader
-          title="Requests"
+          title="Prompts"
           selected={requestCount}
           total={requests.length}
           onSelectAll={() => onRequestsChange(requestIds)}
@@ -102,7 +102,7 @@ export const RunnerEvaluatePanel: FC<Props> = ({
           disabled={disabled}
         />
         <div className="flex flex-col gap-2 pl-4">
-          {requests.length === 0 && <span className="text-(--hl)">This collection has no requests.</span>}
+          {requests.length === 0 && <span className="text-(--hl)">This collection has no prompts.</span>}
           {sortedRequests.map(request => {
             const [collection, ...folders] = request.ancestors;
             const row = (
