@@ -1,5 +1,5 @@
 import type { StorageRules } from 'insomnia-api';
-import type { Workspace } from 'insomnia-data';
+import type { Request, Workspace } from 'insomnia-data';
 import { models } from 'insomnia-data';
 import type { RefObject } from 'react';
 import { useState } from 'react';
@@ -17,6 +17,7 @@ import { PromptModal } from '../modals/prompt-modal';
 import type { FlatItem } from '../sidebar/project-navigation-sidebar/types';
 import {
   type ActionItem,
+  createAiFolderActionItems,
   createRequestOrFolderActionItems,
   createWorkspaceActionItems,
 } from './actions/create-actions';
@@ -51,19 +52,27 @@ export const SidebarShortcutActionsDropdown = ({
   const isRequest = target.kind === 'collectionChild' && !models.requestGroup.isRequestGroup(target.doc);
   const isRequestGroup = target.kind === 'collectionChild' && models.requestGroup.isRequestGroup(target.doc);
   const allowCreateWorkspace = isProject || isNoneCollectionWorkspace;
+  // Prototype (3593AI): in the synced AI Gateway collections nothing is created at the root; the AI folders (and what is
+  // inside them) take only subfolders and their own kind of request.
+  const isAiCollection =
+    target.kind !== 'project' &&
+    target.kind !== 'pinnedHeader' &&
+    Boolean(target.project?.konnectAiGateway || target.project?.konnectAiGatewayPromptsFor);
+  const aiFolderKind = target.kind === 'collectionChild' ? target.aiFolderKind : undefined;
   const allowCreateRequest = isCollection || isRequest || isRequestGroup;
 
-  if (!allowCreateWorkspace && !allowCreateRequest) {
+  if ((!allowCreateWorkspace && !allowCreateRequest) || (isAiCollection && !aiFolderKind)) {
     return null;
   }
 
-  const createRequest = (requestType: CreateRequestType) => {
+  const createRequest = (requestType: CreateRequestType, req?: Partial<Request>) => {
     if (allowCreateRequest) {
       newRequestFetcher.submit({
         organizationId: target.organizationId,
         projectId: target.project._id,
         workspaceId: target.kind === 'workspace' ? target.doc._id : target.workspace._id,
         requestType,
+        req,
         // If the target is a collection or request group, we want to create the request inside it. Otherwise, we want to create the request at the same level.
         parentId: isCollection || isRequestGroup ? target.doc._id : target.doc.parentId,
       });
@@ -114,10 +123,12 @@ export const SidebarShortcutActionsDropdown = ({
         canCreateMockServer: Boolean(target.kind === 'workspace' ? target.project?._id : target.doc?._id),
       })
     : allowCreateRequest
-      ? createRequestOrFolderActionItems({
-          createRequest,
-          createFolder,
-        })
+      ? aiFolderKind
+        ? createAiFolderActionItems({ kind: aiFolderKind, createRequest, createFolder })
+        : createRequestOrFolderActionItems({
+            createRequest,
+            createFolder,
+          })
       : [];
 
   return (

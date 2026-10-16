@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  aiFolderKind,
   applySkillsToChatBody,
   buildSkillsSystemText,
   CONCISE_SKILL_AFTER_RESPONSE_SCRIPT,
@@ -126,5 +127,16 @@ describe('concise skill starter test', () => {
     expect(run(Array.from({ length: 120 }, () => 'word').join(' '))).toEqual([
       { name: 'Answers in under 80 words', ok: false },
     ]);
+  });
+});
+
+describe('aiFolderKind', () => {
+  it('names the three synced folders and nothing else', () => {
+    expect(aiFolderKind({ konnectRouteId: 'ai:gw-1:root' })).toBe('models');
+    expect(aiFolderKind({ konnectRouteId: 'ai:gw-1:prompts' })).toBe('prompts');
+    expect(aiFolderKind({ konnectRouteId: skillsFolderKey('gw-1') })).toBe('skills');
+    expect(aiFolderKind({ konnectRouteId: 'ai:gw-1:/anthropic' })).toBeUndefined();
+    expect(aiFolderKind({ konnectRouteId: null })).toBeUndefined();
+    expect(aiFolderKind({})).toBeUndefined();
   });
 });

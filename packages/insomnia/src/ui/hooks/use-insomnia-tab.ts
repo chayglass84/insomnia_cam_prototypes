@@ -4,7 +4,8 @@ import { models, services } from 'insomnia-data';
 import { useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router';
 
-import { formatMethodName, getRequestMethodShortHand } from '~/ui/components/tags/method-tag';
+import { isSkillsFolder } from '~/common/ai-skills';
+import { formatMethodName, getAiBadgeKind, getRequestMethodShortHand } from '~/ui/components/tags/method-tag';
 import { showResourceNotFoundToast } from '~/ui/components/toast-notification';
 
 import { useDocBodyKeyboardShortcuts } from '../components/keydown-binder';
@@ -145,6 +146,24 @@ const buildTabUrlFromResource = ({
   });
 };
 
+/** True when the request sits anywhere beneath a prompts project's Skills folder. */
+const isUnderSkillsFolder = async (request: Request) => {
+  const seen = new Set<string>();
+  let parentId: string | undefined = request.parentId;
+  while (parentId && !seen.has(parentId)) {
+    seen.add(parentId);
+    const group = await services.requestGroup.getById(parentId);
+    if (!group) {
+      return false;
+    }
+    if (isSkillsFolder(group)) {
+      return true;
+    }
+    parentId = group.parentId;
+  }
+  return false;
+};
+
 const buildTabFromResource = async (params: AddTabParams): Promise<BaseTab | null> => {
   const { resource, organizationId, projectId, workspaceId, projectName, workspaceName, searchParams } = params;
   const effectiveWorkspaceId = workspaceId ?? resource._id;
@@ -199,6 +218,16 @@ const buildTabFromResource = async (params: AddTabParams): Promise<BaseTab | nul
   ) {
     baseTab.tag = getRequestMethodShortHand(resource);
     baseTab.method = (resource as Request).method || '';
+    if (isRequest(resource)) {
+      // Prototype (3593AI): skills, prompts and models get their own chip colours (skills also read "SKL").
+      const aiBadge = getAiBadgeKind(await services.project.getById(projectId), await isUnderSkillsFolder(resource));
+      if (aiBadge) {
+        baseTab.aiBadge = aiBadge;
+        if (aiBadge === 'skill') {
+          baseTab.tag = 'SKL';
+        }
+      }
+    }
   }
 
   if (models.mockRoute.isMockRoute(resource)) {

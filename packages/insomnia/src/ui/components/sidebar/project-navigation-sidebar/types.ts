@@ -1,5 +1,6 @@
 import type { BaseModel, GitRepository, Project, RequestGroup, Workspace, WorkspaceMeta } from 'insomnia-data';
 
+import type { AiFolderKind } from '~/common/ai-skills';
 import type { InsomniaFile } from '~/common/project';
 import type { Child } from '~/routes/organization.$organizationId.project.$projectId.workspace.$workspaceId';
 
@@ -57,6 +58,8 @@ export interface CollectionChildFlatItem extends BaseFlatItem<Child['doc']> {
   ancestors?: string[];
   /** Prototype (3593AI): a request under a Skills folder; shown without an HTTP method badge. */
   isSkill?: boolean;
+  /** Prototype (3593AI): set for one of the synced AI folders and everything inside it; limits what the folder menu can add. */
+  aiFolderKind?: AiFolderKind;
   level: number;
   pinned: boolean;
 }
@@ -81,6 +84,8 @@ export interface EmptyNodeFlatItem {
   project: ProjectWithGitRepository;
   workspace?: Workspace;
   requestGroup?: RequestGroup;
+  /** Prototype (3593AI): for an empty synced AI folder (or one inside it); limits what Create offers. */
+  aiFolderKind?: AiFolderKind;
   level?: number;
 }
 

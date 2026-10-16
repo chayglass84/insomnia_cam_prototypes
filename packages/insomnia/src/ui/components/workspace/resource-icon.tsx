@@ -2,12 +2,17 @@ import type { IconProp } from '@fortawesome/fontawesome-svg-core';
 import { models } from 'insomnia-data';
 
 import { Icon } from '~/basic-components/icon';
-import { getMethodShortHand, getRequestBadgeClassName } from '~/ui/components/tags/method-tag';
+import {
+  aiBadgeClassNames,
+  type AiBadgeKind,
+  getMethodShortHand,
+  getRequestBadgeClassName,
+} from '~/ui/components/tags/method-tag';
 
-export const getBadgeClassName = (colorKey: string) =>
-  `flex w-10 shrink-0 items-center justify-center rounded-xs border border-solid border-(--hl-sm) text-[0.65rem] ${getRequestBadgeClassName(colorKey)}`;
+export const getBadgeClassName = (colorKey: string, aiBadge?: AiBadgeKind) =>
+  `flex w-10 shrink-0 items-center justify-center rounded-xs border border-solid border-(--hl-sm) text-[0.65rem] ${aiBadge ? aiBadgeClassNames[aiBadge] : getRequestBadgeClassName(colorKey)}`;
 
-export function ResourceIcon({ resource }: { resource: any }) {
+export function ResourceIcon({ resource, aiBadge }: { resource: any; aiBadge?: AiBadgeKind }) {
   const isProject = models.project.isProject(resource);
   let icon: IconProp | null = null;
   if (isProject) {
@@ -39,7 +44,9 @@ export function ResourceIcon({ resource }: { resource: any }) {
   return (
     <>
       {models.request.isRequest(resource) && (
-        <span className={getBadgeClassName(resource.method)}>{getMethodShortHand(resource)}</span>
+        <span className={getBadgeClassName(resource.method, aiBadge)}>
+          {aiBadge === 'skill' ? 'SKL' : getMethodShortHand(resource)}
+        </span>
       )}
       {models.webSocketRequest.isWebSocketRequest(resource) && <span className={getBadgeClassName('WS')}>WS</span>}
       {models.socketIORequest.isSocketIORequest(resource) && <span className={getBadgeClassName('IO')}>IO</span>}

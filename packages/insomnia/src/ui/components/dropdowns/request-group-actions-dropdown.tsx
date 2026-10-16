@@ -15,6 +15,7 @@ import { useRequestGroupNewActionFetcher } from '~/routes/organization.$organiza
 import { useTabNavigate } from '~/ui/hooks/use-insomnia-tab';
 import { plugins } from '~/ui/plugins/renderer-bridge';
 
+import type { AiFolderKind } from '../../../common/ai-skills';
 import { toKebabCase } from '../../../common/misc';
 import type { CreateRequestType } from '../../hooks/use-request';
 import { type DropdownHandle, type DropdownProps } from '../base/dropdown';
@@ -25,12 +26,15 @@ import { AskModal } from '../modals/ask-modal';
 import { PasteCurlModal } from '../modals/paste-curl-modal';
 import { PromptModal } from '../modals/prompt-modal';
 import { RequestGroupSettingsModal } from '../modals/request-group-settings-modal';
+import { AI_FOLDER_REQUEST_OPTIONS } from './actions/create-actions';
 interface Props extends Partial<DropdownProps> {
   requestGroup: RequestGroup;
   isOpen: boolean;
   triggerRef?: React.RefObject<HTMLDivElement>;
   activeProject: Project;
   activeWorkspace: Workspace;
+  /** Prototype (3593AI): one of the synced AI folders (or inside one); it only offers folders and its own kind of request. */
+  aiFolderKind?: AiFolderKind;
   onOpenChange: (isOpen: boolean) => void;
   onRename: () => void;
 }
@@ -43,6 +47,7 @@ export const RequestGroupActionsDropdown = ({
   onRename,
   activeProject,
   activeWorkspace,
+  aiFolderKind,
 }: Props) => {
   const { settings } = useRootLoaderData()!;
   const { hotKeyRegistry } = settings;
@@ -193,6 +198,21 @@ export const RequestGroupActionsDropdown = ({
     );
   };
 
+  // Prototype (3593AI): the synced AI folders only take what belongs in them: a model (an SSE route request), a prompt
+  // (an SSE request) or a skill (a request holding Markdown), plus subfolders.
+  const aiFolderRequestOption = aiFolderKind ? AI_FOLDER_REQUEST_OPTIONS[aiFolderKind] : undefined;
+  const aiFolderRequestItem = aiFolderRequestOption && {
+    id: aiFolderRequestOption.id,
+    name: aiFolderRequestOption.name,
+    icon: 'plus-circle' as IconName,
+    action: () =>
+      createRequest({
+        requestType: aiFolderRequestOption.type,
+        parentId: requestGroup._id,
+        req: aiFolderRequestOption.req,
+      }),
+  };
+
   const requestGroupActionItems: {
     name: string;
     id: string;
@@ -231,82 +251,90 @@ export const RequestGroupActionsDropdown = ({
                 }),
             }),
         },
-        {
-          id: 'HTTP',
-          name: 'HTTP Request',
-          icon: 'plus-circle',
-          hint: hotKeyRegistry.request_createHTTP,
-          action: () =>
-            createRequest({
-              requestType: 'HTTP',
-              parentId: requestGroup._id,
-            }),
-        },
-        {
-          id: 'Event Stream',
-          name: 'Event Stream Request (SSE)',
-          icon: 'plus-circle',
-          action: () =>
-            createRequest({
-              requestType: 'Event Stream',
-              parentId: requestGroup._id,
-            }),
-        },
-        {
-          id: 'GraphQL Request',
-          name: 'GraphQL Request',
-          icon: 'plus-circle',
-          action: () =>
-            createRequest({
-              requestType: 'GraphQL',
-              parentId: requestGroup._id,
-            }),
-        },
-        {
-          id: 'gRPC Request',
-          name: 'gRPC Request',
-          icon: 'plus-circle',
-          action: () =>
-            createRequest({
-              requestType: 'gRPC',
-              parentId: requestGroup._id,
-            }),
-        },
-        {
-          id: 'WebSocket Request',
-          name: 'WebSocket Request',
-          icon: 'plus-circle',
-          action: () =>
-            createRequest({
-              requestType: 'WebSocket',
-              parentId: requestGroup._id,
-            }),
-        },
-        {
-          id: 'Socket.IO Request',
-          name: 'Socket.IO Request',
-          icon: 'plus-circle',
-          action: () =>
-            createRequest({
-              requestType: 'SocketIO',
-              parentId: requestGroup._id,
-            }),
-        },
+        ...(aiFolderRequestItem
+          ? [aiFolderRequestItem]
+          : [
+              {
+                id: 'HTTP',
+                name: 'HTTP Request',
+                icon: 'plus-circle' as IconName,
+                hint: hotKeyRegistry.request_createHTTP,
+                action: () =>
+                  createRequest({
+                    requestType: 'HTTP',
+                    parentId: requestGroup._id,
+                  }),
+              },
+              {
+                id: 'Event Stream',
+                name: 'Event Stream Request (SSE)',
+                icon: 'plus-circle' as IconName,
+                action: () =>
+                  createRequest({
+                    requestType: 'Event Stream',
+                    parentId: requestGroup._id,
+                  }),
+              },
+              {
+                id: 'GraphQL Request',
+                name: 'GraphQL Request',
+                icon: 'plus-circle' as IconName,
+                action: () =>
+                  createRequest({
+                    requestType: 'GraphQL',
+                    parentId: requestGroup._id,
+                  }),
+              },
+              {
+                id: 'gRPC Request',
+                name: 'gRPC Request',
+                icon: 'plus-circle' as IconName,
+                action: () =>
+                  createRequest({
+                    requestType: 'gRPC',
+                    parentId: requestGroup._id,
+                  }),
+              },
+              {
+                id: 'WebSocket Request',
+                name: 'WebSocket Request',
+                icon: 'plus-circle' as IconName,
+                action: () =>
+                  createRequest({
+                    requestType: 'WebSocket',
+                    parentId: requestGroup._id,
+                  }),
+              },
+              {
+                id: 'Socket.IO Request',
+                name: 'Socket.IO Request',
+                icon: 'plus-circle' as IconName,
+                action: () =>
+                  createRequest({
+                    requestType: 'SocketIO',
+                    parentId: requestGroup._id,
+                  }),
+              },
+            ]),
       ],
     },
-    {
-      name: 'Import',
-      id: 'import',
-      icon: 'file-import',
-      items: [
-        {
-          id: 'From Curl',
-          name: 'From Curl',
-          icon: 'terminal',
-          action: () => setPasteCurlModalOpen(true),
-        },
-      ],
-    },
+    ...(aiFolderKind
+      ? []
+      : [
+          {
+            name: 'Import',
+            id: 'import',
+            icon: 'file-import' as IconName,
+            items: [
+              {
+                id: 'From Curl',
+                name: 'From Curl',
+                icon: 'terminal' as IconName,
+                action: () => setPasteCurlModalOpen(true),
+              },
+            ],
+          },
+        ]),
     {
       name: 'Actions',
       id: 'actions',
@@ -342,12 +370,17 @@ export const RequestGroupActionsDropdown = ({
           icon: 'trash',
           action: () => handleDeleteFolder(),
         },
-        {
-          id: 'RunFolder',
-          name: 'Run Folder',
-          icon: 'circle-play',
-          action: () => openRunner(),
-        },
+        // Nothing to run in a Skills folder.
+        ...(aiFolderKind === 'skills'
+          ? []
+          : [
+              {
+                id: 'RunFolder',
+                name: 'Run Folder',
+                icon: 'circle-play' as IconName,
+                action: () => openRunner(),
+              },
+            ]),
       ],
     },
     ...(actionPlugins.length > 0

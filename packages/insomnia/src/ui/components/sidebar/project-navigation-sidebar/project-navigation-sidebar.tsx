@@ -18,7 +18,7 @@ import { href, useNavigate, useParams, useSearchParams } from 'react-router';
 import * as reactUse from 'react-use';
 
 import { Button as BasicButton } from '~/basic-components/button';
-import { isSkillsFolder } from '~/common/ai-skills';
+import { type AiFolderKind, aiFolderKind, isSkillsFolder } from '~/common/ai-skills';
 import { workspaceChildrenKeys } from '~/common/app-data';
 import { filterCollection, flattenCollectionChildren } from '~/common/collection';
 import type { SortOrder } from '~/common/constants';
@@ -317,6 +317,18 @@ const ProjectNavigationSidebarInner = (
                 .filter(child => models.requestGroup.isRequestGroup(child.doc) && isSkillsFolder(child.doc))
                 .map(child => child.doc._id),
             );
+            // The synced AI folders (models, prompts, skills) and what is inside them: the folder menu only offers what
+            // belongs there.
+            const aiFolderKinds = new Map<string, AiFolderKind>();
+            collectionChildren.forEach(child => {
+              const kind = models.requestGroup.isRequestGroup(child.doc) ? aiFolderKind(child.doc) : undefined;
+              if (kind) {
+                aiFolderKinds.set(child.doc._id, kind);
+              }
+            });
+            const aiFolderKindFor = (child: (typeof collectionChildren)[number]) =>
+              aiFolderKinds.get(child.doc._id) ??
+              child.ancestors?.map(id => aiFolderKinds.get(id)).find(Boolean);
             // Show pinned collection children when the workspace is expanded
             const pinnedCollectionChildren = shouldHideCollectionChildren
               ? []
@@ -340,6 +352,7 @@ const ProjectNavigationSidebarInner = (
                 children: child.children,
                 ancestors: child.ancestors,
                 isSkill: child.ancestors?.some(id => skillFolderIds.has(id)) ?? false,
+                aiFolderKind: aiFolderKindFor(child),
                 doc: child.doc,
                 collapsed: child.collapsed,
                 hidden: false,
@@ -354,6 +367,7 @@ const ProjectNavigationSidebarInner = (
               items.push({
                 kind: 'collectionChild',
                 isSkill: child.ancestors?.some(id => skillFolderIds.has(id)) ?? false,
+                aiFolderKind: aiFolderKindFor(child),
                 organizationId,
                 project: project,
                 workspace: workspace as Workspace,
@@ -377,6 +391,7 @@ const ProjectNavigationSidebarInner = (
                   project,
                   workspace: workspace as Workspace,
                   requestGroup: child.doc as RequestGroup,
+                  aiFolderKind: aiFolderKindFor(child),
                   doc: { _id: `empty-folder-${child.doc._id}`, name: '' },
                   hidden: child.collapsed,
                   level: child.level,

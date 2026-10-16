@@ -12,6 +12,21 @@ export const skillsFolderKey = (gatewayId: string) => `ai:${gatewayId}:skills`;
 export const isSkillsFolder = (group: { konnectRouteId?: string | null }) =>
   SKILLS_FOLDER_KEY.test(group.konnectRouteId ?? '');
 
+/** The three folders sync creates in the AI Gateway projects; each holds one kind of thing (see the sidebar menus). */
+export type AiFolderKind = 'models' | 'prompts' | 'skills';
+
+/** The kind of a synced AI Gateway folder (`Routes and Models`, `Prompts`, `Skills`), or undefined for any other folder. */
+export const aiFolderKind = (group: { konnectRouteId?: string | null }): AiFolderKind | undefined => {
+  const key = group.konnectRouteId ?? '';
+  if (SKILLS_FOLDER_KEY.test(key)) {
+    return 'skills';
+  }
+  if (/^ai:.+:prompts$/.test(key)) {
+    return 'prompts';
+  }
+  return /^ai:.+:root$/.test(key) ? 'models' : undefined;
+};
+
 /** True when the request sits anywhere beneath a Skills folder. `docs` is the collection's folders (any order). */
 export const isSkillRequest = (
   request: { parentId: string },

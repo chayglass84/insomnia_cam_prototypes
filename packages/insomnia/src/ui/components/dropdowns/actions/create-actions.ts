@@ -1,6 +1,7 @@
 import type { IconName, IconProp } from '@fortawesome/fontawesome-svg-core';
-import type { WorkspaceScope } from 'insomnia-data';
+import type { Request, WorkspaceScope } from 'insomnia-data';
 
+import type { AiFolderKind } from '~/common/ai-skills';
 import type { CreateRequestType } from '~/ui/hooks/use-request';
 
 export interface ActionItem {
@@ -116,4 +117,34 @@ export const createRequestOrFolderActionItems = ({
   ];
 
   return folderFirst ? [folderItem, ...requestItems] : [...requestItems, folderItem];
+};
+
+/**
+ * Prototype (3593AI): the one request each synced AI folder takes (a model is an SSE route request, a prompt an SSE
+ * request, a skill a request holding Markdown). Shared by every menu that can create inside those folders.
+ */
+export const AI_FOLDER_REQUEST_OPTIONS: Record<
+  AiFolderKind,
+  { id: string; name: string; type: CreateRequestType; req?: Partial<Request> }
+> = {
+  models: { id: 'New Model', name: 'New Model Request (SSE)', type: 'Event Stream' },
+  prompts: { id: 'New Prompt', name: 'New Prompt (SSE)', type: 'Event Stream' },
+  skills: { id: 'New Skill', name: 'New Skill', type: 'HTTP', req: { name: 'New Skill' } },
+};
+
+/** Subfolders plus the folder's own kind of request, and nothing else. */
+export const createAiFolderActionItems = ({
+  kind,
+  createFolder,
+  createRequest,
+}: {
+  kind: AiFolderKind;
+  createFolder: () => void;
+  createRequest: (requestType: CreateRequestType, req?: Partial<Request>) => void;
+}): ActionItem[] => {
+  const option = AI_FOLDER_REQUEST_OPTIONS[kind];
+  return [
+    { id: 'New Folder', name: 'New Folder', icon: 'folder', action: createFolder },
+    { id: option.id, name: option.name, icon: 'plus-circle', action: () => createRequest(option.type, option.req) },
+  ];
 };
