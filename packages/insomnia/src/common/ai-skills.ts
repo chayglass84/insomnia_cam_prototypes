@@ -84,7 +84,7 @@ export const applySkillsToChatBody = (
 export const CONCISE_SKILL_PROMPT_NAME = 'Test the Concise answers skill';
 export const CONCISE_SKILL_PROMPT_QUESTION = 'Explain how HTTP caching works.';
 export const CONCISE_SKILL_PROMPT_DESCRIPTION =
-  'Send this as is, then check **Concise answers** on the Skills tab and send again. The test passes only when the answer is under 80 words.';
+  'Send this as is, then check **Concise answers** on the Skills tab and send again. The first test counts words. The second asks the judge (pick one on the collection\'s Judge tab), which also sees the skill the model was given, so it fails when the skill is missing or ignored.';
 export const CONCISE_SKILL_AFTER_RESPONSE_SCRIPT = `insomnia.test('Answers in under 80 words', () => {
   const body = insomnia.response.json();
   // Anthropic-format models return content blocks; OpenAI-format models return choices.
@@ -94,5 +94,18 @@ export const CONCISE_SKILL_AFTER_RESPONSE_SCRIPT = `insomnia.test('Answers in un
   const words = text.trim().split(/\\s+/).filter(Boolean).length;
 
   insomnia.expect(words, \`answered in \${words} words\`).to.be.below(80);
+});
+
+// Needs a judge: pick one on the collection's Judge tab. The judge sees the question, the answer and the system
+// prompt (which includes any checked skills), so the first criterion fails when the skill was not applied.
+insomnia.test('Follows the Concise answers skill', async () => {
+  const verdict = await insomnia.judge([
+    'The instructions the model was given include a "Concise answers" skill',
+    'The first sentence answers the question directly, without restating it',
+    'No more than two sentences of explanation follow the first sentence',
+    'There is no closing summary or recap',
+  ]);
+  verdict.expectAllPassed();
+  return verdict;
 });
 `;

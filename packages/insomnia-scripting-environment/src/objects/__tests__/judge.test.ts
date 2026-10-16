@@ -5,6 +5,7 @@ import {
   combineJudgeReplies,
   extractAnswerText,
   extractQuestionText,
+  extractSystemText,
   type JudgeSend,
   MAX_JUDGE_RUNS,
   parseJudgeReply,
@@ -60,6 +61,30 @@ describe('extractQuestionText', () => {
   });
 });
 
+describe('extractSystemText', () => {
+  it('reads an Anthropic top-level system, as text or blocks', () => {
+    expect(extractSystemText(JSON.stringify({ system: 'be brief', messages: [] }))).toBe('be brief');
+    expect(extractSystemText(JSON.stringify({ system: [{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }] }))).toBe('ab');
+  });
+
+  it('reads OpenAI system and developer messages', () => {
+    const body = JSON.stringify({
+      messages: [
+        { role: 'system', content: 'sys' },
+        { role: 'user', content: 'hi' },
+        { role: 'developer', content: 'dev' },
+      ],
+    });
+    expect(extractSystemText(body)).toBe('sys\n\ndev');
+  });
+
+  it('is empty when there is none or the body is not chat JSON', () => {
+    expect(extractSystemText(JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] }))).toBe('');
+    expect(extractSystemText('nope')).toBe('');
+    expect(extractSystemText()).toBe('');
+  });
+});
+
 describe('buildJudgeRequestBody', () => {
   it('numbers the criteria, includes question and answer, and turns streaming off', () => {
     const body = JSON.parse(buildJudgeRequestBody({ question: 'Q?', answer: 'A.', criteria, options }));
@@ -68,6 +93,18 @@ describe('buildJudgeRequestBody', () => {
     expect(body.messages[1].content).toContain('Q?');
     expect(body.messages[1].content).toContain('A.');
     expect(body.messages[1].content).toContain('1. five bullets\n2. concise');
+  });
+
+  it('shows the instructions the model was given before the question, only when there are some', () => {
+    const withSystem = JSON.parse(
+      buildJudgeRequestBody({ question: 'Q?', answer: 'A.', criteria, options, systemPrompt: '## Skill: Concise' }),
+    );
+    const content: string = withSystem.messages[1].content;
+    expect(content).toContain('Instructions the model was given:\n---\n## Skill: Concise');
+    expect(content.indexOf('Instructions the model was given')).toBeLessThan(content.indexOf('Question:'));
+
+    const without = JSON.parse(buildJudgeRequestBody({ question: 'Q?', answer: 'A.', criteria, options }));
+    expect(without.messages[1].content).not.toContain('Instructions the model was given');
   });
 
   it('keeps the template body (model, params) and forces streaming off, dropping stream_options', () => {

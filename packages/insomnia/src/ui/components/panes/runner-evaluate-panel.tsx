@@ -16,6 +16,9 @@ interface Props {
   selectedModelIds: string[] | null;
   onModelsChange: (ids: string[]) => void;
   /** Skills in the prompts project's Skills folder; empty hides the section. */
+  /** What the Judge tab is set to: a model label, the name of an older request-based judge, or null for none. */
+  judgeLabel: string | null;
+  onOpenJudgeTab: () => void;
   skills: { id: string; name: string }[];
   selectedSkillIds: string[];
   onSkillsChange: (ids: string[]) => void;
@@ -59,6 +62,8 @@ export const RunnerEvaluatePanel: FC<Props> = ({
   models,
   selectedModelIds,
   onModelsChange,
+  judgeLabel,
+  onOpenJudgeTab,
   skills,
   selectedSkillIds,
   onSkillsChange,
@@ -186,6 +191,26 @@ export const RunnerEvaluatePanel: FC<Props> = ({
             onChange={onModelsChange}
             disabled={disabled}
           />
+        </div>
+      </section>
+
+      <section className="flex flex-col gap-2">
+        <h3 className="text-sm font-bold text-(--hl) uppercase">Judge</h3>
+        <div className="flex flex-col gap-1 pl-4">
+          <span className={judgeLabel ? 'font-semibold' : 'text-(--hl)'}>{judgeLabel ?? 'None chosen'}</span>
+          <ul className="list-disc pl-5 text-xs text-(--hl)">
+            <li>
+              Grades replies for tests that call <code>insomnia.judge()</code>.
+            </li>
+            <li>
+              Choose it on the{' '}
+              <Button className={linkButton} onPress={onOpenJudgeTab}>
+                Judge tab
+              </Button>
+              .
+            </li>
+            <li>It can be one of the models above, but a model grading its own replies is not best practice.</li>
+          </ul>
         </div>
       </section>
     </div>
