@@ -39,7 +39,7 @@ import {
   tryToTransformRequestWithPlugins,
 } from '~/network/network';
 import { AnalyticsEvent, type ImportAttribution, importAttributionKey } from '~/ui/analytics';
-import { bodyTextWithRequestSkills } from '~/ui/utils/apply-request-skills';
+import { applyRequestSkills } from '~/ui/utils/apply-request-skills';
 import { recordAction } from '~/ui/utils/record-action';
 import { createFetcherSubmitHook } from '~/ui/utils/router';
 
@@ -176,7 +176,7 @@ export const sendActionImplementation = async (options: {
     };
   }
   // Prototype (3593AI): add the request's checked skills to its system prompt for this send only (nothing is saved).
-  const bodyWithSkills = await bodyTextWithRequestSkills(
+  const { bodyText: bodyWithSkills, skillNames: appliedSkillNames } = await applyRequestSkills(
     aiSkillIds ? { ...requestData.request, aiSkillIds } : requestData.request,
     requestData.workspace.konnectAiGatewayModels,
   );
@@ -377,13 +377,17 @@ export const sendActionImplementation = async (options: {
       }
     }
   }
-  const responsePatch = postMutatedContext
-    ? {
-        ...baseResponsePatch,
-        // both pre-request and after-response test results are collected
-        requestTestResults: [...preTestResults, ...postTestResults],
-      }
-    : baseResponsePatch;
+  const responsePatch = {
+    ...(postMutatedContext
+      ? {
+          ...baseResponsePatch,
+          // both pre-request and after-response test results are collected
+          requestTestResults: [...preTestResults, ...postTestResults],
+        }
+      : baseResponsePatch),
+    // Prototype (3593AI): remember which skills this reply was sent with (chat header chip). Gateway workspaces only.
+    ...(requestData.workspace.konnectAiGatewayModels ? { aiSkillNames: appliedSkillNames } : {}),
+  };
 
   if (!shouldWriteToFile) {
     const response = await services.response.create(responsePatch, requestData.settings.maxHistoryResponses);

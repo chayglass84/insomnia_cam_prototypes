@@ -4,6 +4,7 @@ import type { BaseModel } from './base-types';
 import type { RequestTestResult } from './runner-test-result';
 
 export const name = 'Response';
+export const optionalKeys = ['aiSkillNames'];
 
 export const type = 'Response';
 
@@ -45,6 +46,8 @@ export interface BaseResponse {
   settingStoreCookies: boolean | null;
   settingSendCookies: boolean | null;
   requestTestResults: RequestTestResult[];
+  /** Prototype (3593AI): names of the skills added to the system prompt of this send. Absent on older responses. */
+  aiSkillNames?: string[] | null;
 }
 
 export type Response = BaseModel & BaseResponse;

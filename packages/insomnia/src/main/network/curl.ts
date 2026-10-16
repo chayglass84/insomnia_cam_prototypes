@@ -110,12 +110,14 @@ interface OpenCurlRequestOptions {
   workspaceId: string;
   renderedRequest: RenderedRequest;
   initialPayload?: string;
+  /** Prototype (3593AI): skills added to this connection's system prompt, stored on the response. */
+  aiSkillNames?: string[];
 }
 const openCurlConnection = async (
   _event: Electron.IpcMainInvokeEvent,
   options: OpenCurlRequestOptions,
 ): Promise<void> => {
-  const { workspaceId, renderedRequest: req } = options;
+  const { workspaceId, renderedRequest: req, aiSkillNames } = options;
   const requestId = req._id;
   const existingConnection = CurlConnections.get(requestId);
 
@@ -257,6 +259,7 @@ const openCurlConnection = async (
           settingSendCookies: req.settingSendCookies,
           settingStoreCookies: req.settingStoreCookies,
           bodyCompression: null,
+          ...(aiSkillNames ? { aiSkillNames } : {}),
         };
         const settings = await services.settings.get();
         const res = await services.response.create(responsePatch, settings.maxHistoryResponses);
