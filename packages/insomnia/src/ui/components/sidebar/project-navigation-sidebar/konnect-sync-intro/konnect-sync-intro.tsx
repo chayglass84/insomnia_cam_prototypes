@@ -12,11 +12,18 @@ export const KonnectSyncIntro = ({ onConfigure }: KonnectSyncIntroProps) => {
       <img src={bgUrl} alt="" className="w-full object-cover" />
       <div className="flex flex-col items-center gap-5 px-4 pb-10">
         <span className="rounded-sm border border-[#b5f021] px-2 py-0.5 text-xs font-semibold text-[#b5f021]">NEW</span>
-        <div className="flex flex-col gap-1">
-          <h3 className="text-base leading-snug font-bold">Auto-sync your gateway service routes</h3>
-          <p className="text-sm text-[#aaa]">
-            Get right into testing your gateway configuration in Insomnia with the new Konnect platform integration.
-          </p>
+        <div className="flex flex-col gap-3">
+          <h3 className="text-base leading-snug font-bold">Bring your Kong gateways into Insomnia</h3>
+          <div className="flex flex-col gap-2 text-sm text-[#aaa]">
+            <p>
+              <strong className="text-white">AI Gateway:</strong> debug your routes and models, test prompts and skills
+              across models, and compare results, tokens and cost.
+            </p>
+            <p>
+              <strong className="text-white">API Gateway:</strong> auto-sync your control plane routes and test your
+              gateway configuration.
+            </p>
+          </div>
         </div>
         <Button
           onPress={onConfigure}

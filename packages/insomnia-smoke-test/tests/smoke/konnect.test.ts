@@ -2,10 +2,10 @@ import { expect } from '@playwright/test';
 
 import { test } from '../../playwright/test';
 
-test.describe('Control Planes organization', () => {
+test.describe('AI Gateway & API Gateway organization', () => {
   test('shows intro card without a PAT, configure it, then sync', async ({ page }) => {
     await page.getByRole('button', { name: 'Organizations' }).click();
-    await page.getByRole('option', { name: 'Control Planes' }).click();
+    await page.getByRole('option', { name: 'AI Gateway & API Gateway' }).click();
     await expect.soft(page.getByText('Auto-sync your gateway service routes')).toBeVisible();
 
     await page.getByRole('button', { name: 'Configure' }).click();
@@ -31,10 +31,10 @@ test.describe('Control Planes organization', () => {
       await request.post('http://127.0.0.1:4010/v1/test-utils/user/entitlements', { data: {} });
     });
 
-    test('hides the Control Planes organization', async ({ page }) => {
+    test('hides the AI Gateway & API Gateway organization', async ({ page }) => {
       await page.reload({ waitUntil: 'networkidle' });
       await page.getByRole('button', { name: 'Organizations' }).click();
-      await expect.soft(page.getByRole('option', { name: 'Control Planes' })).toBeHidden();
+      await expect.soft(page.getByRole('option', { name: 'AI Gateway & API Gateway' })).toBeHidden();
     });
   });
 });

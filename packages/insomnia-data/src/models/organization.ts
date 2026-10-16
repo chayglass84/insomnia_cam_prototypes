@@ -4,7 +4,7 @@ export const SCRATCHPAD_ORGANIZATION_ID = 'org_scratchpad';
 export const isScratchpadOrganizationId = (organizationId: string) => organizationId === SCRATCHPAD_ORGANIZATION_ID;
 
 export const KONNECT_ORGANIZATION_ID_PREFIX = 'org_konnect_';
-export const KONNECT_ORGANIZATION_NAME = 'Control Planes';
+export const KONNECT_ORGANIZATION_NAME = 'AI Gateway & API Gateway';
 
 // The Konnect organization is local-only, but the database is not partitioned per user, so the
 // account id is baked into the id to keep one account's Konnect data out of another's.
