@@ -8,7 +8,6 @@ import { formatUsdPerMillion } from '../../../common/llm-cost';
 import { findCatalogModelsByPath, groupModelsByPath, isRotatingModel, modelTargets } from '../../../konnect/transform';
 import { useWorkspaceLoaderData } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId';
 import { useTabNavigate } from '../../hooks/use-insomnia-tab';
-import { Icon } from '../icon';
 
 /** `$5.00 / $25.00` per 1M tokens, or an em dash when Konnect has no price for the model. */
 const formatPricePerMillion = (price: Pick<AiGatewayModel, 'inputPerToken' | 'outputPerToken'>) =>
@@ -22,11 +21,6 @@ export const AiGatewayModelsPane: FC<{ models: AiGatewayModel[] }> = ({ models }
   const { organizationId } = useParams() as { organizationId: string };
   const { activeProject, activeWorkspace, collection } = useWorkspaceLoaderData()!;
   const tabNavigate = useTabNavigate();
-  const openRunner = () =>
-    tabNavigate(
-      { organization: organizationId, project: activeProject, workspace: activeWorkspace, item: activeWorkspace },
-      { shouldNavigate: true, asRunner: true },
-    );
 
   // A request belongs to a route when its URL path resolves to that route's models (same rule the Policies tab uses).
   const requestsByRoute = new Map<string, Request[]>();
@@ -56,12 +50,6 @@ export const AiGatewayModelsPane: FC<{ models: AiGatewayModel[] }> = ({ models }
             {groups.length === 1 ? 'route' : 'routes'}. Synced from Konnect; re-sync to refresh.
           </p>
         </div>
-        <Button
-          onPress={openRunner}
-          className="flex shrink-0 items-center gap-2 rounded-sm bg-(--color-surprise) px-3 py-1.5 text-sm text-(--color-font-surprise) hover:bg-(--color-surprise)/90 focus:bg-(--color-surprise)/90"
-        >
-          <Icon icon="play" /> Model Evaluator
-        </Button>
       </div>
       {groups.map(([path, pathModels]) => (
         <section key={path} className="rounded-md border border-solid border-(--hl-md)">

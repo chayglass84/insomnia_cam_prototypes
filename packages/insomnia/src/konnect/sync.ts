@@ -917,7 +917,7 @@ async function ensureAiGatewayPromptsProject(
   organizationId: string,
   gatewayModels: AiGatewayModel[],
 ): Promise<void> {
-  const promptsName = `${gatewayName} prompts`;
+  const promptsName = `Testing for ${gatewayName}`;
   const orgProjects = (await insoservices.project.list({ parentId: organizationId })).sort(
     (a, b) => a.created - b.created,
   );
@@ -1045,7 +1045,9 @@ async function syncAiGateway(
 ): Promise<void> {
   const { pat, organizationId, signal, onProgress } = syncCtx;
   acc.aiGatewayCounts.total++;
-  const name = gateway.display_name || gateway.name;
+  const gatewayName = gateway.display_name || gateway.name;
+  // The gateway project holds Konnect's models and prices; the testing project beside it is named "Testing for ...".
+  const name = `Models for ${gatewayName}`;
 
   let project = existingProjects.get(gateway.id);
   if (project) {
@@ -1109,7 +1111,7 @@ async function syncAiGateway(
     });
   }
   await ensureAiGatewayTree(workspace._id, gateway.id, models);
-  await ensureAiGatewayPromptsProject(gateway, name, project, organizationId, models);
+  await ensureAiGatewayPromptsProject(gateway, gatewayName, project, organizationId, models);
 
   const workspaceMeta = await insoservices.workspaceMeta.getOrCreateByParentId(workspace._id);
   if (workspaceMeta.activeGlobalEnvironmentId !== environmentId) {
