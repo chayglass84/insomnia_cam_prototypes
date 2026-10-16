@@ -10,6 +10,7 @@ interface State {
   yesText: string;
   noText: string;
   color: string;
+  wide?: boolean;
   onDone?: (success: boolean) => Promise<void>;
   onHide?: () => void;
 }
@@ -21,6 +22,8 @@ export interface AskModalOptions {
   yesText?: string;
   noText?: string;
   color?: string;
+  /** Wider dialog, for content laid out in columns. */
+  wide?: boolean;
 }
 export interface AskModalHandle {
   show: (options: AskModalOptions) => void;
@@ -43,13 +46,14 @@ export const AskModal = forwardRef<AskModalHandle, ModalProps>((_, ref) => {
       hide: () => {
         modalRef.current?.hide();
       },
-      show: ({ title, message, onDone, onHide, yesText, noText, color }) => {
+      show: ({ title, message, onDone, onHide, yesText, noText, color, wide }) => {
         setState({
           title: title || 'Confirm',
           message: message || 'No message provided',
           yesText: yesText || 'Yes',
           noText: noText || 'No',
           color: color || 'surprise',
+          wide,
           onDone,
           onHide,
         });
@@ -58,9 +62,9 @@ export const AskModal = forwardRef<AskModalHandle, ModalProps>((_, ref) => {
     }),
     [],
   );
-  const { message, title, yesText, noText, color, onDone, onHide } = state;
+  const { message, title, yesText, noText, color, wide, onDone, onHide } = state;
   return (
-    <Modal ref={modalRef} onHide={onHide}>
+    <Modal ref={modalRef} onHide={onHide} wide={wide}>
       <ModalHeader>{title || 'Confirm?'}</ModalHeader>
       <ModalBody className="wide pad">{message}</ModalBody>
       <ModalFooter>

@@ -45,7 +45,7 @@ export const KonnectOrgMigrationModal = ({
             </div>
 
             <p className="text-sm text-(--hl)">
-              Konnect data is now stored once per account in the <strong>Control Planes</strong> organization, but this
+              Konnect data is now stored once per account in the <strong>AI Gateway & API Gateway</strong> organization, but this
               computer has Konnect data under more than one organization. Pick the one you want to keep Insomnia
               connected to.
             </p>

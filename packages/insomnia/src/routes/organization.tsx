@@ -252,7 +252,7 @@ const Component = () => {
   const isKonnectOrganization = models.organization.isKonnectOrganizationId(organizationId);
 
   // One-time nudge pointing users who already sync Konnect to the organization dropdown, where
-  // their control planes now live under "Control Planes" instead of the removed sidebar tab.
+  // their control planes now live under "AI Gateway & API Gateway" instead of the removed sidebar tab.
   // Must wait for the migration-conflict check so it never races or overlaps the migration modal
   // (z-50 vs. the modal's z-10 backdrop — it would render on top of an unresolved choice otherwise).
   const [orgSelectNode, setOrgSelectNode] = useState<HTMLDivElement | null>(null);

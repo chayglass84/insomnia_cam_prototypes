@@ -160,27 +160,62 @@ export function useKonnectSyncBar({
               </div>
             </div>
             <p className="text-sm text-(--hl)">
-              Sync the latest changes from your Konnect organization into Insomnia. This will:
+              Sync the latest changes from your Konnect organization into Insomnia. Your local custom changes are never
+              pushed to Konnect.
             </p>
-            <ul className="flex flex-col gap-1 text-sm">
-              <li className="flex items-start gap-2">
-                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-(--color-font)" />
-                Keep your local custom changes (never pushed to Konnect)
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-(--color-font)" />
-                Update existing resources to match Konnect
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-(--color-font)" />
-                Remove collections or environments tied to control planes, services, or routes deleted in Konnect
-              </li>
-            </ul>
+            <div className="grid grid-cols-2 gap-6">
+              <section className="flex flex-col gap-2">
+                <h4 className="text-sm font-bold">AI Gateway</h4>
+                <ul className="flex flex-col gap-1.5 text-sm">
+                  <li className="flex items-start gap-2">
+                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-(--color-font)" />
+                    <span>
+                      <strong>Configure and debug:</strong> see your gateway's routes, models, prices and policies, and
+                      send requests through them
+                    </span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-(--color-font)" />
+                    <span>
+                      <strong>Test prompts across models:</strong> compare results, tokens and cost
+                    </span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-(--color-font)" />
+                    <span>
+                      <strong>Test skills:</strong> see whether a skill helps a model
+                    </span>
+                  </li>
+                </ul>
+                <p className="text-xs text-(--hl)">
+                  Each gateway becomes <strong>Models for …</strong> (refreshed on every sync) and{' '}
+                  <strong>Testing for …</strong> (your prompts and skills, created once and never overwritten).
+                </p>
+              </section>
+              <section className="flex flex-col gap-2">
+                <h4 className="text-sm font-bold">API Gateway</h4>
+                <ul className="flex flex-col gap-1.5 text-sm">
+                  <li className="flex items-start gap-2">
+                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-(--color-font)" />
+                    Keep your local custom changes (never pushed to Konnect)
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-(--color-font)" />
+                    Update existing resources to match Konnect
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-(--color-font)" />
+                    Remove collections or environments tied to control planes, services, or routes deleted in Konnect
+                  </li>
+                </ul>
+              </section>
+            </div>
           </div>
         ),
         yesText: 'Sync Now',
         noText: 'Cancel',
         color: 'surprise',
+        wide: true,
         onDone: async (confirmed: boolean) => {
           if (confirmed) {
             await syncKonnectProjectsAndNotify();
