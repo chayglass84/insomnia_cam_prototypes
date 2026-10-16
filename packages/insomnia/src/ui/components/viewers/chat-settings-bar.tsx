@@ -1,5 +1,5 @@
 import { models } from 'insomnia-data';
-import React, { type FC, useRef } from 'react';
+import React, { type FC, useRef, useState } from 'react';
 import {
   Button,
   ComboBox,
@@ -17,6 +17,7 @@ import { Icon } from '~/ui/components/icon';
 import { isSkillRequest } from '../../../common/ai-skills';
 import type { ChatTotals } from '../../../common/chat-totals';
 import { formatUsd } from '../../../common/llm-cost';
+import { formatTokenUsage } from '../../../common/runner-feedback';
 import { getAiGatewayModelSuggestions } from '../../../konnect/transform';
 import { useWorkspaceLoaderData } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId';
 import { useRequestLoaderData } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request.$requestId';
@@ -113,32 +114,28 @@ const SkillsChip: FC = () => {
 const fieldClassName =
   'rounded-xs border border-solid border-(--hl-sm) bg-(--color-bg) px-2 py-1 text-xs text-(--color-font) outline-hidden focus:border-(--hl)';
 
-/** The conversation's running totals, kept prominent in the bar: tokens in/out (prompt and replies) and cost. */
+/** The conversation's running totals, right-aligned and prominent like a model heading in the evaluator results. */
 const TotalsBadge: FC<{ totals: ChatTotals; showCost: boolean }> = ({ totals, showCost }) => (
   <span
-    className="flex flex-wrap items-center gap-x-1.5 rounded-sm bg-(--hl-sm) px-2 py-0.5 text-(--color-font)"
+    className="ml-auto flex flex-wrap items-baseline justify-end gap-x-2 text-sm text-(--color-font) tabular-nums"
     data-testid="chat-totals"
     title="Summed over every reply. Each reply's input already includes the initial prompt and earlier turns, which is what the provider bills."
   >
-    <Icon icon="coins" />
-    <span className="font-semibold">{totals.replies > 1 ? `Total (${totals.replies} replies):` : 'Total:'}</span>
-    <span className="tabular-nums">
-      {totals.inputTokens.toLocaleString()} in / {totals.outputTokens.toLocaleString()} out
+    <span>
+      {totals.replies > 1 ? `Total Tokens (${totals.replies} replies): ` : 'Total Tokens: '}
+      <strong>{formatTokenUsage(totals)}</strong>
     </span>
-    <span className="text-(--hl) tabular-nums">({(totals.inputTokens + totals.outputTokens).toLocaleString()})</span>
     {showCost &&
       (totals.costUsd === null ? (
-        <span className="text-(--hl)">· cost n/a</span>
+        <span className="text-(--hl)">· Total Cost: n/a</span>
       ) : (
-        <span className="font-semibold">
-          · {formatUsd(totals.costUsd)}
-          {totals.unpricedReplies > 0 && (
-            <span className="font-normal text-(--hl)"> + {totals.unpricedReplies} unpriced</span>
-          )}
+        <span>
+          · Total Cost: <strong>{formatUsd(totals.costUsd)}</strong>
+          {totals.unpricedReplies > 0 && <span className="text-(--hl)"> + {totals.unpricedReplies} unpriced</span>}
         </span>
       ))}
     {totals.missingReplies > 0 && (
-      <span className="text-yellow-500">
+      <span className="text-xs text-yellow-500">
         · {totals.missingReplies} earlier {totals.missingReplies === 1 ? 'reply' : 'replies'} not counted (usage
         unknown)
       </span>
@@ -164,10 +161,16 @@ export const ChatSettingsBar: FC<Props> = ({
   // In a synced AI Gateway workspace, suggest the `model` values the request's route actually matches on
   // (e.g. `opus`) instead of the generic provider model names, which the gateway would 404 on.
   const gatewayModels = useWorkspaceLoaderData()?.activeWorkspace.konnectAiGatewayModels;
+  // Prototype (3593AI): a prompt's model is chosen with the URL bar's model picker (which also sets the route path),
+  // so the body's model is shown here but not editable; editing it alone could leave it out of step with the route.
+  const isPrompt = Boolean(useWorkspaceLoaderData()?.activeProject.konnectAiGatewayPromptsFor);
   const requestUrl = useRequestLoaderData()?.activeRequest?.url;
   const modelSuggestions =
     (gatewayModels && requestUrl ? getAiGatewayModelSuggestions(requestUrl, gatewayModels) : null) ??
     MODEL_SUGGESTIONS[format];
+
+  // The advanced fields stay mounted (just hidden) so their values are still read when anything is committed.
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const modelRef = useRef<HTMLInputElement>(null);
   const systemRef = useRef<HTMLTextAreaElement>(null);
@@ -202,6 +205,7 @@ export const ChatSettingsBar: FC<Props> = ({
     }
   };
 
+  const cutOff = stopReason === 'max_tokens' || stopReason === 'length';
   const totalsBadge = totals ? <TotalsBadge totals={totals} showCost={Boolean(gatewayModels?.length)} /> : null;
 
   if (!onApply) {
@@ -253,95 +257,67 @@ export const ChatSettingsBar: FC<Props> = ({
       className="flex shrink-0 flex-col gap-1.5 border-b border-solid border-(--hl-md) bg-(--hl-xs) px-3 py-2 text-xs text-(--hl)"
     >
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
-        <ComboBox
-          aria-label="Model"
-          allowsCustomValue
-          defaultInputValue={values.model ?? ''}
-          defaultItems={modelSuggestions.map(model => ({ id: model }))}
-          onSelectionChange={key => commit({ model: key ? String(key) : undefined })}
-          menuTrigger="focus"
-        >
-          <Group className="flex w-44 items-center gap-1 rounded-xs border border-solid border-(--hl-sm) bg-(--color-bg) pl-2 text-(--color-font) focus-within:border-(--hl)">
-            <Icon icon="robot" />
-            <Input
-              ref={modelRef}
-              onBlur={() => commit()}
-              onKeyDown={commitOnEnter}
-              placeholder="model"
-              className="w-full bg-transparent py-1 outline-hidden"
-            />
-            <Button className="flex items-center px-1 py-1">
-              <Icon icon="caret-down" />
-            </Button>
-          </Group>
-          <Popover className="w-(--trigger-width)">
-            <ListBox
-              className="max-h-60 overflow-y-auto rounded-md border border-solid border-(--hl-sm) bg-(--color-bg) py-1 text-xs shadow-lg select-none focus:outline-hidden"
-              aria-label="Suggested models"
-            >
-              {(item: { id: string }) => (
-                <ListBoxItem
-                  id={item.id}
-                  textValue={item.id}
-                  className="flex h-(--line-height-xs) w-full items-center px-(--padding-md) whitespace-nowrap text-(--color-font) transition-colors hover:bg-(--hl-sm) focus:bg-(--hl-xs) focus:outline-hidden aria-selected:font-bold data-focused:bg-(--hl-xs)"
-                >
-                  {item.id}
-                </ListBoxItem>
-              )}
-            </ListBox>
-          </Popover>
-        </ComboBox>
+        {isPrompt ? (
+          values.model && (
+            <span className="flex items-center gap-1">
+              <Icon icon="robot" />
+              {values.model}
+            </span>
+          )
+        ) : (
+          <ComboBox
+            aria-label="Model"
+            allowsCustomValue
+            defaultInputValue={values.model ?? ''}
+            defaultItems={modelSuggestions.map(model => ({ id: model }))}
+            onSelectionChange={key => commit({ model: key ? String(key) : undefined })}
+            menuTrigger="focus"
+          >
+            <Group className="flex w-44 items-center gap-1 rounded-xs border border-solid border-(--hl-sm) bg-(--color-bg) pl-2 text-(--color-font) focus-within:border-(--hl)">
+              <Icon icon="robot" />
+              <Input
+                ref={modelRef}
+                onBlur={() => commit()}
+                onKeyDown={commitOnEnter}
+                placeholder="model"
+                className="w-full bg-transparent py-1 outline-hidden"
+              />
+              <Button className="flex items-center px-1 py-1">
+                <Icon icon="caret-down" />
+              </Button>
+            </Group>
+            <Popover className="w-(--trigger-width)">
+              <ListBox
+                className="max-h-60 overflow-y-auto rounded-md border border-solid border-(--hl-sm) bg-(--color-bg) py-1 text-xs shadow-lg select-none focus:outline-hidden"
+                aria-label="Suggested models"
+              >
+                {(item: { id: string }) => (
+                  <ListBoxItem
+                    id={item.id}
+                    textValue={item.id}
+                    className="flex h-(--line-height-xs) w-full items-center px-(--padding-md) whitespace-nowrap text-(--color-font) transition-colors hover:bg-(--hl-sm) focus:bg-(--hl-xs) focus:outline-hidden aria-selected:font-bold data-focused:bg-(--hl-xs)"
+                  >
+                    {item.id}
+                  </ListBoxItem>
+                )}
+              </ListBox>
+            </Popover>
+          </ComboBox>
+        )}
         <SkillsChip />
-        {totalsBadge}
-      </div>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
         {isStreaming && (
           <span className="flex items-center gap-1 text-(--color-font)">
             <Icon icon="spinner" className="animate-spin" />
             Streaming…
           </span>
         )}
-        {supportsSamplingParams && (
-          <>
-            <label className="flex items-center gap-1">
-              <span>Temp</span>
-              <input
-                ref={temperatureRef}
-                defaultValue={values.temperature ?? ''}
-                onBlur={() => commit()}
-                onKeyDown={commitOnEnter}
-                type="number"
-                step="0.1"
-                min="0"
-                max="2"
-                placeholder="0.0–2.0"
-                aria-label="Temperature"
-                className={`${fieldClassName} w-16`}
-              />
-            </label>
-            <label className="flex items-center gap-1">
-              <span>Max tokens</span>
-              <input
-                ref={maxTokensRef}
-                defaultValue={values.maxTokens ?? ''}
-                onBlur={() => commit()}
-                onKeyDown={commitOnEnter}
-                type="number"
-                step="1"
-                min="1"
-                placeholder="default"
-                aria-label="Max tokens"
-                className={`${fieldClassName} w-24`}
-              />
-            </label>
-          </>
-        )}
-        {stopReason && (
-          <span className="flex items-center gap-1">
-            <span>Stop</span>
-            <span className="text-(--color-font)">{stopReason}</span>
+        {cutOff && (
+          <span className="flex items-center gap-1 text-(--color-warning)">
+            <Icon icon="triangle-exclamation" />
+            Cut off at max tokens
           </span>
         )}
+        {totalsBadge}
       </div>
       <label className="flex flex-col gap-1">
         <span>System prompt</span>
@@ -354,6 +330,59 @@ export const ChatSettingsBar: FC<Props> = ({
           className={`${fieldClassName} w-full resize-y italic`}
         />
       </label>
+      <div className="mt-[3px] flex flex-col gap-1.5">
+        <Button
+          onPress={() => setShowAdvanced(open => !open)}
+          aria-expanded={showAdvanced}
+          className="flex w-fit items-center gap-1 rounded-xs text-(--hl) hover:text-(--color-font)"
+        >
+          <Icon icon={showAdvanced ? 'caret-down' : 'caret-right'} />
+          Advanced
+        </Button>
+        <div className={showAdvanced ? 'flex flex-wrap items-center gap-x-4 gap-y-1' : 'hidden'}>
+          {supportsSamplingParams && (
+            <>
+              <label className="flex items-center gap-1">
+                <span>Temp</span>
+                <input
+                  ref={temperatureRef}
+                  defaultValue={values.temperature ?? ''}
+                  onBlur={() => commit()}
+                  onKeyDown={commitOnEnter}
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  max="2"
+                  placeholder="0.0–2.0"
+                  aria-label="Temperature"
+                  className={`${fieldClassName} w-16`}
+                />
+              </label>
+              <label className="flex items-center gap-1">
+                <span>Max tokens</span>
+                <input
+                  ref={maxTokensRef}
+                  defaultValue={values.maxTokens ?? ''}
+                  onBlur={() => commit()}
+                  onKeyDown={commitOnEnter}
+                  type="number"
+                  step="1"
+                  min="1"
+                  placeholder="default"
+                  aria-label="Max tokens"
+                  className={`${fieldClassName} w-24`}
+                />
+              </label>
+            </>
+          )}
+          {stopReason && (
+            <span className="flex items-center gap-1">
+              <span>Stop</span>
+              <span className="text-(--color-font)">{stopReason}</span>
+            </span>
+          )}
+        </div>
+      </div>
       {pendingNotice && (
         <div className="flex items-center justify-between gap-2 rounded-xs border border-solid border-(--color-warning) bg-(--color-bg) px-2 py-1 text-(--color-font)">
           <span className="flex items-center gap-1">
