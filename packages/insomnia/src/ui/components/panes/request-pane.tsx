@@ -115,6 +115,8 @@ export const RequestPane: FC<Props> = ({ environmentId, settings, onPaste }) => 
     Boolean(resolveKonnectRouteLink(activeRequest, activeWorkspace, activeProject)) ||
     Boolean(activeProject?.konnectAiGateway);
 
+  // Prototype (3593AI): prompts live in the local prompts project; Konnect plugins/policies don't apply to them.
+  const isPromptsProject = Boolean(activeProject?.konnectAiGatewayPromptsFor);
   const promptCatalog =
     activeProject?.konnectAiGatewayPromptsFor && activeWorkspace.konnectAiGatewayModels?.length
       ? activeWorkspace.konnectAiGatewayModels
@@ -236,17 +238,19 @@ export const RequestPane: FC<Props> = ({ environmentId, settings, onPaste }) => 
               </span>
             )}
           </Tab>
-          <Tab
-            className="flex h-full shrink-0 cursor-pointer items-center justify-between gap-2 px-3 py-1 text-(--hl) outline-hidden transition-colors duration-300 select-none hover:bg-(--hl-sm) hover:text-(--color-font) focus:bg-(--hl-sm) aria-selected:bg-(--hl-xs) aria-selected:text-(--color-font) aria-selected:hover:bg-(--hl-sm) aria-selected:focus:bg-(--hl-sm) data-focus-visible:ring-2 data-focus-visible:ring-(--hl-md) data-focus-visible:ring-inset"
-            id="plugins"
-          >
-            <span>{activeProject?.konnectAiGateway ? 'Konnect Policies' : 'Konnect Plugins'}</span>
-            {isKonnectLinked && (
-              <span className="flex h-6 min-w-6 items-center justify-center rounded-lg border border-solid border-(--hl) p-1 text-xs">
-                <span className="h-2 w-2 rounded-full bg-green-500" />
-              </span>
-            )}
-          </Tab>
+          {!isPromptsProject && (
+            <Tab
+              className="flex h-full shrink-0 cursor-pointer items-center justify-between gap-2 px-3 py-1 text-(--hl) outline-hidden transition-colors duration-300 select-none hover:bg-(--hl-sm) hover:text-(--color-font) focus:bg-(--hl-sm) aria-selected:bg-(--hl-xs) aria-selected:text-(--color-font) aria-selected:hover:bg-(--hl-sm) aria-selected:focus:bg-(--hl-sm) data-focus-visible:ring-2 data-focus-visible:ring-(--hl-md) data-focus-visible:ring-inset"
+              id="plugins"
+            >
+              <span>{activeProject?.konnectAiGateway ? 'Konnect Policies' : 'Konnect Plugins'}</span>
+              {isKonnectLinked && (
+                <span className="flex h-6 min-w-6 items-center justify-center rounded-lg border border-solid border-(--hl) p-1 text-xs">
+                  <span className="h-2 w-2 rounded-full bg-green-500" />
+                </span>
+              )}
+            </Tab>
+          )}
         </TabList>
         <TabPanel className="flex h-full w-full flex-1 flex-col overflow-y-auto" id="params">
           <div className="shrink-0 p-4">
@@ -481,15 +485,17 @@ export const RequestPane: FC<Props> = ({ environmentId, settings, onPaste }) => 
         <TabPanel className="w-full flex-1 overflow-hidden" id="skills">
           <RequestSkillsTab request={activeRequest} skills={skills} />
         </TabPanel>
-        <TabPanel className="w-full flex-1 overflow-hidden" id="plugins">
-          <ErrorBoundary key={uniqueKey} errorClassName="font-error pad text-center">
-            <RequestPluginsTab
-              activeRequest={activeRequest}
-              activeWorkspace={activeWorkspace}
-              activeProject={activeProject}
-            />
-          </ErrorBoundary>
-        </TabPanel>
+        {!isPromptsProject && (
+          <TabPanel className="w-full flex-1 overflow-hidden" id="plugins">
+            <ErrorBoundary key={uniqueKey} errorClassName="font-error pad text-center">
+              <RequestPluginsTab
+                activeRequest={activeRequest}
+                activeWorkspace={activeWorkspace}
+                activeProject={activeProject}
+              />
+            </ErrorBoundary>
+          </TabPanel>
+        )}
       </Tabs>
       {isRequestSettingsModalOpen && (
         <RequestSettingsModal request={activeRequest} onHide={() => setIsRequestSettingsModalOpen(false)} />

@@ -313,15 +313,18 @@ export const RequestUrlBar = forwardRef<RequestUrlBarHandle, Props>(
     return (
       <div className="flex w-full items-stretch justify-between self-stretch">
         {leading}
-        <div className="flex items-stretch p-1">
-          <MethodSelector
-            className="self-stretch"
-            ref={methodDropdownRef}
-            onChange={method => patchRequest(requestId, { method })}
-            method={method}
-            placement="bottom start"
-          />
-        </div>
+        {/* Prototype (3593AI): a prompt is always sent to a catalog model, so the verb is hidden while the model picker replaces the URL. */}
+        {!urlReplacement && (
+          <div className="flex items-stretch p-1">
+            <MethodSelector
+              className="self-stretch"
+              ref={methodDropdownRef}
+              onChange={method => patchRequest(requestId, { method })}
+              method={method}
+              placement="bottom start"
+            />
+          </div>
+        )}
         <div className="flex flex-1 items-center p-1">
           {urlReplacement ?? (
           <OneLineEditor
