@@ -41,6 +41,8 @@ export interface AiGatewayRunInfo {
   gatewayNote?: string;
   /** USD for this run, from the model's Konnect price at send time. Absent when no price is known. */
   costUsd?: number;
+  /** Names of the Evaluate tab's skills added to this request's system prompt. Absent when none were chosen. */
+  skills?: string[];
 }
 
 export interface RunnerResultPerRequest {

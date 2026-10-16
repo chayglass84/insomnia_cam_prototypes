@@ -2,6 +2,7 @@ import type { Request } from 'insomnia-data';
 import { models } from 'insomnia-data';
 import { useEffect, useMemo, useRef } from 'react';
 
+import { isSkillRequest } from '~/common/ai-skills';
 import { invariant } from '~/common/utils/invariant';
 import type { RequestRow } from '~/routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.runner';
 import { useRunnerContext } from '~/ui/context/app/runner-context';
@@ -18,12 +19,23 @@ export const useRunnerRequestList = (organizationId: string, targetFolderId: str
   const { collection, activeWorkspace } = useWorkspaceLoaderData()!;
   const entityMapRef = useRef(new Map<string, Child>());
 
+  // Prototype (3593AI): skills are requests under the prompts project's Skills folder; the Evaluate tab lists them
+  // separately instead of as prompts to run.
+  const { skills, folderDocs } = useMemo(() => {
+    const folderDocs = collection.map(item => item.doc).filter(isRequestGroup);
+    const skills = collection
+      .filter(item => isRequest(item.doc) && isSkillRequest(item.doc as Request, folderDocs))
+      .map(item => ({ id: item.doc._id, name: item.doc.name }));
+    return { skills, folderDocs };
+  }, [collection]);
+
   const requestRows: RequestRow[] = useMemo(() => {
     return collection
       .filter(item => {
         entityMapRef.current.set(item.doc._id, item);
         return isRequest(item.doc);
       })
+      .filter(item => !isSkillRequest(item.doc as Request, folderDocs))
       .map((item: Child) => {
         const ancestors: { id: string; name: string }[] = [];
         if (item.ancestors) {
@@ -54,7 +66,7 @@ export const useRunnerRequestList = (organizationId: string, targetFolderId: str
       })
       // The request chosen as the judge (Judge tab) grades the others; it is not one of the candidates.
       .filter(item => item.id !== activeWorkspace.aiJudge?.requestId);
-  }, [collection, targetFolderId, activeWorkspace.aiJudge?.requestId]);
+  }, [collection, folderDocs, targetFolderId, activeWorkspace.aiJudge?.requestId]);
 
   const { runnerStateMap, runnerStateRef, updateRunnerState } = useRunnerContext();
 
@@ -78,6 +90,7 @@ export const useRunnerRequestList = (organizationId: string, targetFolderId: str
   return {
     reqList: runnerStateMap[organizationId]?.[runnerId]?.reqList || [],
     requestRows,
+    skills,
     entityMap: entityMapRef.current,
   };
 };

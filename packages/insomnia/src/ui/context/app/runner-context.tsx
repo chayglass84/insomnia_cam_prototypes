@@ -18,6 +18,8 @@ interface RunnerState {
   reqList: RequestRow[];
   // AI Gateway evaluate tab (3593AI): model ids picked; null = untouched, which means all of them.
   selectedModelIds: string[] | null;
+  // AI Gateway evaluate tab (3593AI): skill request ids added to every prompt in the run; none by default.
+  selectedSkillIds: string[];
 }
 
 type OrgRunnerStateMap = Record<string, Partial<RunnerState>>;

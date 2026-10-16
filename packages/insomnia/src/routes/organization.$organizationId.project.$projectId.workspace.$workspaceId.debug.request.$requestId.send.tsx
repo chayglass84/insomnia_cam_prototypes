@@ -127,6 +127,8 @@ export const sendActionImplementation = async (options: {
   runtime?: SendActionRuntime;
   /** Collection runner only: retarget this gateway chat request at another catalog model for this send. */
   aiGatewayModelId?: string;
+  /** Collection runner only: skills to add to this send, replacing the request's own `aiSkillIds` (even when empty). */
+  aiSkillIds?: string[];
 }): Promise<{ nextRequestIdOrName: string | undefined; skipped?: boolean } | undefined> => {
   const {
     requestId,
@@ -139,6 +141,7 @@ export const sendActionImplementation = async (options: {
     transientVariables: nullableTransientVariables,
     runtime = defaultSendActionRuntime,
     aiGatewayModelId,
+    aiSkillIds,
   } = options;
 
   window.main.startExecution({ requestId });
@@ -174,7 +177,7 @@ export const sendActionImplementation = async (options: {
   }
   // Prototype (3593AI): add the request's checked skills to its system prompt for this send only (nothing is saved).
   const bodyWithSkills = await bodyTextWithRequestSkills(
-    requestData.request,
+    aiSkillIds ? { ...requestData.request, aiSkillIds } : requestData.request,
     requestData.workspace.konnectAiGatewayModels,
   );
   if (bodyWithSkills !== undefined) {
