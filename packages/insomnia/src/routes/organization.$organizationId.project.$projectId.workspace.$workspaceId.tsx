@@ -33,8 +33,8 @@ import { Icon } from '~/ui/components/icon';
 import { KonnectDebuggerBanner } from '~/ui/components/panes/konnect-debugger-banner';
 import { showResourceNotFoundToast } from '~/ui/components/toast-notification';
 import { useGitFileIssues } from '~/ui/hooks/use-git-file-issues';
-import { syncVCSLikeForWorkspace } from '~/ui/sync-utils';
 import { KonnectDebuggerContext, resolveKonnectControlPlaneLink, useKonnectDebugger } from '~/ui/hooks/use-konnect-debugger';
+import { syncVCSLikeForWorkspace } from '~/ui/sync-utils';
 import { createFetcherLoadHook } from '~/ui/utils/router';
 
 import type { Route } from './+types/organization.$organizationId.project.$projectId.workspace.$workspaceId';
