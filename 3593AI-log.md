@@ -23,7 +23,7 @@
 # (original title) 3593AI — AI Gateway storytelling in Insomnia
 
 Branch: `3593AI` (off `develop`, synced to upstream `Kong/insomnia` as of 2026-10-01).
-Separate from `3593` (Konnect Plugins/Debugger tabs) — no AI Gateway work there.
+Separate from `3593` (Konnect Plugins/Debugger tabs) — no AI Gateway work there. (**Update 2026-11-02:** all of `3593` was later cherry-picked onto this branch; see "Three separate pieces of work" in `3593AI.md`. Statements below that the Debugger "was not brought over" are historical.)
 
 ## Goal
 
