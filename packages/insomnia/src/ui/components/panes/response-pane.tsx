@@ -8,6 +8,7 @@ import { useFetcher, useParams } from 'react-router';
 import { extractChatCompletion, supportsStreaming } from '~/common/chat-completion';
 import { parseChatRequestBody, serializeChatRequestBody } from '~/common/chat-request';
 import { ensureEventStreamAcceptHeader, ensureStreamingBodyFlag, hasStreamingBodyFlag } from '~/common/chat-streaming';
+import { groupPluginHeaders, KONNECT_PLUGIN_CHIP_CLASS } from '~/common/konnect-plugin-headers';
 import { bodyBufferToUtf8 } from '~/common/utils/utf8-bytes';
 import { useRootLoaderData } from '~/root';
 import { AnalyticsEvent } from '~/ui/analytics';
@@ -17,6 +18,7 @@ import { recordProjectRecentRequest } from '~/ui/utils/recent-project-requests';
 
 import { getSetCookieHeaders } from '../../../common/misc';
 import { cancelRequestById } from '../../../network/cancellation.renderer';
+import { useWorkspaceLoaderData } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId';
 import {
   type RequestLoaderData,
   useRequestLoaderData,
@@ -24,6 +26,7 @@ import {
 import { useDebugRequestSendActionFetcher } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request.$requestId.send';
 import { useExecutionState } from '../../hooks/use-execution-state';
 import { useKonnectDebuggerContext } from '../../hooks/use-konnect-debugger';
+import { resolveKonnectRouteLink, useKonnectPlugins } from '../../hooks/use-konnect-plugins';
 import { useRequestMetaPatcher, useRequestPatcher } from '../../hooks/use-request';
 import { PreviewModeDropdown } from '../dropdowns/preview-mode-dropdown';
 import { ResponseHistoryDropdown } from '../dropdowns/response-history-dropdown';
@@ -235,6 +238,20 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
   // even before this request has ever been sent (see the no-response branch
   // below). `konnectRouteKey` is `${routeId}:${method}:...` — see
   // use-konnect-plugins.ts.
+  // Prototype (3593AI): group plugin-owned response headers; the route's attached plugins (if linked) refine labels.
+  const { activeWorkspace, activeProject } = useWorkspaceLoaderData()!;
+  const { status: pluginsStatus, routePlugins } = useKonnectPlugins(
+    resolveKonnectRouteLink(activeRequest, activeWorkspace, activeProject),
+  );
+  const { groups: pluginHeaderGroups, otherHeaders } = useMemo(
+    () =>
+      groupPluginHeaders(
+        activeResponse?.headers ?? [],
+        pluginsStatus === 'ready' ? routePlugins.filter(p => p.enabled).map(p => p.name) : null,
+      ),
+    [activeResponse?.headers, pluginsStatus, routePlugins],
+  );
+  const pluginSummaries = pluginHeaderGroups.filter(g => g.summary);
   const konnectRouteId = activeRequest?.konnectRouteKey?.split(':')[0] ?? null;
   // Moved here from the Request pane per user feedback ("shouldn't debugger
   // show in the Response panel, right after Preview, rather than Request?").
@@ -367,6 +384,7 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
           />
         </PaneHeader>
       )}
+      {/* .pane is a 2-row grid (header + body), so the plugin lines live inside the body (Tabs) as its first rows. */}
       <Tabs
         aria-label="Request group tabs"
         className="flex h-full w-full flex-1 flex-col"
@@ -381,6 +399,21 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
           }
         }}
       >
+        {pluginSummaries.length > 0 && (
+          <div
+            className="flex shrink-0 items-baseline gap-2 border-b border-solid border-(--hl-md) px-3 py-1 text-xs"
+            data-testid="plugin-summaries"
+          >
+            <span className={`shrink-0 rounded-xs px-1 ${KONNECT_PLUGIN_CHIP_CLASS}`}>Konnect Plugins</span>
+            <ul className="min-w-0 flex-1">
+              {pluginSummaries.map(g => (
+                <li key={g.id} className="truncate text-(--color-font)">
+                  <span className="text-(--hl)">{g.label}:</span> {g.summary}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <TabList
           className="flex h-(--line-height-sm) w-full shrink-0 items-center overflow-x-auto border-b border-solid border-b-(--hl-md) bg-(--color-bg)"
           aria-label="Request pane tabs"
@@ -534,6 +567,8 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
           <ErrorBoundary key={activeResponse._id} errorClassName="font-error pad text-center">
             <ResponseHeadersViewer
               headers={activeResponse.headers}
+              pluginGroups={pluginHeaderGroups}
+              otherHeaders={otherHeaders}
               onCopyAll={() => {
                 window.main.trackAnalyticsEvent({ event: AnalyticsEvent.responseHeadersCopyAllClicked });
               }}
