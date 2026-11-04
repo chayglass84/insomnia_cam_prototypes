@@ -60,6 +60,9 @@ export const RequestPane: FC<Props> = ({ environmentId, settings, onPaste }) => 
   const patchRequest = useRequestPatcher();
 
   const requestUrlBarRef = useRef<RequestUrlBarHandle>(null);
+  // Prototype (3593AI): the body/header editors are uncontrolled, so `editorNonce` is bumped (into uniqueKey
+  // below) by the URL bar after an LLM-URL convert/undo is saved, to remount them with the new values.
+  const [editorNonce, setEditorNonce] = useState(0);
   const [promptTarget = 'model', setPromptTarget] = reactUse.useLocalStorage<AiGatewayPromptTarget>(
     'aiGatewayPromptTarget',
     'model',
@@ -94,7 +97,7 @@ export const RequestPane: FC<Props> = ({ environmentId, settings, onPaste }) => 
   const { activeEnvironment, activeGlobalEnvironment, vcsVersion, activeWorkspace, activeProject, collection } =
     useWorkspaceLoaderData()!;
   // Force re-render when we switch requests, the environment gets modified, or the (Git|Sync)VCS version changes
-  const uniqueKey = `${activeEnvironment?._id}::${activeEnvironment?.modified}::${activeGlobalEnvironment?._id}::${activeGlobalEnvironment?.modified}::${requestId}::${gitVersion}::${vcsVersion}::${activeRequestMeta?.activeResponseId}`;
+  const uniqueKey = `${activeEnvironment?._id}::${activeEnvironment?.modified}::${activeGlobalEnvironment?._id}::${activeGlobalEnvironment?.modified}::${requestId}::${editorNonce}::${gitVersion}::${vcsVersion}::${activeRequestMeta?.activeResponseId}`;
 
   if (!activeRequest) {
     return <PlaceholderRequestPane />;
@@ -145,6 +148,7 @@ export const RequestPane: FC<Props> = ({ environmentId, settings, onPaste }) => 
             nunjucksPowerUserMode={settings.nunjucksPowerUserMode}
             onPaste={onPaste}
             ref={requestUrlBarRef}
+            onEditorsStale={() => setEditorNonce(nonce => nonce + 1)}
             leading={promptCatalog ? <AiGatewayPromptTargetToggle value={promptTarget} onChange={setPromptTarget} /> : undefined}
             urlReplacement={
               promptCatalog && promptTarget === 'model' ? (
