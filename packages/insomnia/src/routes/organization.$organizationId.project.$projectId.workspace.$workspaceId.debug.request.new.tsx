@@ -9,6 +9,7 @@ import {
   METHOD_GET,
   METHOD_POST,
 } from '~/common/constants';
+import { autoConvertImportedRequest } from '~/common/llm-url';
 import { invariant } from '~/common/utils/invariant';
 import type { RequestCreatedMetricsProperties } from '~/ui/analytics';
 import { AnalyticsEvent } from '~/ui/analytics';
@@ -104,14 +105,23 @@ export async function clientAction({ params, request }: Route.ClientActionArgs) 
       return null;
     }
     try {
+      // Prototype (3593AI): "Auto-convert LLM URLs to SSE Requests" also applies to a request created from a cURL.
+      const { autoConvertLlmUrls } = await services.settings.get();
+      const curlRequest = {
+        url: req.url,
+        method: req.method,
+        headers: req.headers,
+        body: req.body as RequestBody,
+      };
+      const converted = autoConvertLlmUrls ? autoConvertImportedRequest(curlRequest) : curlRequest;
       activeRequestId = (
         await services.request.create({
           parentId: parentId || workspaceId,
-          url: req.url,
+          url: converted.url,
           name: req.name || 'New Request',
-          method: req.method,
-          headers: req.headers,
-          body: req.body as RequestBody,
+          method: converted.method,
+          headers: converted.headers,
+          body: converted.body,
           authentication: req.authentication,
           parameters: req.parameters as RequestParameter[],
         })

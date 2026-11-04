@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildLlmUrlConversion, detectLlmUrl, isModelMissingInBody, shouldAutoConvertLlmUrl } from './llm-url';
+import {
+  autoConvertImportedRequest,
+  buildLlmUrlConversion,
+  detectLlmUrl,
+  isModelMissingInBody,
+  shouldAutoConvertLlmUrl,
+} from './llm-url';
 
 describe('detectLlmUrl', () => {
   it.each([
@@ -118,5 +124,46 @@ describe('isModelMissingInBody', () => {
     expect(isModelMissingInBody()).toBe(false);
     expect(isModelMissingInBody('not json')).toBe(false);
     expect(isModelMissingInBody('[1]')).toBe(false);
+  });
+});
+
+describe('autoConvertImportedRequest', () => {
+  it('converts an imported LLM request, keeping its own body fields', () => {
+    const converted = autoConvertImportedRequest<Record<string, any>>({
+      url: 'https://api.openai.com/v1/chat/completions',
+      method: 'POST',
+      name: 'keep me',
+      headers: [{ name: 'Authorization', value: 'Bearer x' }],
+      body: { mimeType: 'application/json', text: '{"model":"gpt-4.1","messages":[{"role":"user","content":"hi"}]}' },
+    });
+    expect(converted.name).toBe('keep me');
+    expect(converted.method).toBe('POST');
+    expect(converted.headers).toEqual([
+      { name: 'Authorization', value: 'Bearer x' },
+      { name: 'Accept', value: 'text/event-stream' },
+      { name: 'Content-Type', value: 'application/json' },
+    ]);
+    const body = JSON.parse(converted.body.text!);
+    expect(body.model).toBe('gpt-4.1');
+    expect(body.messages).toEqual([{ role: 'user', content: 'hi' }]);
+    expect(body.stream).toBe(true);
+  });
+
+  it('handles a request with no method, headers or body', () => {
+    const converted = autoConvertImportedRequest<Record<string, any>>({ url: 'https://x/v1/messages' });
+    expect(converted.method).toBe('POST');
+    expect(JSON.parse(converted.body.text).stream).toBe(true);
+  });
+
+  it('returns non-LLM requests untouched (same object)', () => {
+    const request = { url: 'https://example.com/users', method: 'GET' };
+    expect(autoConvertImportedRequest(request)).toBe(request);
+  });
+
+  it('leaves a non-JSON or non-object body alone', () => {
+    const form = { url: 'https://x/chat/completions', body: { mimeType: 'multipart/form-data', text: 'a=b' } };
+    const array = { url: 'https://x/chat/completions', body: { text: '[1,2]' } };
+    expect(autoConvertImportedRequest(form)).toBe(form);
+    expect(autoConvertImportedRequest(array)).toBe(array);
   });
 });

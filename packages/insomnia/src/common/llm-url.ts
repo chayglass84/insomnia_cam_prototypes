@@ -103,3 +103,40 @@ export const isModelMissingInBody = (bodyText?: string): boolean => {
     return false;
   }
 };
+
+// Import-time version of the conversion (cURL paste, file/URL import). A request being created from an import
+// goes from "no URL" to its URL, which is the same blank -> LLM-URL trigger as pasting into the URL bar.
+// Unlike the URL bar (where the body is blank), an imported request can carry a real body, so one that is
+// non-empty and not a JSON object (form data, GraphQL text, ...) is left completely alone.
+export const autoConvertImportedRequest = <T extends object>(imported: T): T => {
+  // Callers pass whatever request-shaped object the importer produced (loosely typed), so read it through this shape.
+  const request = imported as {
+    url?: string;
+    method?: string;
+    headers?: RequestHeader[];
+    body?: LlmUrlConversionInput['body'];
+  };
+  const format = detectLlmUrl(request.url);
+  if (!format) {
+    return imported;
+  }
+  const bodyText = request.body?.text;
+  if (bodyText?.trim()) {
+    try {
+      const parsed = JSON.parse(bodyText);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        return imported;
+      }
+    } catch {
+      return imported;
+    }
+  }
+  return {
+    ...imported,
+    ...buildLlmUrlConversion(format, {
+      method: request.method || 'GET',
+      headers: request.headers || [],
+      body: request.body || {},
+    }),
+  };
+};

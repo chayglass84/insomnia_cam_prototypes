@@ -19,6 +19,7 @@ import { models, services } from 'insomnia-data';
 import orderedJSON from 'json-order';
 import { z, type ZodError } from 'zod/v4';
 
+import { autoConvertImportedRequest } from '~/common/llm-url';
 import { invariant } from '~/common/utils/invariant';
 
 import type { InsomniaImporter } from '../main/importers/convert';
@@ -460,6 +461,8 @@ export const importResourcesToWorkspace = async ({
   overrideBaseEnvironmentData?: boolean;
 }) => {
   invariant(resourceCacheList.length > 0, 'No resources to import');
+  // Prototype (3593AI): "Auto-convert LLM URLs to SSE Requests" also applies to imported requests.
+  const { autoConvertLlmUrls } = await services.settings.get();
   const existingWorkspace = await services.workspace.getById(workspaceId);
 
   for (const resourceCacheItem of resourceCacheList) {
@@ -572,7 +575,7 @@ export const importResourcesToWorkspace = async ({
         } else if (models.unitTest.isUnitTest(resource)) {
           await services.unitTest.create(objectToWrite);
         } else if (isRequest(resource)) {
-          await services.request.create(objectToWrite);
+          await services.request.create(autoConvertLlmUrls ? autoConvertImportedRequest(objectToWrite) : objectToWrite);
         } else {
           await db.docCreate(model.type, objectToWrite);
         }
@@ -599,6 +602,8 @@ export const importResourcesToNewWorkspace = async ({
   syncNewWorkspaceIfNeeded?: (workspace: Workspace) => Promise<void>;
 }): Promise<Workspace> => {
   invariant(resourceCacheItem, 'No resources to import');
+  // Prototype (3593AI): "Auto-convert LLM URLs to SSE Requests" also applies to imported requests.
+  const { autoConvertLlmUrls } = await services.settings.get();
 
   const project = await services.project.getById(projectId);
   invariant(project, 'Project not found');
@@ -666,7 +671,7 @@ export const importResourcesToNewWorkspace = async ({
       } else if (models.unitTest.isUnitTest(resource)) {
         await services.unitTest.create(objectToWrite);
       } else if (isRequest(resource)) {
-        await services.request.create(objectToWrite);
+        await services.request.create(autoConvertLlmUrls ? autoConvertImportedRequest(objectToWrite) : objectToWrite);
       } else {
         await db.docCreate(model.type, objectToWrite);
       }
