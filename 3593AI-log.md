@@ -1590,3 +1590,14 @@ Summary only; the current truth for each item is in `3593AI.md` (work items 3, 5
 - **Notes condensed** (`485ee173a`): this file kept as history, `3593AI.md` is the work-item summary. Future ideas added: a traffic visualization (the vision-prototype URL is in `3593AI.md`) and the Konnect Debugger on prompts and models (the Konnect debug-session API accepts an `ai_gateway_id`).
 - **Discoverability** (this commit): organization renamed **AI Gateway & API Gateway**, the empty-state intro card rewritten around the AI Gateway and API Gateway, and the Sync modal split into two columns (AI Gateway by the three jobs, API Gateway keeping the earlier wording). Recorded as work item 10 in `3593AI.md`.
 - **Starter prompts** (this commit): a third starter, **Judge Demo** (TCP vs UDP, one four-criterion judge test), and the three renamed **Simple Prompt Test**, **Skill Testing Demo**, **Judge Demo**; explicit `metaSortKey`s keep their order. Details in `3593AI.md` (work items 6, 8, 9).
+
+## Session notes — 2026-11-04: auto-convert pasted LLM URLs (work item 11)
+
+Summary only; the current truth is `3593AI.md` work item 11.
+
+- Local data plane was down: Colima stopped and the container has no restart policy. `colima start && docker start Cams-AI-Gateway` (port 8500) fixed it; saved as a memory.
+- **Idea and decisions (with Cam):** discoverability for a dev with only a URL. Chose "auto-convert on blank -> LLM URL" over a prompt, with a setting (default on), one trigger rule, and an Undo popover.
+- **Click-test round 1 failed three ways:** POST but no SSE or body (the uncontrolled editors remounted before the async save landed; fixed by awaiting `services.request.update` first), a banner that filled the pane (`.pane` is a two-row grid), and a design change from a banner to a popover under Send/Connect.
+- **503 on connect:** the gateway rejects an empty `model` with 503 `name resolution failed`; `4mini` streams fine. Replaced my first idea (toast + a guard that blocked Connect) with the popover instruction plus a red line under the status. The red line first ballooned for the same grid reason; fixed by making it the first row inside `Tabs`.
+- **Import path:** cURL paste/"From Curl" and file/URL/Postman imports now convert too, through `autoConvertImportedRequest`.
+- Commits: `283d8cdf5` (URL bar, setting, popover, red note) and the import-path commit that follows it.
