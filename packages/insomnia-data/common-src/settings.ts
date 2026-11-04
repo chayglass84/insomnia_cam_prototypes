@@ -207,4 +207,6 @@ export interface Settings {
   npmRegistryUrl: string;
   // Forces the test tab to show. Otherwise, only show it if the collection already has legacy tests.
   enableLegacyUnitTests: boolean;
+  // Prototype (3593AI): when a blank URL becomes an LLM chat URL (e.g. ends in /chat/completions), convert the request to a streaming chat request.
+  autoConvertLlmUrls: boolean;
 }

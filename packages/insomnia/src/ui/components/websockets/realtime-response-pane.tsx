@@ -39,6 +39,7 @@ import {
   hasStreamingBodyFlag,
 } from '~/common/chat-streaming';
 import { docsMcpAuthentication } from '~/common/documentation';
+import { isModelMissingInBody } from '~/common/llm-url';
 import { isPlainHttpBody } from '~/common/stream-event-log';
 import { extractStreamChatMeta, getCandidatePayloadsFromEvents, type StreamMessageEvent } from '~/common/stream-summary';
 import { buildQueryStringFromParams, joinUrlAndQueryString } from '~/common/utils/url/querystring';
@@ -46,6 +47,7 @@ import { showToast } from '~/ui/components/toast-notification';
 import { useMcpReadyState } from '~/ui/hooks/use-mcp-ready-state';
 import { useRealtimeConnectionNotifications } from '~/ui/hooks/use-realtime-connection-notifications';
 import { useStreamSummary } from '~/ui/hooks/use-stream-summary';
+import { isAutoConvertedLlmRequest } from '~/ui/utils/auto-converted-llm-requests';
 import { recordChatTurnMeta } from '~/ui/utils/chat-turn-meta-cache';
 import { consumePendingAutoConnect } from '~/ui/utils/pending-auto-connect';
 import { recordProjectRecentRequest } from '~/ui/utils/recent-project-requests';
@@ -483,6 +485,14 @@ const RealtimeActiveResponsePane: FC<RealtimeActiveResponsePaneProps & { readySt
     );
   };
 
+  // Prototype (3593AI): a request we auto-converted from a bare LLM URL starts with an empty "model". If it then
+  // fails, say so under the status line (Kong's own error for it is an unhelpful 503 "name resolution failed").
+  const responseStatusCode = 'statusCode' in response ? response.statusCode : 0;
+  const showMissingModelNote =
+    responseStatusCode >= 400 &&
+    isAutoConvertedLlmRequest(activeRequest._id) &&
+    isModelMissingInBody(requestBodyText);
+
   const chatSettingsValues: ChatSettingsValues = useMemo(() => {
     const samplingParams = parseChatSamplingParams(requestBodyText || '');
     return {
@@ -852,6 +862,12 @@ const RealtimeActiveResponsePane: FC<RealtimeActiveResponsePaneProps & { readySt
           showChatTab ? 'chat' : showStreamSummaryTab && streamSummary.inferredPath != null ? 'summary' : 'events'
         }
       >
+        {/* .pane is a 2-row grid (header + body), so the note lives inside the body (Tabs) as its first row. */}
+        {showMissingModelNote && (
+          <p className="shrink-0 px-3 py-1 text-xs text-(--color-danger)" data-testid="llm-missing-model-note">
+            This looks like an LLM request with no 'model' specified in the body.
+          </p>
+        )}
         <TabList
           className="flex h-(--line-height-sm) w-full shrink-0 items-center overflow-x-auto border-b border-solid border-b-(--hl-md) bg-(--color-bg)"
           aria-label="Request pane tabs"

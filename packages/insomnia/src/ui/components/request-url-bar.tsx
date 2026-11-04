@@ -1,9 +1,11 @@
+import type { Request } from 'insomnia-data';
 import { models, services } from 'insomnia-data';
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { Button, Link } from 'react-aria-components';
 import { useParams, useSearchParams } from 'react-router';
 import * as reactUse from 'react-use';
 
+import { buildLlmUrlConversion, type LlmUrlFormat, shouldAutoConvertLlmUrl } from '~/common/llm-url';
 import { SECURITY_SETTINGS_PATH_LABEL } from '~/common/misc';
 import { buildQueryStringFromParams, joinUrlAndQueryString } from '~/common/utils/url/querystring';
 import { useRootLoaderData } from '~/root';
@@ -16,8 +18,13 @@ import {
   useDebugRequestSendActionFetcher,
 } from '~/routes/organization.$organizationId.project.$projectId.workspace.$workspaceId.debug.request.$requestId.send';
 import { OneLineEditor, type OneLineEditorHandle } from '~/ui/components/.client/codemirror/one-line-editor';
+import { LlmUrlConvertedPopover } from '~/ui/components/llm-url-converted-popover';
 import { showSettingsModal } from '~/ui/components/modals/settings-modal';
 import { clearPendingFocusUrlBar, shouldFocusUrlBar } from '~/ui/components/request-url-bar-focus';
+import {
+  markAutoConvertedLlmRequest,
+  unmarkAutoConvertedLlmRequest,
+} from '~/ui/utils/auto-converted-llm-requests';
 import { recordProjectRecentRequest } from '~/ui/utils/recent-project-requests';
 import { renderRealtimeConnectPayload } from '~/ui/utils/render-realtime-connect';
 
@@ -52,6 +59,14 @@ interface Props {
   urlReplacement?: React.ReactNode;
   /** Prototype (3593AI): rendered at the far left, before the method selector. */
   leading?: React.ReactNode;
+  /** Prototype (3593AI): the body/header editors are uncontrolled; called after convert/undo is saved so the pane can remount them. */
+  onEditorsStale?: () => void;
+}
+
+interface LlmUrlPreviousState {
+  method: Request['method'];
+  headers: Request['headers'];
+  body: Request['body'];
 }
 
 export interface RequestUrlBarHandle {
@@ -60,7 +75,7 @@ export interface RequestUrlBarHandle {
 }
 
 export const RequestUrlBar = forwardRef<RequestUrlBarHandle, Props>(
-  ({ handleAutocompleteUrls, historyKey, onPaste, urlReplacement, leading }, ref) => {
+  ({ handleAutocompleteUrls, historyKey, onPaste, urlReplacement, leading, onEditorsStale }, ref) => {
     const [searchParams, setSearchParams] = useSearchParams();
     const { userSession } = useRootLoaderData()!;
     const { vaultKey } = userSession;
@@ -126,6 +141,13 @@ export const RequestUrlBar = forwardRef<RequestUrlBarHandle, Props>(
     const methodDropdownRef = useRef<DropdownHandle>(null);
     const dropdownRef = useRef<DropdownHandle>(null);
     const inputRef = useRef<OneLineEditorHandle>(null);
+    // Last URL value seen by the editor (see the onChange note on auto-converting LLM URLs).
+    const lastUrlRef = useRef(activeRequest?.url ?? '');
+    const sendButtonsRef = useRef<HTMLDivElement>(null);
+    const [llmConversion, setLlmConversion] = useState<{ format: LlmUrlFormat; previous: LlmUrlPreviousState } | null>(
+      null,
+    );
+    const dismissLlmConversion = useCallback(() => setLlmConversion(null), []);
     const isRealtimeRequest =
       activeRequest && (isEventStreamRequest(activeRequest) || isGraphqlSubscriptionRequest(activeRequest));
 
@@ -313,6 +335,21 @@ export const RequestUrlBar = forwardRef<RequestUrlBarHandle, Props>(
     return (
       <div className="flex w-full items-stretch justify-between self-stretch">
         {leading}
+        {llmConversion && (
+          <LlmUrlConvertedPopover
+            triggerRef={sendButtonsRef}
+            format={llmConversion.format}
+            onDismiss={dismissLlmConversion}
+            onUndo={async () => {
+              const patch = llmConversion.previous as Partial<Request>;
+              await services.request.update(activeRequest, patch);
+              patchRequest(requestId, patch);
+              unmarkAutoConvertedLlmRequest(requestId);
+              onEditorsStale?.();
+              setLlmConversion(null);
+            }}
+          />
+        )}
         {/* Prototype (3593AI): a prompt is always sent to a catalog model, so the verb is hidden while the model picker replaces the URL. */}
         {!urlReplacement && (
           <div className="flex items-stretch p-1">
@@ -342,14 +379,34 @@ export const RequestUrlBar = forwardRef<RequestUrlBarHandle, Props>(
             getAutocompleteConstants={handleAutocompleteUrls}
             placeholder="https://api.myproduct.com/v1/users"
             defaultValue={url}
-            onChange={url => patchRequest(requestId, { url })}
+            onChange={async nextUrl => {
+              // Prototype (3593AI): compare against the last value we saw (not activeRequest.url, which lags the
+              // async patch) so only a true blank -> LLM-URL change (a paste) converts, never typing or later edits.
+              const previousUrl = lastUrlRef.current;
+              lastUrlRef.current = nextUrl;
+              const format =
+                settings.autoConvertLlmUrls && !urlReplacement ? shouldAutoConvertLlmUrl(previousUrl, nextUrl) : null;
+              if (!format) {
+                patchRequest(requestId, { url: nextUrl });
+                return;
+              }
+              const patch = { url: nextUrl, ...buildLlmUrlConversion(format, activeRequest) } as Partial<Request>;
+              const previous = { method: activeRequest.method, headers: activeRequest.headers, body: activeRequest.body };
+              // Persist directly and await it (like "Enable streaming") before remounting the uncontrolled
+              // body/header editors, otherwise they remount with the old values and never pick up the new ones.
+              await services.request.update(activeRequest, patch);
+              patchRequest(requestId, patch);
+              onEditorsStale?.();
+              markAutoConvertedLlmRequest(requestId);
+              setLlmConversion({ format, previous });
+            }}
             onKeyDown={createKeybindingsHandler({
               Enter: () => sendOrConnect(),
             })}
             onPaste={onPaste}
           />
           )}
-          <div className="flex self-stretch">
+          <div className="flex self-stretch" ref={sendButtonsRef}>
             {isCancellable ? (
               <button
                 type="button"

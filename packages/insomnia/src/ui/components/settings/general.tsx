@@ -58,6 +58,11 @@ export const General: FC = () => {
             setting="enableLegacyUnitTests"
             help="If checked, the Tests tab will always be shown in the collection view. Otherwise, it will only be shown if the collection already has legacy tests."
           />
+          <BooleanSetting
+            label="Auto-convert LLM URLs to SSE Requests"
+            setting="autoConvertLlmUrls"
+            help="If checked, entering a URL ending in /chat/completions (OpenAI) or /v1/messages (Anthropic) into a blank URL bar converts the request to a streaming chat request: POST, event-stream Accept header and a chat body."
+          />
         </div>
       </div>
 
