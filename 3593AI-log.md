@@ -1601,3 +1601,12 @@ Summary only; the current truth is `3593AI.md` work item 11.
 - **503 on connect:** the gateway rejects an empty `model` with 503 `name resolution failed`; `4mini` streams fine. Replaced my first idea (toast + a guard that blocked Connect) with the popover instruction plus a red line under the status. The red line first ballooned for the same grid reason; fixed by making it the first row inside `Tabs`.
 - **Import path:** cURL paste/"From Curl" and file/URL/Postman imports now convert too, through `autoConvertImportedRequest`.
 - Commits: `283d8cdf5` (URL bar, setting, popover, red note) and the import-path commit that follows it.
+
+## Session notes — 2026-11-04 (later): Konnect plugin insights on the response (work item 12)
+
+Summary only; the current truth is `3593AI.md` work item 12.
+
+- Cam's goal: make what plugins do discoverable. Read the plugin usage file, then built a header-pattern registry that drives (1) a one-line "Konnect Plugins" bar under the status line and (2) grouped/coloured headers on the Headers tab. Only rate-limiting (+ advanced) so far.
+- Decisions (with Cam): detect by header name cross-checked with route plugins; bar under the status/time/size bar (Cam "going back and forth" on placement, may move it into Preview); Kong lime for all plugins; both places labelled "Konnect Plugins".
+- Slip worth remembering: a Python splice using `s.index('</ul>')` matched an earlier closing tag and duplicated ~300 lines of `response-pane.tsx`; caught by tsc. Restored with `git checkout` and re-applied. Anchor splices on a unique string, and run tsc right after.
+- Next session: walk through more plugins (key-auth, cors, request-transformer, ai-proxy-advanced) and decide how to show each.
