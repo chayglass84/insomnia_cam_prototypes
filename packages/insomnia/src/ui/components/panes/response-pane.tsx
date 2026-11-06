@@ -8,7 +8,7 @@ import { useFetcher, useParams } from 'react-router';
 import { extractChatCompletion, supportsStreaming } from '~/common/chat-completion';
 import { parseChatRequestBody, serializeChatRequestBody } from '~/common/chat-request';
 import { ensureEventStreamAcceptHeader, ensureStreamingBodyFlag, hasStreamingBodyFlag } from '~/common/chat-streaming';
-import { groupPluginHeaders, KONNECT_PLUGIN_CHIP_CLASS } from '~/common/konnect-plugin-headers';
+import { groupPluginHeaders } from '~/common/konnect-plugin-headers';
 import { bodyBufferToUtf8 } from '~/common/utils/utf8-bytes';
 import { useRootLoaderData } from '~/root';
 import { AnalyticsEvent } from '~/ui/analytics';
@@ -401,17 +401,22 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
       >
         {pluginSummaries.length > 0 && (
           <div
-            className="flex shrink-0 items-baseline gap-2 border-b border-solid border-(--hl-md) px-3 py-1 text-xs"
+            className="flex shrink-0 items-center gap-3 border-b border-solid border-(--hl-md) bg-(--color-bg) px-3 py-2"
             data-testid="plugin-summaries"
           >
-            <span className={`shrink-0 rounded-xs px-1 ${KONNECT_PLUGIN_CHIP_CLASS}`}>Konnect Plugins</span>
-            <ul className="min-w-0 flex-1">
-              {pluginSummaries.map(g => (
-                <li key={g.id} className="truncate text-(--color-font)">
-                  <span className="text-(--hl)">{g.label}:</span> {g.summary}
-                </li>
-              ))}
-            </ul>
+            <KongLogo width={24} height={22} className="shrink-0" />
+            <div className="min-w-0 flex-1">
+              <div className="mb-1">
+                <span className="font-semibold text-[#CCFF00]">Konnect Plugins</span>
+              </div>
+              <ul>
+                {pluginSummaries.map(g => (
+                  <li key={g.id} className="truncate text-(--color-font)">
+                    <span className="font-semibold">{g.label}:</span> {g.summary}
+                  </li>
+                ))}
+              </ul>
+            </div>
           </div>
         )}
         <TabList
