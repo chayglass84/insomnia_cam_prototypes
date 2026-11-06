@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildPreflightPatch, getMissingPluginHints, groupPluginHeaders } from './konnect-plugin-headers';
+import {
+  buildPreflightPatch,
+  getMissingPluginHints,
+  getStatusPluginHints,
+  groupPluginHeaders,
+} from './konnect-plugin-headers';
 
 const h = (name: string, value: string) => ({ name, value });
 
@@ -134,5 +139,46 @@ describe('getMissingPluginHints', () => {
     expect(getMissingPluginHints([], [{ name: 'key-auth', config: {} }], req)).toEqual([]);
     expect(getMissingPluginHints([], null, req)).toEqual([]);
     expect(getMissingPluginHints([], cors, { headers: [h('Origin', '{{ _.o }}')] })).toEqual([]);
+  });
+});
+
+describe('getStatusPluginHints', () => {
+  const keyAuth = [{ name: 'key-auth', config: { key_names: ['apikey'] } }];
+  const acl = [{ name: 'acl', config: { allow: ['route-admins'] } }];
+
+  it('key-auth 401: tells you how to send the key, from the plugin config', () => {
+    expect(getStatusPluginHints(401, keyAuth, { headers: [] })[0].hint).toBe(
+      'No API key. Send **apikey** as a header or query param.',
+    );
+    const only = [{ name: 'key-auth', config: { key_names: ['x-key', 'apikey'], key_in_query: false } }];
+    expect(getStatusPluginHints(401, only, { headers: [] })[0].hint).toBe(
+      'No API key. Send **x-key** or **apikey** as a header.',
+    );
+  });
+
+  it('key-auth 401: says the key was rejected when one was sent (header or query, enabled only)', () => {
+    expect(getStatusPluginHints(401, keyAuth, { headers: [h('ApiKey', 'bad')] })[0].hint).toBe(
+      'Invalid API key (**ApiKey** was sent).',
+    );
+    expect(getStatusPluginHints(401, keyAuth, { headers: [], parameters: [h('apikey', 'bad')] })[0].hint).toContain(
+      'Invalid',
+    );
+    expect(
+      getStatusPluginHints(401, keyAuth, { headers: [{ ...h('apikey', 'bad'), disabled: true }] })[0].hint,
+    ).toContain('No API key');
+  });
+
+  it('acl 403: says you have no access and lists the allow/deny groups as detail lines', () => {
+    const [row] = getStatusPluginHints(403, acl, { headers: [] });
+    expect(row.hint).toBe('You do not have access.');
+    expect(row.summary).toBe('Allows: route-admins');
+    const both = [{ name: 'acl', config: { allow: ['a', 'b'], deny: ['c'] } }];
+    expect(getStatusPluginHints(403, both, { headers: [] })[0].summary).toBe('Allows: a, b\nDenies: c');
+  });
+
+  it('is silent for other statuses, unattached plugins and unknown attachment', () => {
+    expect(getStatusPluginHints(200, keyAuth, { headers: [] })).toEqual([]);
+    expect(getStatusPluginHints(401, acl, { headers: [] })).toEqual([]);
+    expect(getStatusPluginHints(401, null, { headers: [] })).toEqual([]);
   });
 });

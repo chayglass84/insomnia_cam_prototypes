@@ -1620,3 +1620,4 @@ Summary only; the current truth is `3593AI.md` work item 12.
 - TODO noted: all Kong lime must be toned down for light themes (not done).
 - Later 2026-11-06: added the CORS registry entry (summary, origin-mismatch and missing-headers hints, inline "(Create OPTIONS request)" link), created a global `cors` test plugin on Insomnia Airlines, wrapped summary lines. Detail in `3593AI.md` work item 12. Slips: macOS `sed -i` without a backup arg fails silently in my chained commands; use python for edits.
 - Later still 2026-11-06: UX pass on the plugin bar and the Headers tab (detail in `3593AI.md` work item 12).
+- Later still 2026-11-06: key-auth and acl status-code hints (no response body needed), bold key names, ACL detail lines, and a rate-limiting rendering bug (`indexOf` -1 split after one character) fixed. Created the `acl` test plugin on `/routes`. Detail in `3593AI.md` work item 12.
