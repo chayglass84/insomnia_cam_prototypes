@@ -2,13 +2,16 @@ import type { Project, Request, Workspace } from 'insomnia-data';
 import React, { useState } from 'react';
 import { Button } from 'react-aria-components';
 
+import { toPreviewRequest } from '~/common/request-transformer';
+
 import type { KonnectPlugin } from '../../../konnect/api';
 import { resolveKonnectRouteLink, useKonnectPlugins } from '../../hooks/use-konnect-plugins';
 import { DeckCommandModal } from '../modals/deck-command-modal';
+import { RequestTransformerModal } from '../modals/request-transformer-modal';
 import { RequestAiPoliciesTab } from './request-ai-policies-tab';
 
 interface Props {
-  activeRequest: Pick<Request, 'konnectRouteKey' | 'url' | 'body'>;
+  activeRequest: Pick<Request, 'konnectRouteKey' | 'url' | 'body' | 'method' | 'headers' | 'parameters'>;
   activeWorkspace: Pick<Workspace, 'konnectServiceId' | 'konnectAiGatewayModels'> | null | undefined;
   activeProject:
     | Pick<Project, 'konnectControlPlaneId' | 'konnectRegion' | 'name' | 'konnectAiGateway'>
@@ -68,11 +71,13 @@ function PluginRow({
   region,
   controlPlaneId,
   onShowDeckCommand,
+  onShowConfig,
 }: {
   plugin: KonnectPlugin;
   region: string;
   controlPlaneId: string;
   onShowDeckCommand: (plugin: KonnectPlugin) => void;
+  onShowConfig: (plugin: KonnectPlugin) => void;
 }) {
   return (
     <div className="flex items-center justify-between gap-3 border-b border-solid border-(--hl-md) px-4 py-2">
@@ -86,6 +91,14 @@ function PluginRow({
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-2 text-xs">
+        {plugin.name === 'request-transformer' && (
+          <Button
+            className="rounded-xs px-2 py-1 text-(--hl) hover:bg-(--hl-xs) hover:text-(--color-font)"
+            onPress={() => onShowConfig(plugin)}
+          >
+            View config
+          </Button>
+        )}
         <Button
           className="rounded-xs px-2 py-1 text-(--hl) hover:bg-(--hl-xs) hover:text-(--color-font)"
           onPress={() => window.main.openInBrowser(docsUrl(plugin.name))}
@@ -130,6 +143,7 @@ const ControlPlanePluginsTab = ({ activeRequest, activeWorkspace, activeProject 
   const link = resolveKonnectRouteLink(activeRequest, activeWorkspace, activeProject);
   const { status, error, routePlugins } = useKonnectPlugins(link);
   const [deckModalPlugin, setDeckModalPlugin] = useState<{ plugin: KonnectPlugin; isNew: boolean } | null>(null);
+  const [configModalPlugin, setConfigModalPlugin] = useState<KonnectPlugin | null>(null);
 
   if (status === 'not-linked') {
     return (
@@ -170,6 +184,7 @@ const ControlPlanePluginsTab = ({ activeRequest, activeWorkspace, activeProject 
           region={link!.region}
           controlPlaneId={link!.controlPlaneId}
           onShowDeckCommand={p => setDeckModalPlugin({ plugin: p, isNew: false })}
+          onShowConfig={setConfigModalPlugin}
         />
       ))}
 
@@ -219,6 +234,14 @@ const ControlPlanePluginsTab = ({ activeRequest, activeWorkspace, activeProject 
             </div>
           ))}
         </div>
+      )}
+
+      {configModalPlugin && (
+        <RequestTransformerModal
+          plugin={configModalPlugin}
+          request={toPreviewRequest(activeRequest)}
+          onHide={() => setConfigModalPlugin(null)}
+        />
       )}
 
       {deckModalPlugin && (
