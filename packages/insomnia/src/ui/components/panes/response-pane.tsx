@@ -14,6 +14,7 @@ import {
   getStatusPluginHints,
   groupPluginHeaders,
 } from '~/common/konnect-plugin-headers';
+import { summarizeRequestTransformer, toPreviewRequest } from '~/common/request-transformer';
 import { bodyBufferToUtf8 } from '~/common/utils/utf8-bytes';
 import { useRootLoaderData } from '~/root';
 import { AnalyticsEvent } from '~/ui/analytics';
@@ -22,6 +23,7 @@ import { markPendingAutoConnect } from '~/ui/utils/pending-auto-connect';
 import { recordProjectRecentRequest } from '~/ui/utils/recent-project-requests';
 
 import { getSetCookieHeaders } from '../../../common/misc';
+import type { KonnectPlugin } from '../../../konnect/api';
 import { cancelRequestById } from '../../../network/cancellation.renderer';
 import { useWorkspaceLoaderData } from '../../../routes/organization.$organizationId.project.$projectId.workspace.$workspaceId';
 import {
@@ -39,6 +41,7 @@ import { MockResponseExtractor } from '../editors/mock-response-extractor';
 import { ErrorBoundary } from '../error-boundary';
 import { KongLogo } from '../kong-logo';
 import { showError } from '../modals';
+import { RequestTransformerModal } from '../modals/request-transformer-modal';
 import { ResponseTimer } from '../response-timer';
 import { SizeTag } from '../tags/size-tag';
 import { StatusTag } from '../tags/status-tag';
@@ -72,6 +75,7 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
   const patchRequest = useRequestPatcher();
   const { settings } = useRootLoaderData()!;
   const [streamingTeaserDismissed, setStreamingTeaserDismissed] = useState(false);
+  const [configModalPlugin, setConfigModalPlugin] = useState<KonnectPlugin | null>(null);
   useEffect(() => {
     setStreamingTeaserDismissed(false);
   }, [activeRequest._id]);
@@ -273,6 +277,17 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
     ...pluginHeaderGroups.filter(g => g.summary),
     ...getMissingPluginHints(activeResponse?.headers ?? [], attachedPlugins, requestContext).map(hintOnly),
     ...getStatusPluginHints(activeResponse?.statusCode ?? 0, attachedPlugins, requestContext).map(hintOnly),
+    // Config rows: plugins that change the request leave nothing in the response, so they show whenever attached.
+    ...(attachedPlugins ?? [])
+      .filter(p => p.name === 'request-transformer')
+      .map(p => ({
+        id: `request-transformer-${p.id}`,
+        label: 'Request Transformer',
+        summary: summarizeRequestTransformer(p.config),
+        hint: null as string | null,
+        hintFirst: false,
+        configPlugin: p,
+      })),
   ];
 
   // Prototype (3593AI): duplicate this request as an OPTIONS preflight, right after it in the sidebar. Not opened.
@@ -453,19 +468,30 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
             {/* Fixed-width name column so the plugins scan as a list; details take the rest and wrap. */}
             <ul className="min-w-0 flex-1 space-y-1">
               {pluginSummaries.map(g => (
-                <li key={g.id} className="grid grid-cols-[7rem_1fr] gap-x-3 text-(--color-font)">
+                <li key={g.id} className="grid grid-cols-[10rem_1fr] gap-x-3 text-(--color-font)">
                   <span className="font-semibold">{g.label}</span>
                   <div className="min-w-0 break-words">
                     {g.hint && g.hintFirst && <div className="text-(--color-warning)">{renderHint(g.hint)}</div>}
                     {g.summary && (
                       <div>
                         {/* One line per "Lead: details"; the lead keeps the normal colour, the details are muted. */}
-                        {g.summary.split('\n').map(line => (
+                        {g.summary.split('\n').map((line, i, lines) => (
                           <div key={line}>
                             {line.includes(': ') && line.slice(0, line.indexOf(': ') + 2)}
                             <span className="text-(--hl)">
                               {line.includes(': ') ? line.slice(line.indexOf(': ') + 2) : line}
                             </span>
+                            {i === lines.length - 1 && 'configPlugin' in g && (
+                              <>
+                                {' - '}
+                                <Button
+                                  className="text-(--color-font) underline"
+                                  onPress={() => setConfigModalPlugin(g.configPlugin)}
+                                >
+                                  See Details
+                                </Button>
+                              </>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -483,6 +509,13 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
                 </li>
               ))}
             </ul>
+            {configModalPlugin && (
+              <RequestTransformerModal
+                plugin={configModalPlugin}
+                request={toPreviewRequest(activeRequest)}
+                onHide={() => setConfigModalPlugin(null)}
+              />
+            )}
           </div>
         )}
         <TabList
