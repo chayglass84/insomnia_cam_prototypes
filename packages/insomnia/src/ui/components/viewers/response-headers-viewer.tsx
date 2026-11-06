@@ -1,11 +1,7 @@
 import type { ResponseHeader } from 'insomnia-data';
 import React, { type FC, Fragment, useMemo } from 'react';
 
-import {
-  KONNECT_PLUGIN_BORDER_CLASS,
-  KONNECT_PLUGIN_CHIP_CLASS,
-  type PluginHeaderGroup,
-} from '~/common/konnect-plugin-headers';
+import { KONNECT_PLUGIN_TEXT_CLASS, type PluginHeaderGroup } from '~/common/konnect-plugin-headers';
 
 import { CopyButton } from '../base/copy-button';
 import { Link } from '../base/link';
@@ -32,10 +28,11 @@ const headerAsString = (header: ResponseHeader) => `${header.name}: ${header.val
 export const ResponseHeadersViewer: FC<Props> = ({ headers, onCopyAll, pluginGroups = [], otherHeaders }) => {
   const headersString = useMemo(() => headers.map(headerAsString).join('\n'), [headers]);
 
-  const renderRow = (header: ResponseHeader, accentBorderClass?: string) => (
+  // `indentClass` nudges plugin headers in under their plugin name so the groups scan as a tree.
+  const renderRow = (header: ResponseHeader, indentClass?: string) => (
     <tr className="selectable" key={headerAsString(header)}>
-      <td className={`force-wrap w-1/2 ${accentBorderClass ? `border-l-4 border-solid ${accentBorderClass}` : ''}`}>
-        {header.name}
+      <td className="force-wrap w-1/2">
+        <div className={indentClass}>{header.name}</div>
       </td>
       <td className="force-wrap w-1/2">
         {validateURL(header) ? <Link href={header.value}>{header.value}</Link> : header.value}
@@ -55,21 +52,21 @@ export const ResponseHeadersViewer: FC<Props> = ({ headers, onCopyAll, pluginGro
         <tbody>
           {pluginGroups.length > 0 && (
             <tr>
-              <th colSpan={2} className={`border-l-4 border-solid text-left ${KONNECT_PLUGIN_BORDER_CLASS}`}>
-                <span className={`rounded-xs px-1 ${KONNECT_PLUGIN_CHIP_CLASS}`}>Konnect Plugins</span>
+              <th colSpan={2} className={`text-left ${KONNECT_PLUGIN_TEXT_CLASS}`}>
+                Konnect Plugins
               </th>
             </tr>
           )}
           {pluginGroups.map(group => (
             <Fragment key={group.id}>
               <tr>
-                <td colSpan={2} className={`border-l-4 border-solid ${KONNECT_PLUGIN_BORDER_CLASS}`}>
-                  <span className={`rounded-xs px-1 ${KONNECT_PLUGIN_CHIP_CLASS}`}>
+                <td colSpan={2} className={KONNECT_PLUGIN_TEXT_CLASS}>
+                  <div className="pl-2">
                     {group.pluginNames.length > 0 ? group.pluginNames.join(', ') : group.label}
-                  </span>
+                  </div>
                 </td>
               </tr>
-              {group.headers.map(header => renderRow(header, KONNECT_PLUGIN_BORDER_CLASS))}
+              {group.headers.map(header => renderRow(header, 'pl-5'))}
             </Fragment>
           ))}
           {pluginGroups.length > 0 && (otherHeaders ?? headers).length > 0 && (

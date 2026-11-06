@@ -27,9 +27,8 @@ export interface PluginRequestContext {
 }
 
 // All Konnect plugin UI shares the Kong lime accent. Literal Tailwind classes so Tailwind picks them up.
-// Kong lime is #CCFF00 (see kong-logo.tsx). Text on it is always black so it stays readable in light and dark themes.
-export const KONNECT_PLUGIN_BORDER_CLASS = 'border-l-[#CCFF00]';
-export const KONNECT_PLUGIN_CHIP_CLASS = 'bg-[#CCFF00] text-black';
+// Kong lime is #CCFF00 (see kong-logo.tsx).
+export const KONNECT_PLUGIN_TEXT_CLASS = 'text-[#CCFF00]';
 
 interface PluginHeaderDef {
   id: string;

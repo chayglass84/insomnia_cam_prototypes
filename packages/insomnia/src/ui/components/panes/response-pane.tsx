@@ -38,6 +38,7 @@ import { ResponseTimer } from '../response-timer';
 import { SizeTag } from '../tags/size-tag';
 import { StatusTag } from '../tags/status-tag';
 import { TimeTag } from '../tags/time-tag';
+import { Tooltip } from '../tooltip';
 import { ResponseCookiesViewer } from '../viewers/response-cookies-viewer';
 import { ResponseHeadersViewer } from '../viewers/response-headers-viewer';
 import { ResponseTimelineViewer } from '../viewers/response-timeline-viewer';
@@ -431,37 +432,46 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
       >
         {pluginSummaries.length > 0 && (
           <div
-            className="flex shrink-0 items-center gap-3 border-b border-solid border-(--hl-md) bg-(--color-bg) px-3 py-2"
+            className="flex shrink-0 items-center gap-3 border-b border-solid border-(--hl-md) bg-(--color-bg) px-3 py-2 text-sm"
             data-testid="plugin-summaries"
           >
-            <KongLogo width={24} height={22} className="shrink-0" />
-            <div className="min-w-0 flex-1">
-              <div className="mb-1">
-                <span className="font-semibold text-[#CCFF00]">Konnect Plugins</span>
-              </div>
-              <ul>
-                {pluginSummaries.map(g => (
-                  <li key={g.id} className="text-(--color-font)">
-                    <div className="break-words">
-                      <span className="font-semibold">{g.label}:</span>{' '}
-                      {g.summary ?? <span className="text-(--color-warning)">{g.hint}</span>}
-                      {g.id === 'cors' && activeRequest?.method !== 'OPTIONS' && (
-                        <>
-                          {' '}
-                          <Button
-                            className="text-(--hl) underline hover:text-(--color-font)"
-                            onPress={handleCreatePreflight}
-                          >
-                            (Create OPTIONS request)
-                          </Button>
-                        </>
-                      )}
-                    </div>
+            <Tooltip message="Konnect Plugins" position="right" className="shrink-0">
+              <KongLogo width={24} height={22} />
+            </Tooltip>
+            {/* Fixed-width name column so the plugins scan as a list; details take the rest and wrap. */}
+            <ul className="min-w-0 flex-1 space-y-1">
+              {pluginSummaries.map(g => (
+                <li key={g.id} className="grid grid-cols-[7rem_1fr] gap-x-3 text-(--color-font)">
+                  <span className="font-semibold">{g.label}</span>
+                  <div className="min-w-0 break-words">
+                    {g.summary ? (
+                      <div>
+                        {/* "Allows: a, b" -> lead in the normal colour, the details muted so they don't run together. */}
+                        {g.summary.includes(': ') ? (
+                          <>
+                            {g.summary.slice(0, g.summary.indexOf(': ') + 2)}
+                            <span className="text-(--hl)">{g.summary.slice(g.summary.indexOf(': ') + 2)}</span>
+                          </>
+                        ) : (
+                          g.summary
+                        )}
+                      </div>
+                    ) : (
+                      <div className="text-(--color-warning)">{g.hint}</div>
+                    )}
                     {g.summary && g.hint && <div className="text-(--color-warning)">{g.hint}</div>}
-                  </li>
-                ))}
-              </ul>
-            </div>
+                    {g.id === 'cors' && activeRequest?.method !== 'OPTIONS' && (
+                      <Button
+                        className="text-(--hl) underline hover:text-(--color-font)"
+                        onPress={handleCreatePreflight}
+                      >
+                        Create OPTIONS request
+                      </Button>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
         <TabList
