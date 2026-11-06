@@ -17,6 +17,13 @@ export interface PluginHeaderGroup {
   headers: ResponseHeader[];
   /** One-line summary, or null if the headers don't carry enough to say anything useful. */
   summary: string | null;
+  /** Extra advice that needs the REQUEST too (e.g. "your Origin doesn't match"); null when there is none. */
+  hint: string | null;
+}
+
+/** The slice of the request the registry may look at. Disabled headers are ignored by callers' convention. */
+export interface PluginRequestContext {
+  headers: { name: string; value: string; disabled?: boolean }[];
 }
 
 // All Konnect plugin UI shares the Kong lime accent. Literal Tailwind classes so Tailwind picks them up.
@@ -34,6 +41,9 @@ interface PluginHeaderDef {
   /** Names claimed only if matchesHeader hit at least one other header (e.g. Retry-After). */
   matchesCompanionHeader?: (lowerName: string) => boolean;
   summarize: (headers: ResponseHeader[]) => string | null;
+  hint?: (responseHeaders: ResponseHeader[], request: PluginRequestContext) => string | null;
+  /** Advice when the plugin is attached to the route but NONE of its headers came back. `config` is the plugin's config. */
+  missingHint?: (request: PluginRequestContext, config: Record<string, unknown>) => string | null;
 }
 
 const RATE_LIMIT_HEADER = /^(?:x-)?ratelimit-(limit|remaining|reset)(?:-(.+))?$/;
@@ -94,6 +104,59 @@ function summarizeRateLimit(headers: ResponseHeader[]): string | null {
   return parts.length > 0 ? parts.join(', ') : null;
 }
 
+const CORS_HEADER = /^access-control-(?:allow-|expose-|max-age$)/;
+
+function summarizeCors(headers: ResponseHeader[]): string | null {
+  const get = (name: string) => headers.find(h => h.name.toLowerCase() === `access-control-${name}`)?.value.trim();
+  const origin = get('allow-origin');
+  const methods = get('allow-methods');
+  const parts: string[] = [];
+  if (origin) {
+    parts.push(origin === '*' ? 'any domain' : origin);
+  }
+  if (methods) {
+    parts.push(methods.split(/\s*,\s*/).join('/'));
+  }
+  if (get('allow-credentials')?.toLowerCase() === 'true') {
+    parts.push('credentials');
+  }
+  return parts.length > 0 ? `Allows: ${parts.join(', ')}` : null;
+}
+
+/** Value of an enabled request header, or undefined. */
+export const getRequestHeader = (request: PluginRequestContext, name: string): string | undefined =>
+  request.headers.find(h => !h.disabled && h.name.toLowerCase() === name.toLowerCase())?.value.trim();
+
+// PROTOTYPE SHORTCUT: compares raw strings; a request Origin that is still a {{ template }} is skipped.
+function corsHint(responseHeaders: ResponseHeader[], request: PluginRequestContext): string | null {
+  const allowed = responseHeaders.find(h => h.name.toLowerCase() === 'access-control-allow-origin')?.value.trim();
+  const sent = getRequestHeader(request, 'origin');
+  if (!allowed) {
+    return null;
+  }
+  if (!sent) {
+    return 'Origin header missing';
+  }
+  if (sent.includes('{{') || allowed === '*' || allowed === sent) {
+    return null;
+  }
+  return `Allowed origin (${allowed}) doesn't match your Origin (${sent}); a browser would block this.`;
+}
+
+function corsMissingHint(request: PluginRequestContext, config: Record<string, unknown>): string | null {
+  const sent = getRequestHeader(request, 'origin');
+  if (!sent) {
+    return 'Origin header missing';
+  }
+  if (sent.includes('{{')) {
+    return null;
+  }
+  const origins = Array.isArray(config.origins) ? config.origins.filter((o): o is string => typeof o === 'string') : [];
+  return origins.length > 0
+    ? `No CORS headers came back: your Origin (${sent}) isn't allowed. Allowed: ${origins.join(', ')}.`
+    : `No CORS headers came back for your Origin (${sent}).`;
+}
+
 const PLUGIN_HEADER_DEFS: PluginHeaderDef[] = [
   {
     id: 'rate-limiting',
@@ -103,7 +166,40 @@ const PLUGIN_HEADER_DEFS: PluginHeaderDef[] = [
     matchesCompanionHeader: lower => lower === 'retry-after',
     summarize: summarizeRateLimit,
   },
+  {
+    // PROTOTYPE SHORTCUT: header-only. The plugin sends nothing unless the request carries an Origin header.
+    id: 'cors',
+    label: 'CORS',
+    pluginNames: ['cors'],
+    matchesHeader: lower => CORS_HEADER.test(lower),
+    summarize: summarizeCors,
+    hint: corsHint,
+    missingHint: corsMissingHint,
+  },
 ];
+
+/**
+ * Plugins that are attached (and enabled) on the route but returned none of their headers, with advice on why.
+ * `attached` null = unknown (not linked or still loading): no advice.
+ */
+export function getMissingPluginHints(
+  responseHeaders: ResponseHeader[],
+  attached: { name: string; config: Record<string, unknown> }[] | null,
+  request: PluginRequestContext,
+): { id: string; label: string; hint: string }[] {
+  const out: { id: string; label: string; hint: string }[] = [];
+  for (const def of PLUGIN_HEADER_DEFS) {
+    const plugin = def.missingHint && attached?.find(p => def.pluginNames.includes(p.name));
+    if (!plugin || responseHeaders.some(h => def.matchesHeader(h.name.toLowerCase()))) {
+      continue;
+    }
+    const hint = def.missingHint!(request, plugin.config);
+    if (hint) {
+      out.push({ id: def.id, label: def.label, hint });
+    }
+  }
+  return out;
+}
 
 /**
  * Groups the plugin-owned headers out of a response. `attachedPluginNames` is the set of enabled plugin names on
@@ -112,6 +208,7 @@ const PLUGIN_HEADER_DEFS: PluginHeaderDef[] = [
 export function groupPluginHeaders(
   headers: ResponseHeader[],
   attachedPluginNames: string[] | null,
+  request: PluginRequestContext = { headers: [] },
 ): { groups: PluginHeaderGroup[]; otherHeaders: ResponseHeader[] } {
   const claimed = new Set<ResponseHeader>();
   const groups: PluginHeaderGroup[] = [];
@@ -132,8 +229,53 @@ export function groupPluginHeaders(
       pluginNames: (attachedPluginNames ?? []).filter(n => def.pluginNames.includes(n)),
       headers: all,
       summary: def.summarize(all),
+      hint: def.hint?.(all, request) ?? null,
     });
   }
 
   return { groups, otherHeaders: headers.filter(h => !claimed.has(h)) };
+}
+
+// Headers a browser never lists in Access-Control-Request-Headers (forbidden, or CORS-safelisted).
+const PREFLIGHT_SKIP_HEADERS = new Set([
+  'origin',
+  'host',
+  'content-length',
+  'accept',
+  'accept-language',
+  'accept-encoding',
+  'user-agent',
+  'connection',
+  'cookie',
+  'referer',
+]);
+
+/**
+ * What a browser would send before the given request: an OPTIONS with Origin, Access-Control-Request-Method and
+ * Access-Control-Request-Headers. Returns the patch to apply to a duplicate of the request (method, headers, no body).
+ * `fallbackOrigin` is used when the request has no Origin of its own (e.g. the origin the CORS plugin allowed).
+ */
+export function buildPreflightPatch(
+  request: { method: string; headers: { name: string; value: string; disabled?: boolean }[] },
+  fallbackOrigin?: string,
+) {
+  const origin =
+    getRequestHeader(request, 'origin') || (fallbackOrigin && fallbackOrigin !== '*' ? fallbackOrigin : '');
+  const requestHeaderNames = [
+    ...new Set(
+      request.headers
+        .filter(h => !h.disabled && h.name && !PREFLIGHT_SKIP_HEADERS.has(h.name.toLowerCase()))
+        .map(h => h.name.toLowerCase()),
+    ),
+  ];
+  const ours = new Set(['origin', 'access-control-request-method', 'access-control-request-headers']);
+  const headers = [
+    ...request.headers.filter(h => !ours.has(h.name.toLowerCase())),
+    { name: 'Origin', value: origin || 'https://example.com' },
+    { name: 'Access-Control-Request-Method', value: request.method },
+    ...(requestHeaderNames.length > 0
+      ? [{ name: 'Access-Control-Request-Headers', value: requestHeaderNames.join(',') }]
+      : []),
+  ];
+  return { method: 'OPTIONS', headers, body: {} };
 }

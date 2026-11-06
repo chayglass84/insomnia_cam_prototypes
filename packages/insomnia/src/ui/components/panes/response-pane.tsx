@@ -8,7 +8,7 @@ import { useFetcher, useParams } from 'react-router';
 import { extractChatCompletion, supportsStreaming } from '~/common/chat-completion';
 import { parseChatRequestBody, serializeChatRequestBody } from '~/common/chat-request';
 import { ensureEventStreamAcceptHeader, ensureStreamingBodyFlag, hasStreamingBodyFlag } from '~/common/chat-streaming';
-import { groupPluginHeaders } from '~/common/konnect-plugin-headers';
+import { buildPreflightPatch, getMissingPluginHints, groupPluginHeaders } from '~/common/konnect-plugin-headers';
 import { bodyBufferToUtf8 } from '~/common/utils/utf8-bytes';
 import { useRootLoaderData } from '~/root';
 import { AnalyticsEvent } from '~/ui/analytics';
@@ -248,10 +248,40 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
       groupPluginHeaders(
         activeResponse?.headers ?? [],
         pluginsStatus === 'ready' ? routePlugins.filter(p => p.enabled).map(p => p.name) : null,
+        { headers: activeRequest?.headers ?? [] },
       ),
-    [activeResponse?.headers, pluginsStatus, routePlugins],
+    [activeResponse?.headers, activeRequest?.headers, pluginsStatus, routePlugins],
   );
-  const pluginSummaries = pluginHeaderGroups.filter(g => g.summary);
+  // Bar rows: plugins that sent headers (summary + optional hint), then attached plugins that sent none (hint only).
+  const pluginSummaries = [
+    ...pluginHeaderGroups.filter(g => g.summary),
+    ...getMissingPluginHints(
+      activeResponse?.headers ?? [],
+      pluginsStatus === 'ready' ? routePlugins.filter(p => p.enabled) : null,
+      { headers: activeRequest?.headers ?? [] },
+    ).map(m => ({ id: m.id, label: m.label, summary: null, hint: m.hint })),
+  ];
+
+  // Prototype (3593AI): duplicate this request as an OPTIONS preflight, right after it in the sidebar. Not opened.
+  const handleCreatePreflight = async () => {
+    if (!activeRequest) {
+      return;
+    }
+    const allowedOrigin = activeResponse?.headers.find(
+      h => h.name.toLowerCase() === 'access-control-allow-origin',
+    )?.value;
+    const preflight = await services.helpers.duplicateRequest(activeRequest, {
+      name: `${activeRequest.name} (preflight)`,
+      ...buildPreflightPatch(activeRequest, allowedOrigin),
+    });
+    services.stats.incrementCreatedRequests();
+    showToast({
+      icon: 'check',
+      title: 'Created preflight request',
+      status: 'success',
+      description: `"${preflight.name}" is next to this request in the sidebar.`,
+    });
+  };
   const konnectRouteId = activeRequest?.konnectRouteKey?.split(':')[0] ?? null;
   // Moved here from the Request pane per user feedback ("shouldn't debugger
   // show in the Response panel, right after Preview, rather than Request?").
@@ -411,8 +441,23 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
               </div>
               <ul>
                 {pluginSummaries.map(g => (
-                  <li key={g.id} className="truncate text-(--color-font)">
-                    <span className="font-semibold">{g.label}:</span> {g.summary}
+                  <li key={g.id} className="text-(--color-font)">
+                    <div className="break-words">
+                      <span className="font-semibold">{g.label}:</span>{' '}
+                      {g.summary ?? <span className="text-(--color-warning)">{g.hint}</span>}
+                      {g.id === 'cors' && activeRequest?.method !== 'OPTIONS' && (
+                        <>
+                          {' '}
+                          <Button
+                            className="text-(--hl) underline hover:text-(--color-font)"
+                            onPress={handleCreatePreflight}
+                          >
+                            (Create OPTIONS request)
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                    {g.summary && g.hint && <div className="text-(--color-warning)">{g.hint}</div>}
                   </li>
                 ))}
               </ul>

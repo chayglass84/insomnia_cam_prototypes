@@ -1618,3 +1618,4 @@ Summary only; the current truth is `3593AI.md` work item 12.
 - Restyled the response-pane plugin bar with Cam: dark pane background, Kong lime `KongLogo` on the left, lime `Konnect Plugins` title on its own line, normal font size. Lime constants changed to literal `#CCFF00` + black chip text (the forest-green look was `text-lime-600`).
 - Cam called the first version "overdoing it" (lime tint, chip, emoji gorilla). Went simpler.
 - TODO noted: all Kong lime must be toned down for light themes (not done).
+- Later 2026-11-06: added the CORS registry entry (summary, origin-mismatch and missing-headers hints, inline "(Create OPTIONS request)" link), created a global `cors` test plugin on Insomnia Airlines, wrapped summary lines. Detail in `3593AI.md` work item 12. Slips: macOS `sed -i` without a backup arg fails silently in my chained commands; use python for edits.
