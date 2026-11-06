@@ -19,11 +19,15 @@ export interface PluginHeaderGroup {
   summary: string | null;
   /** Extra advice that needs the REQUEST too (e.g. "your Origin doesn't match"); null when there is none. */
   hint: string | null;
+  /** Show the hint above the summary lines (status-code hints lead with the problem). */
+  hintFirst?: boolean;
 }
 
 /** The slice of the request the registry may look at. Disabled headers are ignored by callers' convention. */
 export interface PluginRequestContext {
   headers: { name: string; value: string; disabled?: boolean }[];
+  /** Query parameters (used by key-auth to see whether a key was sent). */
+  parameters?: { name: string; value: string; disabled?: boolean }[];
 }
 
 // All Konnect plugin UI shares the Kong lime accent. Literal Tailwind classes so Tailwind picks them up.
@@ -277,4 +281,85 @@ export function buildPreflightPatch(
       : []),
   ];
   return { method: 'OPTIONS', headers, body: {} };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Hint strings may wrap a word in **double asterisks** to bold it; the UI renders that (see renderHint).
+// Status-code hints: plugins that leave NO response headers (key-auth, acl) but whose failures are recognisable
+// from the status code plus what the request sent and how the plugin is configured.
+// PROTOTYPE SHORTCUT: assumes the attached plugin caused the status (a 401 with key-auth attached is blamed on it).
+// ---------------------------------------------------------------------------------------------------------------
+
+interface StatusHintDef {
+  id: string;
+  label: string;
+  pluginName: string;
+  status: number;
+  hint: (request: PluginRequestContext, config: Record<string, unknown>) => string | null;
+  /** Optional detail lines (newline-separated "Lead: details"), shown under the hint in the same style as summaries. */
+  summary?: (config: Record<string, unknown>) => string | null;
+}
+
+const stringList = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
+
+function keyAuthHint(request: PluginRequestContext, config: Record<string, unknown>): string | null {
+  const names = stringList(config.key_names).length > 0 ? stringList(config.key_names) : ['apikey'];
+  const inHeader = config.key_in_header !== false;
+  const inQuery = config.key_in_query !== false;
+  const lower = names.map(n => n.toLowerCase());
+  const sentName =
+    (inHeader &&
+      request.headers.find(h => !h.disabled && lower.includes(h.name.toLowerCase()) && h.value.trim())?.name) ||
+    (inQuery &&
+      (request.parameters ?? []).find(p => !p.disabled && lower.includes(p.name.toLowerCase()) && p.value.trim())
+        ?.name) ||
+    null;
+  if (sentName) {
+    return `Invalid API key (**${sentName}** was sent).`;
+  }
+  const where = [inHeader && 'header', inQuery && 'query param'].filter(Boolean).join(' or ') || 'request';
+  return `No API key. Send **${names.join('** or **')}** as a ${where}.`;
+}
+
+function aclSummary(config: Record<string, unknown>): string | null {
+  const allow = stringList(config.allow);
+  const deny = stringList(config.deny);
+  const lines = [allow.length > 0 && `Allows: ${allow.join(', ')}`, deny.length > 0 && `Denies: ${deny.join(', ')}`];
+  return lines.filter(Boolean).join('\n') || null;
+}
+
+const STATUS_HINT_DEFS: StatusHintDef[] = [
+  { id: 'key-auth', label: 'Key Auth', pluginName: 'key-auth', status: 401, hint: keyAuthHint },
+  {
+    id: 'acl',
+    label: 'ACL',
+    pluginName: 'acl',
+    status: 403,
+    hint: () => 'You do not have access.',
+    summary: aclSummary,
+  },
+];
+
+/** Hints for attached plugins that explain the response's status code. `attached` null = unknown: no hints. */
+export function getStatusPluginHints(
+  statusCode: number,
+  attached: { name: string; config: Record<string, unknown> }[] | null,
+  request: PluginRequestContext,
+): { id: string; label: string; hint: string; summary: string | null; hintFirst: true }[] {
+  const out: { id: string; label: string; hint: string; summary: string | null; hintFirst: true }[] = [];
+  for (const def of STATUS_HINT_DEFS) {
+    const plugin = def.status === statusCode && attached?.find(p => p.name === def.pluginName);
+    const hint = plugin ? def.hint(request, plugin.config) : null;
+    if (plugin && hint) {
+      out.push({
+        id: def.id,
+        label: def.label,
+        hint,
+        summary: def.summary?.(plugin.config) ?? null,
+        hintFirst: true,
+      });
+    }
+  }
+  return out;
 }

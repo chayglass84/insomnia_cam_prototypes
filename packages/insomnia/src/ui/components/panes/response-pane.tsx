@@ -8,7 +8,12 @@ import { useFetcher, useParams } from 'react-router';
 import { extractChatCompletion, supportsStreaming } from '~/common/chat-completion';
 import { parseChatRequestBody, serializeChatRequestBody } from '~/common/chat-request';
 import { ensureEventStreamAcceptHeader, ensureStreamingBodyFlag, hasStreamingBodyFlag } from '~/common/chat-streaming';
-import { buildPreflightPatch, getMissingPluginHints, groupPluginHeaders } from '~/common/konnect-plugin-headers';
+import {
+  buildPreflightPatch,
+  getMissingPluginHints,
+  getStatusPluginHints,
+  groupPluginHeaders,
+} from '~/common/konnect-plugin-headers';
 import { bodyBufferToUtf8 } from '~/common/utils/utf8-bytes';
 import { useRootLoaderData } from '~/root';
 import { AnalyticsEvent } from '~/ui/analytics';
@@ -53,6 +58,10 @@ import { downloadResponseBody } from './response-pane-utils';
 interface Props {
   activeRequestId: string;
 }
+
+// Plugin hints can wrap a word in **double asterisks** to bold it (e.g. the API key name).
+const renderHint = (hint: string | null) =>
+  hint?.split(/\*\*(.+?)\*\*/).map((part, i) => (i % 2 === 1 ? <strong key={part}>{part}</strong> : part));
 
 export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
   const { activeRequest, activeRequestMeta, activeResponse, responses, requestVersions } =
@@ -249,18 +258,21 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
       groupPluginHeaders(
         activeResponse?.headers ?? [],
         pluginsStatus === 'ready' ? routePlugins.filter(p => p.enabled).map(p => p.name) : null,
-        { headers: activeRequest?.headers ?? [] },
+        { headers: activeRequest?.headers ?? [], parameters: activeRequest?.parameters ?? [] },
       ),
-    [activeResponse?.headers, activeRequest?.headers, pluginsStatus, routePlugins],
+    [activeResponse?.headers, activeRequest?.headers, activeRequest?.parameters, pluginsStatus, routePlugins],
   );
   // Bar rows: plugins that sent headers (summary + optional hint), then attached plugins that sent none (hint only).
+  const attachedPlugins = pluginsStatus === 'ready' ? routePlugins.filter(p => p.enabled) : null;
+  const requestContext = { headers: activeRequest?.headers ?? [], parameters: activeRequest?.parameters ?? [] };
+  const hintOnly = (m: { id: string; label: string; hint: string; summary?: string | null; hintFirst?: boolean }) => ({
+    summary: null,
+    ...m,
+  });
   const pluginSummaries = [
     ...pluginHeaderGroups.filter(g => g.summary),
-    ...getMissingPluginHints(
-      activeResponse?.headers ?? [],
-      pluginsStatus === 'ready' ? routePlugins.filter(p => p.enabled) : null,
-      { headers: activeRequest?.headers ?? [] },
-    ).map(m => ({ id: m.id, label: m.label, summary: null, hint: m.hint })),
+    ...getMissingPluginHints(activeResponse?.headers ?? [], attachedPlugins, requestContext).map(hintOnly),
+    ...getStatusPluginHints(activeResponse?.statusCode ?? 0, attachedPlugins, requestContext).map(hintOnly),
   ];
 
   // Prototype (3593AI): duplicate this request as an OPTIONS preflight, right after it in the sidebar. Not opened.
@@ -444,22 +456,21 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
                 <li key={g.id} className="grid grid-cols-[7rem_1fr] gap-x-3 text-(--color-font)">
                   <span className="font-semibold">{g.label}</span>
                   <div className="min-w-0 break-words">
-                    {g.summary ? (
+                    {g.hint && g.hintFirst && <div className="text-(--color-warning)">{renderHint(g.hint)}</div>}
+                    {g.summary && (
                       <div>
-                        {/* "Allows: a, b" -> lead in the normal colour, the details muted so they don't run together. */}
-                        {g.summary.includes(': ') ? (
-                          <>
-                            {g.summary.slice(0, g.summary.indexOf(': ') + 2)}
-                            <span className="text-(--hl)">{g.summary.slice(g.summary.indexOf(': ') + 2)}</span>
-                          </>
-                        ) : (
-                          g.summary
-                        )}
+                        {/* One line per "Lead: details"; the lead keeps the normal colour, the details are muted. */}
+                        {g.summary.split('\n').map(line => (
+                          <div key={line}>
+                            {line.includes(': ') && line.slice(0, line.indexOf(': ') + 2)}
+                            <span className="text-(--hl)">
+                              {line.includes(': ') ? line.slice(line.indexOf(': ') + 2) : line}
+                            </span>
+                          </div>
+                        ))}
                       </div>
-                    ) : (
-                      <div className="text-(--color-warning)">{g.hint}</div>
                     )}
-                    {g.summary && g.hint && <div className="text-(--color-warning)">{g.hint}</div>}
+                    {g.hint && !g.hintFirst && <div className="text-(--color-warning)">{renderHint(g.hint)}</div>}
                     {g.id === 'cors' && activeRequest?.method !== 'OPTIONS' && (
                       <Button
                         className="text-(--hl) underline hover:text-(--color-font)"
