@@ -1610,3 +1610,11 @@ Summary only; the current truth is `3593AI.md` work item 12.
 - Decisions (with Cam): detect by header name cross-checked with route plugins; bar under the status/time/size bar (Cam "going back and forth" on placement, may move it into Preview); Kong lime for all plugins; both places labelled "Konnect Plugins".
 - Slip worth remembering: a Python splice using `s.index('</ul>')` matched an earlier closing tag and duplicated ~300 lines of `response-pane.tsx`; caught by tsc. Restored with `git checkout` and re-applied. Anchor splices on a unique string, and run tsc right after.
 - Next session: walk through more plugins (key-auth, cors, request-transformer, ai-proxy-advanced) and decide how to show each.
+
+## Session notes — 2026-11-06: plugin bar restyle (work item 12)
+
+Summary only; the current truth is `3593AI.md` work item 12.
+
+- Restyled the response-pane plugin bar with Cam: dark pane background, Kong lime `KongLogo` on the left, lime `Konnect Plugins` title on its own line, normal font size. Lime constants changed to literal `#CCFF00` + black chip text (the forest-green look was `text-lime-600`).
+- Cam called the first version "overdoing it" (lime tint, chip, emoji gorilla). Went simpler.
+- TODO noted: all Kong lime must be toned down for light themes (not done).

@@ -56,14 +56,14 @@ export const ResponseHeadersViewer: FC<Props> = ({ headers, onCopyAll, pluginGro
           {pluginGroups.length > 0 && (
             <tr>
               <th colSpan={2} className={`border-l-4 border-solid text-left ${KONNECT_PLUGIN_BORDER_CLASS}`}>
-                Konnect Plugins
+                <span className={`rounded-xs px-1 ${KONNECT_PLUGIN_CHIP_CLASS}`}>Konnect Plugins</span>
               </th>
             </tr>
           )}
           {pluginGroups.map(group => (
             <Fragment key={group.id}>
               <tr>
-                <td colSpan={2} className={`border-l-4 border-solid text-xs ${KONNECT_PLUGIN_BORDER_CLASS}`}>
+                <td colSpan={2} className={`border-l-4 border-solid ${KONNECT_PLUGIN_BORDER_CLASS}`}>
                   <span className={`rounded-xs px-1 ${KONNECT_PLUGIN_CHIP_CLASS}`}>
                     {group.pluginNames.length > 0 ? group.pluginNames.join(', ') : group.label}
                   </span>
