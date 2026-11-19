@@ -14,6 +14,8 @@ export interface McpDebuggerBridgeAPI {
   invokeCapability: (options: Parameters<typeof service.invokeCapability>[0]) => Promise<{ correlationId: string }>;
   invokeRaw: (options: Parameters<typeof service.invokeRaw>[0]) => Promise<{ correlationId: string }>;
   cancel: (options: Parameters<typeof service.cancel>[0]) => Promise<void>;
+  respondPeerRequest: (options: Parameters<typeof service.respondPeerRequest>[0]) => Promise<void>;
+  setRoots: (options: Parameters<typeof service.setRoots>[0]) => Promise<void>;
 }
 
 export const registerMcpDebuggerHandlers = () => {
@@ -28,6 +30,10 @@ export const registerMcpDebuggerHandlers = () => {
   );
   ipcMainHandle('mcpDebugger.invokeRaw', (_, o: Parameters<typeof service.invokeRaw>[0]) => service.invokeRaw(o));
   ipcMainHandle('mcpDebugger.cancel', (_, o: Parameters<typeof service.cancel>[0]) => service.cancel(o));
+  ipcMainHandle('mcpDebugger.respondPeerRequest', (_, o: Parameters<typeof service.respondPeerRequest>[0]) =>
+    service.respondPeerRequest(o),
+  );
+  ipcMainHandle('mcpDebugger.setRoots', (_, o: Parameters<typeof service.setRoots>[0]) => service.setRoots(o));
 };
 
 export const closeAllMcpDebuggerSessions = service.closeAll;

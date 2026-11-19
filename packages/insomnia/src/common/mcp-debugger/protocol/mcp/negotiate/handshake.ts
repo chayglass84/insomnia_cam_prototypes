@@ -194,9 +194,24 @@ function shouldSurfaceFallbackFailure(e: unknown): boolean {
 
 /** `initialize` params, proposing `proposedVersion` (4348: a pinned legacy version) instead of the newest one. */
 export function initializeParams(proposedVersion?: string) {
-  return proposedVersion
-    ? { ...INITIALIZE_REQUEST.params, protocolVersion: proposedVersion }
-    : INITIALIZE_REQUEST.params;
+  const protocolVersion = proposedVersion ?? INITIALIZE_REQUEST.params.protocolVersion;
+  return {
+    ...INITIALIZE_REQUEST.params,
+    protocolVersion,
+    capabilities: { ...INITIALIZE_REQUEST.params.capabilities, ...legacyClientCapabilities(protocolVersion) },
+  };
+}
+
+/**
+ * 4348 (S3): the client capabilities the debugger can actually serve to a session-era server. Roots and sampling exist
+ * in every legacy version; elicitation arrived in 2025-06-18. Advertising them is what makes a server send the requests.
+ */
+export function legacyClientCapabilities(version: string): Record<string, unknown> {
+  return {
+    roots: { listChanged: true },
+    sampling: {},
+    ...(version >= "2025-06-18" ? { elicitation: {} } : {}),
+  };
 }
 
 export async function negotiateAndInitialize(

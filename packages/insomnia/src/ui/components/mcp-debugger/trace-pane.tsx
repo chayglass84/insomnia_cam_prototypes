@@ -8,6 +8,7 @@ import { buildCurl } from './curl-command';
 import { JsonView } from './json-view';
 import { diffJson, type DiffLine, hasChanges } from './line-diff';
 import { SegmentedToggle } from './segmented-toggle';
+import { ElicitationResponder, SamplingResponder, type ServerRequestOutcome } from './server-request-forms';
 
 // Task 4348 trace pane: one row per call (events grouped by correlationId), click for request/response detail.
 // S2: "Edit & replay" on any request row (raw JSON-RPC editor), replay rows link to their original, and request /
@@ -58,6 +59,16 @@ export const groupCalls = (trace: TraceEvent[]): Call[] => {
 const requestEventOf = (call: Call) =>
   call.events.find(e => e.direction === 'client-to-server' && e.awaitsReply) ?? call.events[0];
 const terminalEventOf = (call: Call) => [...call.events].reverse().find(e => e.terminalStatus);
+
+/** Server-initiated requests the user answers by hand (the service holds the reply until then). */
+const HELD_SERVER_METHODS = new Set(['sampling/createMessage', 'elicitation/create']);
+const isWaitingServerRequest = (call: Call) => {
+  const request = requestEventOf(call);
+  const method = (request.payload as { method?: string } | undefined)?.method;
+  return (
+    request.direction === 'server-to-client' && call.status === 'pending' && method !== undefined && HELD_SERVER_METHODS.has(method)
+  );
+};
 
 /** A call can be edited and replayed when it is a client request other than the connect handshake. */
 const isReplayable = (call: Call) => {
@@ -178,8 +189,9 @@ const CallDetail: FC<{
   serverUrl?: string;
   onCancel: (correlationId: string) => void;
   onReplay: (call: Call, invocation: ReplayRequest) => void;
+  onRespond: (call: Call, outcome: ServerRequestOutcome) => void;
   onSelect: (correlationId: string) => void;
-}> = ({ call, original, isConnected, serverUrl, onCancel, onReplay, onSelect }) => {
+}> = ({ call, original, isConnected, serverUrl, onCancel, onReplay, onRespond, onSelect }) => {
   const request = requestEventOf(call);
   const replies = call.events.filter(e => e !== request);
   const [editing, setEditing] = useState(false);
@@ -246,6 +258,18 @@ const CallDetail: FC<{
           )}
         </div>
       </div>
+      {isWaitingServerRequest(call) &&
+        ((request.payload as { method?: string }).method === 'elicitation/create' ? (
+          <ElicitationResponder
+            params={(request.payload as { params?: { message?: string; requestedSchema?: never } }).params}
+            onRespond={outcome => onRespond(call, outcome)}
+          />
+        ) : (
+          <SamplingResponder
+            params={(request.payload as { params?: unknown }).params}
+            onRespond={outcome => onRespond(call, outcome)}
+          />
+        ))}
       {copied && copied.length > 0 && (
         <p className="text-xs text-(--hl)" data-testid="mcp-curl-note">
           Credentials are not copied. Set {copied.map(v => `$${v}`).join(', ')} in your shell before running it.
@@ -463,6 +487,15 @@ export const McpTracePane: FC<{
     setSelectedEventId(null);
   }, [requestId]);
 
+  const respond = async (call: Call, outcome: ServerRequestOutcome) => {
+    try {
+      await window.main.mcpDebugger.respondPeerRequest({ requestId, correlationId: call.correlationId, ...outcome });
+    } catch (err) {
+      console.error('[mcp-debugger] responding to the server request failed', err);
+    }
+  };
+  const waiting = calls.find(isWaitingServerRequest);
+
   const replay = async (call: Call, invocation: ReplayRequest) => {
     try {
       const { correlationId } = await window.main.mcpDebugger.invokeRaw({
@@ -499,6 +532,24 @@ export const McpTracePane: FC<{
           Clear
         </Button>
       </div>
+      {waiting && (
+        <div
+          className="flex items-center gap-2 border-b border-solid border-(--hl-md) bg-amber-500/10 px-2 py-1 text-xs text-amber-500"
+          data-testid="mcp-waiting-server-request"
+        >
+          <i className="fa fa-hourglass-half" />
+          <span>The server is waiting for your answer: {waiting.label}</span>
+          <Button
+            className="ml-auto underline"
+            onPress={() => {
+              setStoredMode('calls');
+              setSelectedId(waiting.correlationId);
+            }}
+          >
+            Open
+          </Button>
+        </div>
+      )}
       {calls.length === 0 ? (
         <p className="p-4 text-sm text-(--hl)">Connect to a server to see protocol traffic here.</p>
       ) : (
@@ -553,6 +604,7 @@ export const McpTracePane: FC<{
                 serverUrl={serverUrl}
                 onCancel={correlationId => window.main.mcpDebugger.cancel({ requestId, correlationId })}
                 onReplay={replay}
+                onRespond={respond}
                 onSelect={setSelectedId}
               />
             )}

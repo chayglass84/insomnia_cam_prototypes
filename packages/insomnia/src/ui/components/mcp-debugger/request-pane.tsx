@@ -11,8 +11,10 @@ import { AuthWrapper } from '~/ui/components/editors/auth/auth-wrapper';
 import { RequestHeadersEditor } from '~/ui/components/editors/request-headers-editor';
 import { InsomniaRjsfForm, type InsomniaRjsfFormHandle } from '~/ui/components/rjsf';
 
+import type { SessionTab } from './capability-sidebar';
 import { PrototypeMock } from './prototype-mock';
 import { SegmentedToggle } from './segmented-toggle';
+import { SessionPanel } from './session-panels';
 
 // Task 4348 S1 request pane: Params (schema form or raw JSON) / Auth / Headers for the selected capability.
 // PROTOTYPE-MOCK: params live in component state per capability (not persisted to McpPayload); S2 persists runs.
@@ -25,9 +27,10 @@ const tabClass =
 export const McpDebuggerRequestPane: FC<{
   request: McpRequest;
   capability: Capability | null;
+  session: SessionTab | null;
   isConnected: boolean;
   uniqueKey: string;
-}> = ({ request, capability, isConnected, uniqueKey }) => {
+}> = ({ request, capability, session, isConnected, uniqueKey }) => {
   const [tab, setTab] = useState<'params' | 'auth' | 'headers'>('params');
   const [argsByCapability, setArgsByCapability] = useState<Record<string, Record<string, unknown>>>({});
   const [rawMode, setRawMode] = useState(false);
@@ -99,6 +102,8 @@ export const McpDebuggerRequestPane: FC<{
       <TabPanel id="params" className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         {!isConnected ? (
           <p className="notice info m-(--padding-md)">Connect to an MCP server to build requests.</p>
+        ) : session ? (
+          <SessionPanel tab={session} request={request} isConnected={isConnected} />
         ) : !capability ? (
           <p className="notice info m-(--padding-md)">Select a tool, resource or prompt from the list.</p>
         ) : (

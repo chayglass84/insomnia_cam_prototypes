@@ -129,6 +129,8 @@ export type HandleChannels =
   | 'mcpDebugger.invokeCapability'
   | 'mcpDebugger.invokeRaw'
   | 'mcpDebugger.cancel'
+  | 'mcpDebugger.respondPeerRequest'
+  | 'mcpDebugger.setRoots'
   | 'mcp.client.hasRequestResponded'
   | 'mcp.close'
   | 'mcp.connect'

@@ -25,6 +25,8 @@ interface Session {
   seq: number;
   /** replay correlationId -> the correlationId of the call it was replayed from (S2). */
   replays: Record<string, string>;
+  /** Roots offered to the server when it asks roots/list (S3; configured on the request, editable while connected). */
+  roots: { name?: string; uri: string }[];
 }
 
 const MAX_TRACE_EVENTS = 5000;
@@ -33,7 +35,7 @@ const sessions = new Map<string, Session>();
 const sessionFor = (requestId: string): Session => {
   let s = sessions.get(requestId);
   if (!s) {
-    s = { protocol: new MCPHTTPProtocol(), status: 'disconnected', capabilities: [], warnings: [], trace: [], seq: 0, replays: {} };
+    s = { protocol: new MCPHTTPProtocol(), status: 'disconnected', capabilities: [], warnings: [], trace: [], seq: 0, replays: {}, roots: [] };
     sessions.set(requestId, s);
   }
   return s;
@@ -70,6 +72,9 @@ const protocolIssueOf = (err: unknown, url: string, versionChoice?: string): str
     : `The MCP server ${url} does not support any protocol version Insomnia supports.`;
 };
 
+/** Server-initiated requests the UI answers by hand. */
+const HELD_PEER_METHODS = new Set(['sampling/createMessage', 'elicitation/create']);
+
 const messageOf = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 export interface McpDebuggerConnectOptions {
@@ -78,6 +83,8 @@ export interface McpDebuggerConnectOptions {
   /** Already template-rendered, auth headers included (the renderer reuses the existing connect-param rendering). */
   headers: { name: string; value: string; disabled?: boolean }[];
   protocolVersion?: string;
+  /** Roots to offer when the server asks (session-era versions). */
+  roots?: { name?: string; uri: string }[];
 }
 
 export interface McpDebuggerState {
@@ -132,6 +139,7 @@ export const connect = async (options: McpDebuggerConnectOptions): Promise<McpDe
   s.error = undefined;
   s.protocolIssue = undefined;
   s.url = url;
+  s.roots = (options.roots ?? []).filter(r => r.uri);
   s.capabilities = [];
   s.warnings = [];
   const sink = sinkFor(s);
@@ -144,6 +152,20 @@ export const connect = async (options: McpDebuggerConnectOptions): Promise<McpDe
   };
   try {
     s.conn = await s.protocol.connect(config, s.abort.signal, sink);
+    const conn = s.conn;
+    // S3: roots are answered from the configured list; sampling and elicitation are held until the UI answers
+    // (respondPeerRequest). Anything else keeps the protocol's automatic -32601.
+    s.protocol.setPeerRequestHandler(conn, request => {
+      if (request.method === 'roots/list') {
+        queueMicrotask(() =>
+          void s.protocol
+            .respondToPeerRequest(conn, request.correlationId, { result: { roots: s.roots } }, sink)
+            .catch(err => console.warn('[mcp-debugger] roots reply failed', err)),
+        );
+        return true;
+      }
+      return HELD_PEER_METHODS.has(request.method);
+    });
     const result = await s.protocol.introspect(s.conn, s.abort.signal, sink);
     s.capabilities = result.capabilities;
     s.warnings = result.warnings;
@@ -223,6 +245,40 @@ export const cancel = ({ requestId, correlationId }: { requestId: string; correl
   const s = sessionFor(requestId);
   if (s.conn) {
     s.protocol.cancel(s.conn, correlationId, 'Cancelled by user');
+  }
+};
+
+/** Answer a held server-initiated request (sampling / elicitation) with a result or a JSON-RPC error. */
+export const respondPeerRequest = async ({
+  requestId,
+  correlationId,
+  result,
+  error,
+}: {
+  requestId: string;
+  correlationId: string;
+  result?: unknown;
+  error?: { code: number; message: string; data?: unknown };
+}) => {
+  const s = sessionFor(requestId);
+  if (!s.conn) {
+    throw new Error('Not connected');
+  }
+  await s.protocol.respondToPeerRequest(s.conn, correlationId, error ? { error } : { result }, sinkFor(s));
+};
+
+/** Update the roots offered to the server and tell it they changed (notifications/roots/list_changed). */
+export const setRoots = async ({
+  requestId,
+  roots,
+}: {
+  requestId: string;
+  roots: { name?: string; uri: string }[];
+}) => {
+  const s = sessionFor(requestId);
+  s.roots = roots.filter(r => r.uri);
+  if (s.conn && s.status === 'connected') {
+    await s.protocol.notify(s.conn, 'notifications/roots/list_changed');
   }
 };
 

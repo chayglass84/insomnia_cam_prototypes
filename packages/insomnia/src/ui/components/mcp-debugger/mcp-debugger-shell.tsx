@@ -13,7 +13,7 @@ import { OrganizationTabList } from '~/ui/components/tabs/tab-list';
 import WorkspacePaneHeader from '~/ui/components/workspace/workspace-pane-header';
 import { useGitVCSVersion } from '~/ui/hooks/use-vcs-version';
 
-import { CapabilitySidebar } from './capability-sidebar';
+import { CapabilitySidebar, type SessionTab } from './capability-sidebar';
 import { McpDebuggerUrlBar } from './mcp-debugger-url-bar';
 import { McpDebuggerRequestPane } from './request-pane';
 import { McpTracePane } from './trace-pane';
@@ -28,6 +28,7 @@ export const McpDebuggerShell = ({ request }: { request: McpRequest }) => {
   const gitVersion = useGitVCSVersion();
   const { state, trace, clearTrace } = useMcpDebugger(request._id);
   const [selected, setSelected] = useState<Capability | null>(null);
+  const [session, setSession] = useState<SessionTab | null>(null);
   const isConnected = state.status === 'connected';
   const uniqueKey = `${activeEnvironment?._id}::${activeEnvironment?.modified}::${activeGlobalEnvironment?._id}::${activeGlobalEnvironment?.modified}::${request._id}::${gitVersion}::${vcsVersion}::${isConnected}`;
 
@@ -65,7 +66,12 @@ export const McpDebuggerShell = ({ request }: { request: McpRequest }) => {
             protocolVersion={state.protocolVersion}
             isConnected={isConnected}
             selectedKey={selected ? capabilityKey(selected) : null}
-            onSelect={setSelected}
+            onSelect={capability => {
+              setSelected(capability);
+              setSession(null);
+            }}
+            selectedSession={session}
+            onSelectSession={setSession}
           />
         </Panel>
         <PanelResizeHandle className="h-full w-px bg-(--hl-md)" />
@@ -76,6 +82,7 @@ export const McpDebuggerShell = ({ request }: { request: McpRequest }) => {
                 <McpDebuggerRequestPane
                   request={request}
                   capability={selected}
+                  session={isConnected ? session : null}
                   isConnected={isConnected}
                   uniqueKey={uniqueKey}
                 />

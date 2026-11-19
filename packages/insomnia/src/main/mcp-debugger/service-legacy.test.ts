@@ -86,3 +86,88 @@ describe('HTTP+SSE (2024-11-05)', () => {
     await service.disconnect({ requestId: 'req_sse_auto' });
   });
 });
+
+describe('server-initiated requests (session era)', () => {
+  const connectWithRoots = async (requestId: string, version = 'auto') => {
+    const state = await service.connect({
+      requestId,
+      url: `${base}/mcp`,
+      headers: [],
+      protocolVersion: version,
+      roots: [{ name: 'proj', uri: 'file:///work/proj' }],
+    });
+    expect(state.status).toBe('connected');
+  };
+  const callTool = (requestId: string, name: string) => {
+    const capability = service.getState({ requestId }).capabilities.find(c => c.metadata.name === name)!;
+    return service.invokeCapability({ requestId, capability, args: {} }).correlationId;
+  };
+  const settled = (requestId: string, correlationId: string) =>
+    service.getTrace({ requestId }).find(e => e.correlationId === correlationId && e.terminalStatus);
+  /** A server-initiated request still waiting for our answer. */
+  const pendingServerRequest = (requestId: string, method: string) =>
+    service
+      .getTrace({ requestId })
+      .find(
+        (e, _i, all) =>
+          e.direction === 'server-to-client' &&
+          e.awaitsReply &&
+          (e.payload as { method?: string }).method === method &&
+          !all.some(x => x.correlationId === e.correlationId && x.terminalStatus),
+      );
+  const toolText = (requestId: string, correlationId: string) =>
+    JSON.stringify((settled(requestId, correlationId)!.payload as { content: unknown }).content);
+
+  it('advertises roots/sampling (and elicitation from 2025-06-18) in initialize', async () => {
+    for (const [version, expectElicitation] of [['2025-11-25', true], ['2025-03-26', false]] as const) {
+      const requestId = `req_caps_${version}`;
+      await connectWithRoots(requestId, version);
+      const init = service.getTrace({ requestId }).find(e => (e.payload as { method?: string }).method === 'initialize')!;
+      const caps = (init.payload as { params: { capabilities: Record<string, unknown> } }).params.capabilities;
+      expect(caps).toMatchObject({ roots: { listChanged: true }, sampling: {} });
+      expect('elicitation' in caps).toBe(expectElicitation);
+      await service.disconnect({ requestId });
+    }
+  });
+
+  it('answers roots/list from the configured roots', async () => {
+    const requestId = 'req_roots';
+    await connectWithRoots(requestId);
+    const call = callTool(requestId, 'ask-roots');
+    await waitFor(() => settled(requestId, call) !== undefined);
+    expect(toolText(requestId, call)).toContain('file:///work/proj');
+    await service.disconnect({ requestId });
+  });
+
+  it('holds a sampling request until it is answered, then returns the answer to the server', async () => {
+    const requestId = 'req_sampling';
+    await connectWithRoots(requestId);
+    const call = callTool(requestId, 'ask-sampling');
+    await waitFor(() => pendingServerRequest(requestId, 'sampling/createMessage') !== undefined);
+    expect(settled(requestId, call)).toBeUndefined(); // the tool call is blocked on us
+    await service.respondPeerRequest({
+      requestId,
+      correlationId: pendingServerRequest(requestId, 'sampling/createMessage')!.correlationId,
+      result: { role: 'assistant', content: { type: 'text', text: 'hello from the human' }, model: 'me' },
+    });
+    await waitFor(() => settled(requestId, call) !== undefined);
+    expect(toolText(requestId, call)).toContain('hello from the human');
+    expect(pendingServerRequest(requestId, 'sampling/createMessage')).toBeUndefined();
+    await service.disconnect({ requestId });
+  });
+
+  it('answers an elicitation, and a decline reaches the server as the user wrote it', async () => {
+    const requestId = 'req_elicit';
+    await connectWithRoots(requestId);
+    const call = callTool(requestId, 'ask-elicit');
+    await waitFor(() => pendingServerRequest(requestId, 'elicitation/create') !== undefined);
+    await service.respondPeerRequest({
+      requestId,
+      correlationId: pendingServerRequest(requestId, 'elicitation/create')!.correlationId,
+      result: { action: 'accept', content: { name: 'Cam' } },
+    });
+    await waitFor(() => settled(requestId, call) !== undefined);
+    expect(toolText(requestId, call)).toContain('Cam');
+    await service.disconnect({ requestId });
+  });
+});

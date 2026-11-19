@@ -112,6 +112,7 @@ export const McpDebuggerUrlBar = ({
           url: params.url,
           headers: params.headers,
           protocolVersion: versionChoice,
+          roots: request.roots,
         });
         // A failed connect is already in the trace (and the shell shows a banner for protocol mismatches).
         if (next.status === 'error') {
@@ -124,7 +125,7 @@ export const McpDebuggerUrlBar = ({
         setIsStarting(false);
       }
     },
-    [buildConnectParams, request._id],
+    [buildConnectParams, request._id, request.roots],
   );
 
   const handleSubmit = useCallback(async () => {

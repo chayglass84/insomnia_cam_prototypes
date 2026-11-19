@@ -55,6 +55,8 @@ import {
   DISCONNECT_DELETE_TIMEOUT_MS,
   type MCPConnection,
   newConnection,
+  type PeerOutcome,
+  replyToPeerRequest,
   sendRequest,
   type SettledReply,
   withTimeout,
@@ -761,6 +763,32 @@ export class MCPHTTPProtocol implements Protocol<MCPConnectConfig> {
       this.trace.notification(String(requestId), "notifications/cancelled", { requestId, reason }),
     );
     void this.sendNotification(conn, "notifications/cancelled", { requestId, reason });
+  }
+
+  /**
+   * 4348 (S3): let the app answer some server-initiated requests itself. `handler` returns true to take ownership of a
+   * request (it must later call `respondToPeerRequest`); false leaves Ardi's auto -32601.
+   */
+  setPeerRequestHandler(
+    connection: Connection,
+    handler: ((request: { correlationId: string; method: string; params: unknown }) => boolean) | undefined,
+  ): void {
+    this.requireConnection(connection).onPeerRequest = handler;
+  }
+
+  /** Answer a held server-initiated request with a result or a JSON-RPC error, settling its trace row. */
+  respondToPeerRequest(
+    connection: Connection,
+    correlationId: string,
+    outcome: PeerOutcome,
+    onTrace?: TraceSink,
+  ): Promise<void> {
+    return replyToPeerRequest(this.requireConnection(connection), this.trace, correlationId, outcome, onTrace);
+  }
+
+  /** Send a client notification (e.g. `notifications/roots/list_changed`), best effort. */
+  notify(connection: Connection, method: string, params: Record<string, unknown> = {}): Promise<void> {
+    return this.sendNotification(this.requireConnection(connection), method, params);
   }
 
   /**

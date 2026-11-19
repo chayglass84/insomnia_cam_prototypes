@@ -34,13 +34,19 @@ const CHIPS: Record<CapabilityType, { label: string; className: string }> = {
   },
 };
 
+// Session-era (legacy) panels that exist only in the older protocol versions. Built in S3.
+export type SessionTab = 'ping' | 'logging' | 'roots' | 'sampling';
+const SESSION_TABS: Partial<Record<McpDebuggerTabId, { id: SessionTab; label: string }>> = {
+  ping: { id: 'ping', label: 'Ping' },
+  logging: { id: 'logging', label: 'Logging' },
+  roots: { id: 'roots', label: 'Roots' },
+  sampling: { id: 'sampling', label: 'Sampling' },
+};
+
+// Still to build (slice S4): shown as visible mock rows.
 const MOCK_TABS: Partial<Record<McpDebuggerTabId, string>> = {
   tasks: 'Tasks (slice S4)',
   subscriptions: 'Subscriptions (slice S4)',
-  roots: 'Roots (slice S3)',
-  sampling: 'Sampling (slice S3)',
-  logging: 'Logging (slice S3)',
-  ping: 'Ping (slice S3)',
 };
 
 export const CapabilitySidebar: FC<{
@@ -48,8 +54,10 @@ export const CapabilitySidebar: FC<{
   protocolVersion?: string;
   selectedKey: string | null;
   onSelect: (capability: Capability) => void;
+  selectedSession: SessionTab | null;
+  onSelectSession: (tab: SessionTab) => void;
   isConnected: boolean;
-}> = ({ capabilities, protocolVersion, selectedKey, onSelect, isConnected }) => {
+}> = ({ capabilities, protocolVersion, selectedKey, onSelect, selectedSession, onSelectSession, isConnected }) => {
   const [filter, setFilter] = useState('');
   const visible = useMemo(
     () =>
@@ -62,6 +70,7 @@ export const CapabilitySidebar: FC<{
   const ordered = useMemo(() => GROUPS.flatMap(({ type }) => visible.filter(c => c.type === type)), [visible]);
   const profile = isSupportedVersion(protocolVersion) ? getProfile(protocolVersion) : null;
   const mockTabs = profile ? profile.tabs.filter(t => MOCK_TABS[t]) : [];
+  const sessionTabs = profile ? profile.tabs.flatMap(t => SESSION_TABS[t] ?? []) : [];
 
   return (
     <div className="flex h-full flex-col overflow-hidden" data-testid="mcp-capability-sidebar">
@@ -98,6 +107,22 @@ export const CapabilitySidebar: FC<{
               </button>
             );
           })}
+        {isConnected && sessionTabs.length > 0 && (
+          <section className="mt-3 border-t border-solid border-(--hl-md) pt-1" data-testid="mcp-session-tabs">
+            {sessionTabs.map(tab => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => onSelectSession(tab.id)}
+                data-testid={`mcp-session-${tab.id}`}
+                className={`flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm hover:bg-(--hl-xs) ${selectedSession === tab.id ? 'bg-(--hl-sm)' : ''}`}
+              >
+                <span className={`${CHIP_BASE} border-(--hl-md) text-(--hl)`}>Sess</span>
+                <span className="truncate">{tab.label}</span>
+              </button>
+            ))}
+          </section>
+        )}
         {isConnected && mockTabs.length > 0 && (
           <section className="mt-3 border-t border-dashed border-amber-500/50 p-3" data-testid="mcp-mock-tabs">
             <h4 className="mb-1 text-xs font-bold text-amber-500 uppercase">Not built yet · {protocolVersion}</h4>

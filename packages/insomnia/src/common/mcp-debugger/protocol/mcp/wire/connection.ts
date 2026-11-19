@@ -69,6 +69,13 @@ export type MCPConnection = Connection & {
   sessionId: string | undefined;
   getNextId: () => number;
   nextServerEventId: () => number;
+  /**
+   * 4348 (S3): server-initiated requests this client chose to answer later (sampling, elicitation, roots), keyed by
+   * trace correlationId (`srv-N`) -> the server's wire id. Without a handler every non-ping peer request is auto-rejected
+   * with -32601, as Ardi does.
+   */
+  readonly peerRequests: Map<string, string | number>;
+  onPeerRequest?: (request: { correlationId: string; method: string; params: unknown }) => boolean;
 };
 
 export function currentOrigin(): string | null {
@@ -153,6 +160,7 @@ export function newConnection(
     // `server/discover` probe never registers a waiter, so the gap is inert there.
     getNextId: createIdGenerator(2),
     nextServerEventId: () => nextServerEventCounter++,
+    peerRequests: new Map(),
   };
 }
 
@@ -267,6 +275,10 @@ function handleMessage(
       // an empty result, regardless of negotiated capabilities (spec: Ping).
       onTrace?.(trace.clientResponse(correlationId, {}));
       void sendPeerReply(conn, { jsonrpc: "2.0", id: env.id, result: {} });
+    } else if (conn.onPeerRequest?.({ correlationId, method: env.method, params: env.params })) {
+      // 4348: the app took ownership of this request and will answer via `replyToPeerRequest`. The trace row
+      // stays pending until then (serverRequest sets awaitsReply).
+      conn.peerRequests.set(correlationId, env.id);
     } else {
       // Every other peer request targets a capability this client never
       // advertised, so it's a JSON-RPC method-not-found.
@@ -280,6 +292,32 @@ function handleMessage(
   // Peer notification → trace as srv-N
   if (typeof env.method === "string") {
     onTrace?.(trace.serverNotification(`srv-${conn.nextServerEventId()}`, env.method, env.params));
+  }
+}
+
+export type PeerOutcome =
+  | { result: unknown }
+  | { error: { code: number; message: string; data?: unknown } };
+
+/** Answer a held server-initiated request (see `MCPConnection.peerRequests`) and settle its trace row. */
+export async function replyToPeerRequest(
+  conn: MCPConnection,
+  trace: TraceEventFactory,
+  correlationId: string,
+  outcome: PeerOutcome,
+  onTrace?: TraceSink,
+): Promise<void> {
+  const wireId = conn.peerRequests.get(correlationId);
+  if (wireId === undefined) {
+    throw new Error("No pending server request with that id (already answered?)");
+  }
+  conn.peerRequests.delete(correlationId);
+  if ("result" in outcome) {
+    onTrace?.(trace.clientResponse(correlationId, outcome.result));
+    await sendPeerReply(conn, { jsonrpc: "2.0", id: wireId, result: outcome.result });
+  } else {
+    onTrace?.(trace.clientError(correlationId, outcome.error));
+    await sendPeerReply(conn, { jsonrpc: "2.0", id: wireId, error: outcome.error });
   }
 }
 
