@@ -69,6 +69,22 @@ describe('mcp-debugger service', () => {
     expect(state.error).toBeTruthy();
   });
 
+  it('replays an edited call, linking it to the original', async () => {
+    const requestId = 'req_replay';
+    await service.connect({ requestId, url: `${base}/stateless`, headers: [], protocolVersion: 'auto' });
+    const call = (message: string, replayOf?: string) =>
+      service.invokeRaw({ requestId, invocation: { method: 'tools/call', params: { name: 'echo', arguments: { message } } }, replayOf });
+    const first = call('one');
+    const second = call('two', first.correlationId);
+    expect(first.correlationId).toBeTruthy();
+    expect(second.correlationId).not.toBe(first.correlationId);
+    expect(service.getState({ requestId }).replays[second.correlationId]).toBe(first.correlationId);
+    await waitFor(() =>
+      [first, second].every(c => service.getTrace({ requestId }).some(e => e.correlationId === c.correlationId && e.terminalStatus === 'success')),
+    );
+    await service.disconnect({ requestId });
+  });
+
   describe('failures', () => {
     const errorEvent = (requestId: string) => service.getTrace({ requestId }).find(e => e.terminalStatus === 'error');
 

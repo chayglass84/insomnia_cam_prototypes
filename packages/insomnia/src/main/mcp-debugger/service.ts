@@ -21,6 +21,8 @@ interface Session {
   warnings: IntrospectionWarning[];
   trace: TraceEvent[];
   seq: number;
+  /** replay correlationId -> the correlationId of the call it was replayed from (S2). */
+  replays: Record<string, string>;
 }
 
 const MAX_TRACE_EVENTS = 5000;
@@ -29,7 +31,7 @@ const sessions = new Map<string, Session>();
 const sessionFor = (requestId: string): Session => {
   let s = sessions.get(requestId);
   if (!s) {
-    s = { protocol: new MCPHTTPProtocol(), status: 'disconnected', capabilities: [], warnings: [], trace: [], seq: 0 };
+    s = { protocol: new MCPHTTPProtocol(), status: 'disconnected', capabilities: [], warnings: [], trace: [], seq: 0, replays: {} };
     sessions.set(requestId, s);
   }
   return s;
@@ -86,6 +88,7 @@ export interface McpDebuggerState {
   capabilities: Capability[];
   warnings: IntrospectionWarning[];
   lastSequence: number;
+  replays: Record<string, string>;
 }
 
 export const getState = ({ requestId }: { requestId: string }): McpDebuggerState => {
@@ -99,6 +102,7 @@ export const getState = ({ requestId }: { requestId: string }): McpDebuggerState
     capabilities: s.capabilities,
     warnings: s.warnings,
     lastSequence: s.seq,
+    replays: s.replays,
   };
 };
 
@@ -106,7 +110,9 @@ export const getTrace = ({ requestId, afterSequence = 0 }: { requestId: string; 
   sessionFor(requestId).trace.filter(e => e.sequence > afterSequence);
 
 export const clearTrace = ({ requestId }: { requestId: string }) => {
-  sessionFor(requestId).trace = [];
+  const s = sessionFor(requestId);
+  s.trace = [];
+  s.replays = {};
 };
 
 export const connect = async (options: McpDebuggerConnectOptions): Promise<McpDebuggerState> => {
@@ -160,15 +166,26 @@ export const disconnect = async ({ requestId }: { requestId: string }): Promise<
   return getState({ requestId });
 };
 
-const run = (requestId: string, invocation: Invocation) => {
+/** Returns the new call's correlationId (captured from its request event, which is emitted synchronously). */
+const run = (requestId: string, invocation: Invocation, replayOf?: string): { correlationId: string } => {
   const s = sessionFor(requestId);
   if (!s.conn || s.status !== 'connected') {
     throw new Error('Not connected');
   }
+  const base = sinkFor(s);
+  let correlationId = '';
+  const sink = (event: TraceEvent) => {
+    if (!correlationId && event.direction === 'client-to-server' && event.awaitsReply) {
+      correlationId = event.correlationId;
+      if (replayOf) {
+        s.replays[correlationId] = replayOf;
+      }
+    }
+    base(event);
+  };
   // Fire and forget: progress and the terminal result arrive through the trace. `invoke` traces its own errors.
-  void s.protocol
-    .invoke(s.conn, invocation, s.abort?.signal, sinkFor(s))
-    .catch(err => console.warn('[mcp-debugger] invoke failed', err));
+  void s.protocol.invoke(s.conn, invocation, s.abort?.signal, sink).catch(err => console.warn('[mcp-debugger] invoke failed', err));
+  return { correlationId };
 };
 
 export const invokeCapability = ({
@@ -185,10 +202,13 @@ export const invokeCapability = ({
 export const invokeRaw = ({
   requestId,
   invocation,
+  replayOf,
 }: {
   requestId: string;
   invocation: Invocation;
-}) => run(requestId, invocation);
+  /** correlationId of the trace call this edits and replays, if any. */
+  replayOf?: string;
+}) => run(requestId, invocation, replayOf);
 
 export const cancel = ({ requestId, correlationId }: { requestId: string; correlationId: string }) => {
   const s = sessionFor(requestId);

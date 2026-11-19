@@ -84,7 +84,13 @@ export const McpDebuggerShell = ({ request }: { request: McpRequest }) => {
             <PanelResizeHandle className="h-px w-full bg-(--hl-md)" />
             <Panel id="mcp-debugger-trace" order={2} minSize={15} className="pane-two theme--pane">
               <ErrorBoundary showAlert>
-                <McpTracePane requestId={request._id} trace={trace} onClear={clearTrace} />
+                <McpTracePane
+                  requestId={request._id}
+                  trace={trace}
+                  isConnected={isConnected}
+                  replays={state.replays}
+                  onClear={clearTrace}
+                />
               </ErrorBoundary>
             </Panel>
           </PanelGroup>

@@ -4,7 +4,7 @@ import type { TraceEvent } from '~/common/mcp-debugger/protocol/TraceEvent';
 import type { McpDebuggerState } from '~/main/mcp-debugger/service';
 
 const POLL_MS = 500;
-const EMPTY_STATE: McpDebuggerState = { status: 'disconnected', capabilities: [], warnings: [], lastSequence: 0 };
+const EMPTY_STATE: McpDebuggerState = { status: 'disconnected', capabilities: [], warnings: [], lastSequence: 0, replays: {} };
 
 /**
  * PROTOTYPE-MOCK: polls the main-process session (state + new trace events) while mounted instead of subscribing to

@@ -11,8 +11,8 @@ export interface McpDebuggerBridgeAPI {
   getState: (options: Parameters<typeof service.getState>[0]) => Promise<ReturnType<typeof service.getState>>;
   getTrace: (options: Parameters<typeof service.getTrace>[0]) => Promise<ReturnType<typeof service.getTrace>>;
   clearTrace: (options: Parameters<typeof service.clearTrace>[0]) => Promise<void>;
-  invokeCapability: (options: Parameters<typeof service.invokeCapability>[0]) => Promise<void>;
-  invokeRaw: (options: Parameters<typeof service.invokeRaw>[0]) => Promise<void>;
+  invokeCapability: (options: Parameters<typeof service.invokeCapability>[0]) => Promise<{ correlationId: string }>;
+  invokeRaw: (options: Parameters<typeof service.invokeRaw>[0]) => Promise<{ correlationId: string }>;
   cancel: (options: Parameters<typeof service.cancel>[0]) => Promise<void>;
 }
 
