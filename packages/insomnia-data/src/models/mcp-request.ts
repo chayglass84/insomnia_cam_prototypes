@@ -30,6 +30,9 @@ export const baseMcpRequestSettingsSchema = z.object({
   // See: https://nodejs.org/api/tls.html#tlsconnectoptions-callback
   sslValidation: z.boolean().optional().default(true),
   disableUserAgentHeader: z.boolean().optional(),
+  // 4348: 'auto' | an MCP protocol version (see insomnia/src/common/mcp-debugger/versions.ts). Optional, so no migration
+  // is needed; absent means 'auto'. Kept a plain string because insomnia-data can't import from the app package.
+  protocolVersion: z.string().optional(),
 });
 export const baseMcpRequestSchema = z.object({
   url: z.string().optional().default(''),
@@ -73,4 +76,5 @@ export function init(): BaseMcpRequest {
   };
 }
 
-export const optionalKeys: (keyof BaseMcpRequest)[] = ['disableUserAgentHeader'];
+// 4348: protocolVersion must be listed here or initModel prunes it on every save (it is not in init()).
+export const optionalKeys: (keyof BaseMcpRequest)[] = ['disableUserAgentHeader', 'protocolVersion'];

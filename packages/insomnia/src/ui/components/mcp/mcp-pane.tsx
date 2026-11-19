@@ -51,6 +51,7 @@ import {
   type ResourceTemplateItem,
   type ToolItem,
 } from '~/ui/components/mcp/types';
+import { McpDebuggerShell } from '~/ui/components/mcp-debugger/mcp-debugger-shell';
 import { OrganizationTabList } from '~/ui/components/tabs/tab-list';
 import { RealtimeResponsePane } from '~/ui/components/websockets/realtime-response-pane';
 import WorkspacePaneHeader from '~/ui/components/workspace/workspace-pane-header';
@@ -86,7 +87,16 @@ const shouldShowRootError = (
   return Boolean(item.isEmpty) || !collapsedPrimitives.includes(item.type);
 };
 
+// 4348: HTTP MCP requests render the new debugger shell; stdio keeps the legacy pane (replaced in a later slice).
 export const McpPane = () => {
+  const { activeRequest } = useRequestLoaderData()! as McpRequestLoaderData;
+  if (activeRequest.transportType !== 'stdio') {
+    return <McpDebuggerShell key={activeRequest._id} request={activeRequest} />;
+  }
+  return <LegacyMcpPane />;
+};
+
+const LegacyMcpPane = () => {
   const { workspaceId } = useParams() as {
     workspaceId: string;
   };

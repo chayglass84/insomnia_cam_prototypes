@@ -79,6 +79,7 @@ import installPlugin from '../install-plugin';
 import type { CurlBridgeAPI } from '../network/curl';
 import { getAuthHeader as getAuthHeaderInMain } from '../network/get-auth-header';
 import { cancelCurlRequest, curlRequest } from '../network/libcurl-promise';
+import type { McpDebuggerBridgeAPI } from '../mcp-debugger';
 import type { McpBridgeAPI } from '../network/mcp';
 import { getOAuth2Token as getOAuth2TokenInMain } from '../network/o-auth-2/get-token';
 import {
@@ -278,6 +279,7 @@ export interface RendererToMainBridgeAPI {
   webSocket: WebSocketBridgeAPI;
   socketIO: SocketIOBridgeAPI;
   mcp: McpBridgeAPI;
+  mcpDebugger: McpDebuggerBridgeAPI;
   grpc: gRPCBridgeAPI;
   curl: CurlBridgeAPI;
   git: GitServiceAPI;

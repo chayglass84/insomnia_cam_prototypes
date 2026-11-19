@@ -25,6 +25,7 @@ import type { gRPCBridgeAPI } from './main/ipc/grpc';
 import type { secretStorageBridgeAPI } from './main/ipc/secret-storage';
 import type { AIFeatureNames } from './main/llm-config-service';
 import type { CurlBridgeAPI } from './main/network/curl';
+import type { McpDebuggerBridgeAPI } from './main/mcp-debugger';
 import type { McpBridgeAPI } from './main/network/mcp';
 import type { SocketIOBridgeAPI } from './main/network/socket-io';
 import type { WebSocketBridgeAPI } from './main/network/websocket';
@@ -113,6 +114,18 @@ const mcp: McpBridgeAPI = {
     findNotifications: options => invokeWithNormalizedError('mcp.event.findNotifications', options),
     findPendingEvents: options => invokeWithNormalizedError('mcp.event.findPendingEvents', options),
   },
+};
+
+const mcpDebugger: McpDebuggerBridgeAPI = {
+  probe: options => invokeWithNormalizedError('mcpDebugger.probe', options),
+  connect: options => invokeWithNormalizedError('mcpDebugger.connect', options),
+  disconnect: options => invokeWithNormalizedError('mcpDebugger.disconnect', options),
+  getState: options => invokeWithNormalizedError('mcpDebugger.getState', options),
+  getTrace: options => invokeWithNormalizedError('mcpDebugger.getTrace', options),
+  clearTrace: options => invokeWithNormalizedError('mcpDebugger.clearTrace', options),
+  invokeCapability: options => invokeWithNormalizedError('mcpDebugger.invokeCapability', options),
+  invokeRaw: options => invokeWithNormalizedError('mcpDebugger.invokeRaw', options),
+  cancel: options => invokeWithNormalizedError('mcpDebugger.cancel', options),
 };
 
 const cookies: CookiesBridgeAPI = {
@@ -286,6 +299,7 @@ const main: Window['main'] = {
   webSocket,
   socketIO,
   mcp,
+  mcpDebugger,
   git,
   llm,
   grpc,
