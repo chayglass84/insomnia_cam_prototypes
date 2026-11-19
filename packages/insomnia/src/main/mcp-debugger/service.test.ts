@@ -249,3 +249,95 @@ describe('multi round-trip requests (input_required)', () => {
     await service.disconnect({ requestId });
   });
 });
+
+describe('tasks (io.modelcontextprotocol/tasks)', () => {
+  // Poll fast: the server advertises 10 ms, and the production floor is 2 s.
+  const originalPoll = { ...service.taskPollConfig };
+  beforeAll(() => Object.assign(service.taskPollConfig, { minMs: 15, defaultMs: 20, maxMs: 40, backoff: 1 }));
+  afterAll(() => Object.assign(service.taskPollConfig, originalPoll));
+
+  const start = async (requestId: string, tool: string) => {
+    await service.connect({ requestId, url: `${base}/stateless`, headers: [], protocolVersion: 'auto' });
+    const { correlationId } = service.invokeRaw({
+      requestId,
+      invocation: { method: 'tools/call', params: { name: tool, arguments: {} } },
+    });
+    await waitFor(() => service.getState({ requestId }).tasks.length === 1);
+    return { correlationId, task: () => service.getState({ requestId }).tasks[0] };
+  };
+  const callStatus = (requestId: string, correlationId: string) =>
+    service.getTrace({ requestId }).find(e => e.correlationId === correlationId && e.terminalStatus)?.terminalStatus;
+  const count = (requestId: string, method: string) =>
+    service.getTrace({ requestId }).filter(e => e.awaitsReply && (e.payload as { method?: string }).method === method).length;
+
+  it('polls a task to completion and settles the originating call with its result', async () => {
+    const requestId = 'req_task_ok';
+    const { correlationId, task } = await start(requestId, 'quick-success-task');
+    expect(callStatus(requestId, correlationId)).toBeUndefined(); // the call is pending while the task works
+    await waitFor(() => task().status === 'completed');
+    expect(JSON.stringify(task().result)).toContain('quick task done');
+    await waitFor(() => callStatus(requestId, correlationId) === 'success');
+    expect(task().polling).toBe(false);
+    await service.disconnect({ requestId });
+  });
+
+  it('settles the call as an error when the task fails', async () => {
+    const requestId = 'req_task_fail';
+    const { correlationId, task } = await start(requestId, 'failed-task');
+    await waitFor(() => task().status === 'failed');
+    expect(task().error).toMatchObject({ message: 'task failed' });
+    await waitFor(() => callStatus(requestId, correlationId) === 'error');
+    await service.disconnect({ requestId });
+  });
+
+  it('stops polling on a fatal tasks/get error (an expired task) and fails the task', async () => {
+    const requestId = 'req_task_expired';
+    const { correlationId, task } = await start(requestId, 'expired-task');
+    await waitFor(() => task().status === 'failed');
+    await waitFor(() => callStatus(requestId, correlationId) === 'error');
+    expect(task().polling).toBe(false);
+    await service.disconnect({ requestId });
+  });
+
+  it('cancels a working task: the task and its call both end cancelled', async () => {
+    const requestId = 'req_task_cancel';
+    const { correlationId, task } = await start(requestId, 'cancellable-task');
+    await waitFor(() => count(requestId, 'tasks/get') >= 1);
+    service.taskAction({ requestId, taskId: task().taskId, action: 'cancel' });
+    await waitFor(() => task().status === 'cancelled');
+    await waitFor(() => callStatus(requestId, correlationId) === 'cancelled');
+    await service.disconnect({ requestId });
+  });
+
+  it('pauses and resumes polling', async () => {
+    const requestId = 'req_task_pause';
+    const { task } = await start(requestId, 'cancellable-task'); // stays working forever
+    await waitFor(() => count(requestId, 'tasks/get') >= 1);
+    service.taskAction({ requestId, taskId: task().taskId, action: 'pause' });
+    await new Promise(r => setTimeout(r, 60)); // let any in-flight poll land
+    const paused = count(requestId, 'tasks/get');
+    await new Promise(r => setTimeout(r, 150));
+    expect(count(requestId, 'tasks/get')).toBe(paused);
+    expect(task().paused).toBe(true);
+    service.taskAction({ requestId, taskId: task().taskId, action: 'resume' });
+    await waitFor(() => count(requestId, 'tasks/get') > paused);
+    service.taskAction({ requestId, taskId: task().taskId, action: 'cancel' });
+    await service.disconnect({ requestId });
+  });
+
+  it('stops polling at input_required, then completes after tasks/update', async () => {
+    const requestId = 'req_task_input';
+    const { correlationId, task } = await start(requestId, 'input-required-task');
+    await waitFor(() => task().status === 'input_required');
+    expect(Object.keys(task().inputRequests ?? {})).toEqual(['confirmation']);
+    await new Promise(r => setTimeout(r, 80));
+    const polled = count(requestId, 'tasks/get');
+    await new Promise(r => setTimeout(r, 120));
+    expect(count(requestId, 'tasks/get')).toBe(polled); // not polling while waiting for the user
+
+    service.taskAction({ requestId, taskId: task().taskId, action: 'update', inputs: { confirmation: { proceed: 'yes' } } });
+    await waitFor(() => task().status === 'completed');
+    await waitFor(() => callStatus(requestId, correlationId) === 'success');
+    await service.disconnect({ requestId });
+  });
+});

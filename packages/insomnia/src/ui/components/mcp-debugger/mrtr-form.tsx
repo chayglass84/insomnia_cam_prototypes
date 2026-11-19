@@ -74,7 +74,10 @@ const buttonClass = 'rounded-sm px-(--padding-md) py-1 text-xs';
 export const InputRequiredResponder: FC<{
   prompt: InputRequiredResult;
   onSubmit: (inputResponses: InputResponses) => void;
-}> = ({ prompt, onSubmit }) => {
+  /** Tasks only take answers (a task is cancelled with Cancel task), so hide Decline/Cancel. */
+  acceptOnly?: boolean;
+  title?: string;
+}> = ({ prompt, onSubmit, acceptOnly, title = 'The server needs more input to finish this call' }) => {
   const requestKeys = Object.keys(prompt.inputRequests);
   const [values, setValues] = useState<Record<string, Record<string, unknown>>>({});
   const [rawJson, setRawJson] = useState<Record<string, string>>({});
@@ -110,7 +113,7 @@ export const InputRequiredResponder: FC<{
       className="flex flex-col gap-3 rounded-xs border border-solid border-amber-500/60 bg-amber-500/5 p-2"
       data-testid="mcp-input-required"
     >
-      <h4 className="text-xs font-bold text-amber-500 uppercase">The server needs more input to finish this call</h4>
+      <h4 className="text-xs font-bold text-amber-500 uppercase">{title}</h4>
       <fieldset disabled={submitted} className="m-0 flex min-w-0 flex-col gap-4 border-0 p-0">
         {requestKeys.map(key => {
           const request = prompt.inputRequests[key];
@@ -167,20 +170,24 @@ export const InputRequiredResponder: FC<{
             Submit
           </Button>
         )}
-        <Button
-          className={`${buttonClass} border border-solid border-(--hl-md) hover:bg-(--hl-sm)`}
-          isDisabled={submitted}
-          onPress={() => submit('decline')}
-        >
-          Decline
-        </Button>
-        <Button
-          className={`${buttonClass} border border-solid border-(--hl-md) hover:bg-(--hl-sm)`}
-          isDisabled={submitted}
-          onPress={() => submit('cancel')}
-        >
-          Cancel
-        </Button>
+        {!acceptOnly && (
+          <>
+            <Button
+              className={`${buttonClass} border border-solid border-(--hl-md) hover:bg-(--hl-sm)`}
+              isDisabled={submitted}
+              onPress={() => submit('decline')}
+            >
+              Decline
+            </Button>
+            <Button
+              className={`${buttonClass} border border-solid border-(--hl-md) hover:bg-(--hl-sm)`}
+              isDisabled={submitted}
+              onPress={() => submit('cancel')}
+            >
+              Cancel
+            </Button>
+          </>
+        )}
       </div>
     </section>
   );

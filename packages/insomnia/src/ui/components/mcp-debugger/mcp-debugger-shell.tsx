@@ -71,6 +71,7 @@ export const McpDebuggerShell = ({ request }: { request: McpRequest }) => {
               setSession(null);
             }}
             selectedSession={session}
+            activeTaskCount={state.tasks.filter(t => t.status === 'working' || t.status === 'input_required').length}
             onSelectSession={setSession}
           />
         </Panel>
@@ -83,6 +84,7 @@ export const McpDebuggerShell = ({ request }: { request: McpRequest }) => {
                   request={request}
                   capability={selected}
                   session={isConnected ? session : null}
+                  tasks={state.tasks}
                   isConnected={isConnected}
                   uniqueKey={uniqueKey}
                 />
@@ -98,6 +100,7 @@ export const McpDebuggerShell = ({ request }: { request: McpRequest }) => {
                   replays={state.replays}
                   serverUrl={state.url}
                   currentVersion={state.protocolVersion}
+                  tasks={state.tasks}
                   onClear={clearTrace}
                 />
               </ErrorBoundary>

@@ -1,6 +1,9 @@
 import { isProtocolException } from '~/common/mcp-debugger/protocol/errors';
 import type { MCPInvocation } from '~/common/mcp-debugger/protocol/mcp/capabilities/methods';
 import { type MCPConnectConfig,MCPHTTPProtocol } from '~/common/mcp-debugger/protocol/mcp/MCPHTTPProtocol';
+import { buildTasksCancel, buildTasksGet, buildTasksUpdate } from '~/common/mcp-debugger/protocol/mcp/tasks/taskMethods';
+import { isTaskTerminal, parseTaskHandle, type TaskRecord } from '~/common/mcp-debugger/protocol/mcp/tasks/taskModel';
+import { traceEventsFor } from '~/common/mcp-debugger/protocol/mcp/traceEvents';
 import type { Capability, Connection, IntrospectionWarning,Invocation } from '~/common/mcp-debugger/protocol/Protocol';
 import type { TraceEvent } from '~/common/mcp-debugger/protocol/TraceEvent';
 import { isVersionChoice } from '~/common/mcp-debugger/versions';
@@ -29,6 +32,12 @@ interface Session {
   roots: { name?: string; uri: string }[];
   /** Headers of the last connect, reused when a call is replayed over another protocol version (S3). */
   headerRecord?: Record<string, string>;
+  /** Tasks (S4): created by a tools/call that returned a task handle, then polled until terminal. */
+  tasks: Map<string, TrackedTask>;
+  taskTimers: Map<string, ReturnType<typeof setTimeout>>;
+  taskIntervals: Map<string, number>;
+  /** correlationId of a tasks/get|update|cancel call we issued -> the task it concerns. */
+  taskCalls: Map<string, string>;
 }
 
 const MAX_TRACE_EVENTS = 5000;
@@ -37,7 +46,7 @@ const sessions = new Map<string, Session>();
 const sessionFor = (requestId: string): Session => {
   let s = sessions.get(requestId);
   if (!s) {
-    s = { protocol: new MCPHTTPProtocol(), status: 'disconnected', capabilities: [], warnings: [], trace: [], seq: 0, replays: {}, roots: [] };
+    s = { protocol: new MCPHTTPProtocol(), status: 'disconnected', capabilities: [], warnings: [], trace: [], seq: 0, replays: {}, roots: [], tasks: new Map(), taskTimers: new Map(), taskIntervals: new Map(), taskCalls: new Map() };
     sessions.set(requestId, s);
   }
   return s;
@@ -46,6 +55,7 @@ const sessionFor = (requestId: string): Session => {
 const sinkFor = (s: Session) => (event: TraceEvent) => {
   // Event ids repeat across rounds of one call (e.g. a second input_required), so make them unique per event.
   s.trace.push({ ...event, id: `${event.id}~${s.seq + 1}`, sequence: ++s.seq });
+  observeTaskEvent(s, event);
   if (s.trace.length > MAX_TRACE_EVENTS) {
     s.trace.splice(0, s.trace.length - MAX_TRACE_EVENTS);
   }
@@ -103,6 +113,7 @@ export interface McpDebuggerState {
   warnings: IntrospectionWarning[];
   lastSequence: number;
   replays: Record<string, string>;
+  tasks: TaskView[];
 }
 
 export const getState = ({ requestId }: { requestId: string }): McpDebuggerState => {
@@ -118,6 +129,10 @@ export const getState = ({ requestId }: { requestId: string }): McpDebuggerState
     warnings: s.warnings,
     lastSequence: s.seq,
     replays: s.replays,
+    tasks: [...s.tasks.values()].map(t => ({
+      ...t,
+      polling: s.taskTimers.has(t.taskId),
+    })),
   };
 };
 
@@ -143,6 +158,7 @@ export const connect = async (options: McpDebuggerConnectOptions): Promise<McpDe
   s.protocolIssue = undefined;
   s.url = url;
   void closeAlts(requestId);
+  clearTasks(s);
   s.roots = (options.roots ?? []).filter(r => r.uri);
   s.capabilities = [];
   s.warnings = [];
@@ -187,6 +203,7 @@ export const connect = async (options: McpDebuggerConnectOptions): Promise<McpDe
 export const disconnect = async ({ requestId }: { requestId: string }): Promise<McpDebuggerState> => {
   const s = sessionFor(requestId);
   await closeAlts(requestId);
+  clearTasks(s);
   if (s.conn) {
     try {
       await s.protocol.disconnect(s.conn, sinkFor(s));
@@ -293,6 +310,215 @@ export const setRoots = async ({
   s.roots = roots.filter(r => r.uri);
   if (s.conn && s.status === 'connected') {
     await s.protocol.notify(s.conn, 'notifications/roots/list_changed');
+  }
+};
+
+// ---------- tasks (S4) ----------
+// `io.modelcontextprotocol/tasks`: a tools/call may return a task handle (resultType "task"). The service tracks the
+// task, polls tasks/get on a timer until it is terminal (stopping while input_required, resuming after tasks/update),
+// and settles the originating call's trace row from the task's final status, as Ardi's UI did.
+// Ported from Ardi's taskPoller.ts + useTaskStore.ts, folded into one main-process tracker.
+
+export interface TrackedTask extends TaskRecord {
+  /** The trace correlationId of the tools/call that created the task. */
+  correlationId: string;
+  result?: unknown;
+  error?: unknown;
+  paused: boolean;
+}
+export interface TaskView extends TrackedTask {
+  /** A poll is scheduled. */
+  polling: boolean;
+}
+
+// Poll cadence: servers advertise pollIntervalMs; clamp it, and back off while the status does not change. Mutable so
+// tests can run it fast.
+export const taskPollConfig = { minMs: 2000, defaultMs: 3000, maxMs: 30_000, backoff: 1.5 };
+
+// -32602 (invalid/unknown/expired taskId) and -32003 (tasks capability missing) are fatal to polling.
+const FATAL_TASK_ERROR_CODES = new Set([-32_602, -32_003]);
+const taskTrace = traceEventsFor('mcp-http');
+
+const clampPoll = (ms: number) => Math.min(Math.max(ms, taskPollConfig.minMs), taskPollConfig.maxMs);
+
+const stopTaskTimer = (s: Session, taskId: string) => {
+  const timer = s.taskTimers.get(taskId);
+  if (timer) {
+    clearTimeout(timer);
+  }
+  s.taskTimers.delete(taskId);
+};
+
+function clearTasks(s: Session) {
+  for (const timer of s.taskTimers.values()) {
+    clearTimeout(timer);
+  }
+  s.taskTimers.clear();
+  s.taskIntervals.clear();
+  s.taskCalls.clear();
+  s.tasks.clear();
+}
+
+/** Issue a tasks/* call, remembering which task its reply belongs to. */
+function callTaskMethod(s: Session, taskId: string, invocation: Invocation) {
+  if (!s.conn || s.status !== 'connected') {
+    return;
+  }
+  const base = sinkFor(s);
+  let seen = false;
+  const sink = (event: TraceEvent) => {
+    if (!seen && event.direction === 'client-to-server' && event.awaitsReply) {
+      seen = true;
+      s.taskCalls.set(event.correlationId, taskId);
+    }
+    base(event);
+  };
+  void s.protocol
+    .invoke(s.conn, invocation, s.abort?.signal, sink)
+    .catch(err => console.warn('[mcp-debugger] task call failed', err));
+}
+
+function scheduleTaskPoll(s: Session, taskId: string, restart = false) {
+  const task = s.tasks.get(taskId);
+  stopTaskTimer(s, taskId);
+  if (!task || task.paused || isTaskTerminal(task.status) || task.status === 'input_required') {
+    return;
+  }
+  const base = clampPoll(task.pollIntervalMs ?? taskPollConfig.defaultMs);
+  const previous = s.taskIntervals.get(taskId);
+  const interval = restart || previous === undefined ? base : Math.min(previous * taskPollConfig.backoff, taskPollConfig.maxMs);
+  s.taskIntervals.set(taskId, interval);
+  s.taskTimers.set(
+    taskId,
+    setTimeout(() => {
+      s.taskTimers.delete(taskId);
+      callTaskMethod(s, taskId, buildTasksGet(taskId));
+    }, interval),
+  );
+}
+
+/** Settle the originating tools/call row from the task's final status. */
+function settleTaskCall(s: Session, task: TrackedTask) {
+  const sink = sinkFor(s);
+  if (task.status === 'completed') {
+    sink(taskTrace.response(task.correlationId, { taskId: task.taskId, status: 'completed', result: task.result }));
+  } else if (task.status === 'cancelled') {
+    sink(taskTrace.cancelled(task.correlationId, 'Task cancelled'));
+  } else {
+    const error = (task.error ?? {}) as { code?: number; message?: string };
+    sink(
+      taskTrace.error(task.correlationId, {
+        kind: 'task',
+        message: error.message ?? task.statusMessage ?? 'Task failed',
+        ...(error.code === undefined ? {} : { code: error.code }),
+      }),
+    );
+  }
+}
+
+function applyTaskReply(s: Session, taskId: string, payload: unknown) {
+  const existing = s.tasks.get(taskId);
+  const parsed = parseTaskHandle(payload);
+  if (!existing || !parsed || isTaskTerminal(existing.status)) {
+    return; // a task never leaves a terminal status
+  }
+  const extra = payload as { result?: unknown; error?: unknown };
+  const statusChanged = parsed.status !== existing.status;
+  const next: TrackedTask = {
+    ...existing,
+    ...parsed,
+    result: extra.result ?? existing.result,
+    error: extra.error ?? existing.error,
+  };
+  s.tasks.set(taskId, next);
+  if (isTaskTerminal(next.status)) {
+    stopTaskTimer(s, taskId);
+    settleTaskCall(s, next);
+  } else {
+    scheduleTaskPoll(s, taskId, statusChanged);
+  }
+}
+
+function failTask(s: Session, taskId: string, error: { code?: number; message?: string }) {
+  const existing = s.tasks.get(taskId);
+  if (!existing || isTaskTerminal(existing.status)) {
+    return;
+  }
+  stopTaskTimer(s, taskId);
+  const next: TrackedTask = { ...existing, status: 'failed', error };
+  s.tasks.set(taskId, next);
+  settleTaskCall(s, next);
+}
+
+/** Called for every trace event of a session: picks up task handles and the replies to our task calls. */
+function observeTaskEvent(s: Session, event: TraceEvent) {
+  if (event.messageType === 'task') {
+    const handle = parseTaskHandle(event.payload);
+    if (handle && !s.tasks.has(handle.taskId)) {
+      s.tasks.set(handle.taskId, { ...handle, correlationId: event.correlationId, paused: false });
+      scheduleTaskPoll(s, handle.taskId, true);
+    }
+    return;
+  }
+  const taskId = s.taskCalls.get(event.correlationId);
+  if (!taskId || event.direction !== 'server-to-client') {
+    return;
+  }
+  if (event.messageType === 'response') {
+    applyTaskReply(s, taskId, event.payload);
+  } else if (event.messageType === 'error') {
+    const payload = event.payload as { code?: number; message?: string };
+    if (payload.code !== undefined && FATAL_TASK_ERROR_CODES.has(payload.code)) {
+      failTask(s, taskId, payload);
+    }
+  }
+}
+
+export const taskAction = ({
+  requestId,
+  taskId,
+  action,
+  inputs,
+}: {
+  requestId: string;
+  taskId: string;
+  action: 'pause' | 'resume' | 'refresh' | 'cancel' | 'update';
+  /** For `update`: the answers, keyed like the task's inputRequests. */
+  inputs?: Record<string, unknown>;
+}) => {
+  const s = sessionFor(requestId);
+  const task = s.tasks.get(taskId);
+  if (!task) {
+    throw new Error('Unknown task');
+  }
+  switch (action) {
+    case 'pause': {
+      task.paused = true;
+      stopTaskTimer(s, taskId);
+      break;
+    }
+    case 'resume': {
+      task.paused = false;
+      callTaskMethod(s, taskId, buildTasksGet(taskId));
+      break;
+    }
+    case 'refresh': {
+      callTaskMethod(s, taskId, buildTasksGet(taskId));
+      break;
+    }
+    case 'cancel': {
+      callTaskMethod(s, taskId, buildTasksCancel(taskId));
+      break;
+    }
+    case 'update': {
+      // Answering input_required: send tasks/update, then poll again (polling stops while input is pending).
+      task.paused = false;
+      callTaskMethod(s, taskId, buildTasksUpdate(taskId, { inputs: inputs ?? {} }));
+      break;
+    }
+    default: {
+      break;
+    }
   }
 };
 

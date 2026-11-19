@@ -9,6 +9,7 @@ import {
 } from '~/common/mcp-debugger/protocol/mcp/elicitation';
 import type { TraceEvent, TraceStatus } from '~/common/mcp-debugger/protocol/TraceEvent';
 import { SUPPORTED_VERSIONS } from '~/common/mcp-debugger/versions';
+import type { TaskView } from '~/main/mcp-debugger/service';
 import { Dropdown, DropdownItem, DropdownSection, ItemContent } from '~/ui/components/base/dropdown';
 
 import { buildCurl } from './curl-command';
@@ -17,6 +18,7 @@ import { diffJson, type DiffLine, hasChanges } from './line-diff';
 import { InputRequiredResponder } from './mrtr-form';
 import { SegmentedToggle } from './segmented-toggle';
 import { ElicitationResponder, SamplingResponder, type ServerRequestOutcome } from './server-request-forms';
+import { TaskCard } from './task-card';
 
 // Task 4348 trace pane: one row per call (events grouped by correlationId), click for request/response detail.
 // S2: "Edit & replay" on any request row (raw JSON-RPC editor), replay rows link to their original, and request /
@@ -209,9 +211,11 @@ const CallDetail: FC<{
   onRespond: (call: Call, outcome: ServerRequestOutcome) => void;
   onSubmitInput: (call: Call, inputResponses: InputResponses, requestState: unknown) => void;
   currentVersion?: string;
+  tasks: TaskView[];
+  requestId: string;
   onReplayVersion: (call: Call, version: string) => Promise<string | undefined>;
   onSelect: (correlationId: string) => void;
-}> = ({ call, original, isConnected, serverUrl, onCancel, onReplay, onRespond, currentVersion, onReplayVersion, onSubmitInput, onSelect }) => {
+}> = ({ call, original, isConnected, serverUrl, onCancel, onReplay, onRespond, currentVersion, tasks, requestId, onReplayVersion, onSubmitInput, onSelect }) => {
   const request = requestEventOf(call);
   const replies = call.events.filter(e => e !== request);
   const [editing, setEditing] = useState(false);
@@ -313,6 +317,10 @@ const CallDetail: FC<{
           {versionError} The failed handshake is in the trace.
         </p>
       )}
+      {(() => {
+        const task = tasks.find(t => t.correlationId === call.correlationId);
+        return task ? <TaskCard requestId={requestId} task={task} /> : null;
+      })()}
       {(() => {
         const prompt = pendingInputRequired(call);
         return prompt ? (
@@ -552,8 +560,9 @@ export const McpTracePane: FC<{
   replays: Record<string, string>;
   serverUrl?: string;
   currentVersion?: string;
+  tasks: TaskView[];
   onClear: () => void;
-}> = ({ requestId, trace, isConnected, replays, serverUrl, currentVersion, onClear }) => {
+}> = ({ requestId, trace, isConnected, replays, serverUrl, currentVersion, tasks, onClear }) => {
   // Calls: one row per request/response pair, newest request first. Stream: every message, newest received first.
   const [storedMode, setStoredMode] = useLocalStorage<TraceMode>('mcp-debugger:trace-mode', 'calls');
   const mode: TraceMode = storedMode === 'stream' ? 'stream' : 'calls';
@@ -729,6 +738,8 @@ export const McpTracePane: FC<{
                 onRespond={respond}
                 onSubmitInput={submitInput}
                 currentVersion={currentVersion}
+                tasks={tasks}
+                requestId={requestId}
                 onReplayVersion={replayOnVersion}
                 onSelect={setSelectedId}
               />

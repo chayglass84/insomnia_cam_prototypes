@@ -35,17 +35,18 @@ const CHIPS: Record<CapabilityType, { label: string; className: string }> = {
 };
 
 // Session-era (legacy) panels that exist only in the older protocol versions. Built in S3.
-export type SessionTab = 'ping' | 'logging' | 'roots' | 'sampling';
-const SESSION_TABS: Partial<Record<McpDebuggerTabId, { id: SessionTab; label: string }>> = {
+export type SessionTab = 'ping' | 'logging' | 'roots' | 'sampling' | 'tasks';
+const SESSION_TABS: Partial<Record<McpDebuggerTabId, { id: SessionTab; label: string; chip?: string }>> = {
   ping: { id: 'ping', label: 'Ping' },
   logging: { id: 'logging', label: 'Logging' },
   roots: { id: 'roots', label: 'Roots' },
   sampling: { id: 'sampling', label: 'Sampling' },
+  // The tasks extension (2026-07-28): same kind of non-capability panel, so it lives in this section too.
+  tasks: { id: 'tasks', label: 'Tasks', chip: 'Ext' },
 };
 
 // Still to build (slice S4): shown as visible mock rows.
 const MOCK_TABS: Partial<Record<McpDebuggerTabId, string>> = {
-  tasks: 'Tasks (slice S4)',
   subscriptions: 'Subscriptions (slice S4)',
 };
 
@@ -56,8 +57,10 @@ export const CapabilitySidebar: FC<{
   onSelect: (capability: Capability) => void;
   selectedSession: SessionTab | null;
   onSelectSession: (tab: SessionTab) => void;
+  /** Tasks still running, shown next to the Tasks entry. */
+  activeTaskCount: number;
   isConnected: boolean;
-}> = ({ capabilities, protocolVersion, selectedKey, onSelect, selectedSession, onSelectSession, isConnected }) => {
+}> = ({ capabilities, protocolVersion, selectedKey, onSelect, selectedSession, onSelectSession, activeTaskCount, isConnected }) => {
   const [filter, setFilter] = useState('');
   const visible = useMemo(
     () =>
@@ -117,8 +120,13 @@ export const CapabilitySidebar: FC<{
                 data-testid={`mcp-session-${tab.id}`}
                 className={`flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm hover:bg-(--hl-xs) ${selectedSession === tab.id ? 'bg-(--hl-sm)' : ''}`}
               >
-                <span className={`${CHIP_BASE} border-(--hl-md) text-(--hl)`}>Sess</span>
+                <span className={`${CHIP_BASE} border-(--hl-md) text-(--hl)`}>{tab.chip ?? 'Sess'}</span>
                 <span className="truncate">{tab.label}</span>
+                {tab.id === 'tasks' && activeTaskCount > 0 && (
+                  <span className="ml-auto text-xs text-amber-500" title="Tasks still running">
+                    {activeTaskCount} active
+                  </span>
+                )}
               </button>
             ))}
           </section>
