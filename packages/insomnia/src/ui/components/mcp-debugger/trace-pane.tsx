@@ -3,6 +3,8 @@ import { Button, Focusable, Tooltip, TooltipTrigger } from 'react-aria-component
 import { useLocalStorage } from 'react-use';
 
 import type { TraceEvent, TraceStatus } from '~/common/mcp-debugger/protocol/TraceEvent';
+import { SUPPORTED_VERSIONS } from '~/common/mcp-debugger/versions';
+import { Dropdown, DropdownItem, DropdownSection, ItemContent } from '~/ui/components/base/dropdown';
 
 import { buildCurl } from './curl-command';
 import { JsonView } from './json-view';
@@ -24,6 +26,8 @@ export interface Call {
   startedAt: string;
   durationMs?: number;
   firstSequence: number;
+  /** Set when the call was replayed over another protocol version (S3). */
+  via?: string;
 }
 
 const STATUS_STYLE: Record<TraceStatus, string> = {
@@ -51,6 +55,7 @@ export const groupCalls = (trace: TraceEvent[]): Call[] => {
         startedAt: request.timestamp,
         durationMs: terminal ? Date.parse(terminal.timestamp) - Date.parse(request.timestamp) : undefined,
         firstSequence: events[0].sequence,
+        via: events[0].via,
       } satisfies Call;
     })
     .sort((a, b) => b.firstSequence - a.firstSequence);
@@ -190,16 +195,20 @@ const CallDetail: FC<{
   onCancel: (correlationId: string) => void;
   onReplay: (call: Call, invocation: ReplayRequest) => void;
   onRespond: (call: Call, outcome: ServerRequestOutcome) => void;
+  currentVersion?: string;
+  onReplayVersion: (call: Call, version: string) => Promise<string | undefined>;
   onSelect: (correlationId: string) => void;
-}> = ({ call, original, isConnected, serverUrl, onCancel, onReplay, onRespond, onSelect }) => {
+}> = ({ call, original, isConnected, serverUrl, onCancel, onReplay, onRespond, currentVersion, onReplayVersion, onSelect }) => {
   const request = requestEventOf(call);
   const replies = call.events.filter(e => e !== request);
   const [editing, setEditing] = useState(false);
   const [copied, setCopied] = useState<string[] | null>(null);
+  const [versionError, setVersionError] = useState<string | null>(null);
 
   useEffect(() => {
     setEditing(false);
     setCopied(null);
+    setVersionError(null);
   }, [call.correlationId]);
 
   const copyCurl = async () => {
@@ -225,8 +234,9 @@ const CallDetail: FC<{
   return (
     <div className="flex h-full flex-col gap-3 overflow-y-auto p-3 text-sm" data-testid="mcp-trace-detail">
       <div className="flex items-center justify-between gap-2">
-        <strong className="flex min-w-0">
+        <strong className="flex min-w-0 items-center gap-2">
           <CallLabel label={call.label} />
+          {call.via && <VersionChip version={call.via} />}
         </strong>
         <div className="flex shrink-0 items-center gap-2">
           {call.status === 'pending' && request.cancellable && (
@@ -246,6 +256,33 @@ const CallDetail: FC<{
               {copied ? 'Copied' : 'Copy cURL'}
             </Button>
           )}
+          {isReplayable(call) && isConnected && (
+            <Dropdown
+              triggerButton={
+                <Button
+                  className="rounded-xs border border-solid border-(--hl-md) px-2 py-0.5 text-xs hover:bg-(--hl-sm)"
+                  data-testid="mcp-replay-on-version"
+                >
+                  Replay on… <i className="fa fa-caret-down" />
+                </Button>
+              }
+              placement="bottom end"
+            >
+              <DropdownSection>
+                {SUPPORTED_VERSIONS.filter(v => v !== (call.via ?? currentVersion)).map(version => (
+                  <DropdownItem key={version}>
+                    <ItemContent
+                      label={version}
+                      onClick={async () => {
+                        setVersionError(null);
+                        setVersionError((await onReplayVersion(call, version)) ?? null);
+                      }}
+                    />
+                  </DropdownItem>
+                ))}
+              </DropdownSection>
+            </Dropdown>
+          )}
           {isReplayable(call) && (
             <Button
               className="rounded-xs border border-solid border-(--hl-md) px-2 py-0.5 text-xs hover:bg-(--hl-sm) disabled:opacity-50"
@@ -258,6 +295,11 @@ const CallDetail: FC<{
           )}
         </div>
       </div>
+      {versionError && (
+        <p className="text-xs text-amber-500" data-testid="mcp-version-replay-error">
+          {versionError} The failed handshake is in the trace.
+        </p>
+      )}
       {isWaitingServerRequest(call) &&
         ((request.payload as { method?: string }).method === 'elicitation/create' ? (
           <ElicitationResponder
@@ -336,6 +378,28 @@ export const formatTime = (iso: string) => {
   const d = new Date(iso);
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
 };
+
+/** Marks a call that was sent over a different protocol version than the session's own. */
+const VersionChip: FC<{ version: string }> = ({ version }) => (
+  <TooltipTrigger delay={200}>
+    <Focusable>
+      <span
+        role="img"
+        aria-label={`Sent over protocol ${version}`}
+        className="shrink-0 rounded-xs border border-solid border-(--hl-sm) px-1 font-mono text-[0.65rem] text-(--hl)"
+        data-testid="mcp-version-chip"
+      >
+        {version}
+      </span>
+    </Focusable>
+    <Tooltip
+      offset={8}
+      className="max-w-xs rounded-md border border-solid border-(--hl-sm) bg-(--color-bg) px-3 py-2 text-xs text-(--color-font) shadow-lg select-none"
+    >
+      Replayed over protocol {version}, a different version than this session. Compare it with the original.
+    </Tooltip>
+  </TooltipTrigger>
+);
 
 const ReplayBadge: FC = () => (
   <TooltipTrigger delay={200}>
@@ -465,8 +529,9 @@ export const McpTracePane: FC<{
   isConnected: boolean;
   replays: Record<string, string>;
   serverUrl?: string;
+  currentVersion?: string;
   onClear: () => void;
-}> = ({ requestId, trace, isConnected, replays, serverUrl, onClear }) => {
+}> = ({ requestId, trace, isConnected, replays, serverUrl, currentVersion, onClear }) => {
   // Calls: one row per request/response pair, newest request first. Stream: every message, newest received first.
   const [storedMode, setStoredMode] = useLocalStorage<TraceMode>('mcp-debugger:trace-mode', 'calls');
   const mode: TraceMode = storedMode === 'stream' ? 'stream' : 'calls';
@@ -495,6 +560,25 @@ export const McpTracePane: FC<{
     }
   };
   const waiting = calls.find(isWaitingServerRequest);
+
+  /** Replay a call's method and params over another protocol version; resolves to an error message, if any. */
+  const replayOnVersion = async (call: Call, version: string): Promise<string | undefined> => {
+    const wire = wireRequestOf(requestEventOf(call));
+    try {
+      const { correlationId, error } = await window.main.mcpDebugger.replayOnVersion({
+        requestId,
+        invocation: { method: wire.method as string, params: wire.params },
+        version,
+        replayOf: call.correlationId,
+      });
+      if (correlationId) {
+        setSelectedId(correlationId);
+      }
+      return error;
+    } catch (err) {
+      return err instanceof Error ? err.message : String(err);
+    }
+  };
 
   const replay = async (call: Call, invocation: ReplayRequest) => {
     try {
@@ -567,6 +651,7 @@ export const McpTracePane: FC<{
                   <StatusDot status={call.status} />
                   <Time iso={call.startedAt} />
                   {replays[call.correlationId] && <ReplayBadge />}
+                  {call.via && <VersionChip version={call.via} />}
                   <CallLabel label={call.label} />
                   <span className="ml-auto shrink-0 text-xs text-(--hl)">
                     {call.durationMs !== undefined ? `${call.durationMs} ms` : 'pending…'}
@@ -591,6 +676,7 @@ export const McpTracePane: FC<{
                     <Time iso={event.timestamp} />
                     <Arrow isRequest={isRequest} />
                     <CallLabel label={call?.label ?? event.label ?? event.messageType} />
+                    {event.via && <VersionChip version={event.via} />}
                   </button>
                 );
               })}
@@ -605,6 +691,8 @@ export const McpTracePane: FC<{
                 onCancel={correlationId => window.main.mcpDebugger.cancel({ requestId, correlationId })}
                 onReplay={replay}
                 onRespond={respond}
+                currentVersion={currentVersion}
+                onReplayVersion={replayOnVersion}
                 onSelect={setSelectedId}
               />
             )}

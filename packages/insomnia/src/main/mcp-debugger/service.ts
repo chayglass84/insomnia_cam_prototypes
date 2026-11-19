@@ -27,6 +27,8 @@ interface Session {
   replays: Record<string, string>;
   /** Roots offered to the server when it asks roots/list (S3; configured on the request, editable while connected). */
   roots: { name?: string; uri: string }[];
+  /** Headers of the last connect, reused when a call is replayed over another protocol version (S3). */
+  headerRecord?: Record<string, string>;
 }
 
 const MAX_TRACE_EVENTS = 5000;
@@ -139,11 +141,13 @@ export const connect = async (options: McpDebuggerConnectOptions): Promise<McpDe
   s.error = undefined;
   s.protocolIssue = undefined;
   s.url = url;
+  void closeAlts(requestId);
   s.roots = (options.roots ?? []).filter(r => r.uri);
   s.capabilities = [];
   s.warnings = [];
   const sink = sinkFor(s);
   const headerRecord = Object.fromEntries(headers.filter(h => !h.disabled && h.name).map(h => [h.name, h.value]));
+  s.headerRecord = headerRecord;
   const config: MCPConnectConfig = {
     url,
     authMode: 'none', // auth is already folded into `headers` by the renderer
@@ -181,6 +185,7 @@ export const connect = async (options: McpDebuggerConnectOptions): Promise<McpDe
 
 export const disconnect = async ({ requestId }: { requestId: string }): Promise<McpDebuggerState> => {
   const s = sessionFor(requestId);
+  await closeAlts(requestId);
   if (s.conn) {
     try {
       await s.protocol.disconnect(s.conn, sinkFor(s));
@@ -242,6 +247,14 @@ export const invokeRaw = ({
 }) => run(requestId, exactHeaders ? { ...invocation, exact: { headers: exactHeaders } } : invocation, replayOf);
 
 export const cancel = ({ requestId, correlationId }: { requestId: string; correlationId: string }) => {
+  const alt = parseAltCorrelation(correlationId);
+  if (alt) {
+    const entry = alts.get(`${requestId}|${alt.version}`);
+    if (entry) {
+      entry.protocol.cancel(entry.conn, alt.id, 'Cancelled by user');
+    }
+    return;
+  }
   const s = sessionFor(requestId);
   if (s.conn) {
     s.protocol.cancel(s.conn, correlationId, 'Cancelled by user');
@@ -280,6 +293,108 @@ export const setRoots = async ({
   if (s.conn && s.status === 'connected') {
     await s.protocol.notify(s.conn, 'notifications/roots/list_changed');
   }
+};
+
+// ---------- cross-version replay (S3) ----------
+// A call is replayed over a second, temporary connection to the same server pinned to another protocol version. Its
+// events are folded into the main session's trace (correlationId `xv-<version>-<id>`, `via` set) and linked to the
+// original with `replays`, so the existing diff and replay UI work unchanged.
+// PROTOTYPE-MOCK: the second connection offers no sampling/elicitation/roots (the protocol auto-rejects those) and
+// is not introspected; it lives until the main session disconnects or reconnects.
+
+interface AltSession {
+  protocol: MCPHTTPProtocol;
+  conn: Connection;
+  abort: AbortController;
+}
+const alts = new Map<string, AltSession>();
+
+const parseAltCorrelation = (correlationId: string) => {
+  const match = /^xv-(\d{4}-\d{2}-\d{2})-(.+)$/.exec(correlationId);
+  return match ? { version: match[1], id: match[2] } : null;
+};
+
+const closeAlts = async (requestId: string) => {
+  for (const [key, alt] of alts) {
+    if (key.startsWith(`${requestId}|`)) {
+      alts.delete(key);
+      alt.abort.abort();
+      await alt.protocol.disconnect(alt.conn).catch(() => {});
+    }
+  }
+};
+
+const withoutMeta = (params: unknown) => {
+  if (params !== null && typeof params === 'object' && !Array.isArray(params)) {
+    const { _meta, ...rest } = params as Record<string, unknown>;
+    return rest;
+  }
+  return params;
+};
+
+export const replayOnVersion = async ({
+  requestId,
+  invocation,
+  version,
+  replayOf,
+}: {
+  requestId: string;
+  invocation: Invocation;
+  version: string;
+  replayOf: string;
+}): Promise<{ correlationId?: string; error?: string }> => {
+  const base = sessionFor(requestId);
+  if (!base.url || !base.headerRecord) {
+    return { error: 'Connect first' };
+  }
+  if (!isVersionChoice(version) || version === 'auto') {
+    return { error: `Unknown protocol version ${version}` };
+  }
+  const headerRecord = base.headerRecord;
+  const prefix = `xv-${version}-`;
+  const forward = (event: TraceEvent) => {
+    base.trace.push({
+      ...event,
+      id: `${prefix}${event.id}`,
+      correlationId: `${prefix}${event.correlationId}`,
+      sequence: ++base.seq,
+      via: version,
+    });
+  };
+
+  const key = `${requestId}|${version}`;
+  let alt = alts.get(key);
+  if (!alt) {
+    const protocol = new MCPHTTPProtocol();
+    const abort = new AbortController();
+    const handshake: TraceEvent[] = [];
+    try {
+      const conn = await protocol.connect(
+        { url: base.url, authMode: 'none', getRequestHeaders: () => headerRecord, protocolVersion: version },
+        abort.signal,
+        event => handshake.push(event),
+      );
+      alt = { protocol, conn, abort };
+      alts.set(key, alt);
+    } catch (err) {
+      // Show why the other version could not be reached right in the trace.
+      handshake.forEach(forward);
+      return { error: protocolIssueOf(err, base.url, version) ?? messageOf(err) };
+    }
+  }
+
+  let correlationId = '';
+  const sink = (event: TraceEvent) => {
+    if (!correlationId && event.direction === 'client-to-server' && event.awaitsReply) {
+      correlationId = `${prefix}${event.correlationId}`;
+      base.replays[correlationId] = replayOf;
+    }
+    forward(event);
+  };
+  void alt.protocol
+    .invoke(alt.conn, { method: invocation.method, params: withoutMeta(invocation.params) }, alt.abort.signal, sink)
+    .catch(err => console.warn('[mcp-debugger] cross-version invoke failed', err));
+  return { correlationId };
 };
 
 export const closeAll = () => {

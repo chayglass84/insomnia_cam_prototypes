@@ -171,3 +171,51 @@ describe('server-initiated requests (session era)', () => {
     await service.disconnect({ requestId });
   });
 });
+
+describe('cross-version replay', () => {
+  const echoCall = async (requestId: string) => {
+    const capability = service.getState({ requestId }).capabilities.find(c => c.metadata.name === 'echo')!;
+    const { correlationId } = service.invokeCapability({ requestId, capability, args: { message: 'hi' } });
+    await waitFor(() => service.getTrace({ requestId }).some(e => e.correlationId === correlationId && e.terminalStatus));
+    return correlationId;
+  };
+  const eventsOf = (requestId: string, id: string) => service.getTrace({ requestId }).filter(e => e.correlationId === id);
+
+  it('replays a call over another protocol version and links it to the original', async () => {
+    const requestId = 'req_xver';
+    await connect(requestId, '/mcp', '2025-11-25');
+    const original = await echoCall(requestId);
+    const request = service.getTrace({ requestId }).find(e => e.correlationId === original && e.awaitsReply)!;
+    const { correlationId, error } = await service.replayOnVersion({
+      requestId,
+      invocation: request.payload as { method: string; params?: unknown },
+      version: '2025-03-26',
+      replayOf: original,
+    });
+    expect(error).toBeUndefined();
+    expect(correlationId).toMatch(/^xv-2025-03-26-/);
+    expect(service.getState({ requestId }).replays[correlationId!]).toBe(original);
+    await waitFor(() => eventsOf(requestId, correlationId!).some(e => e.terminalStatus === 'success'));
+    expect(eventsOf(requestId, correlationId!).every(e => e.via === '2025-03-26')).toBe(true);
+    // The replayed request really went over the other version.
+    const sent = eventsOf(requestId, correlationId!).find(e => e.awaitsReply)!;
+    expect(sent.requestHeaders).toMatchObject({ 'MCP-Protocol-Version': '2025-03-26' });
+    await service.disconnect({ requestId });
+  });
+
+  it('reports why another version could not be reached, and shows the failed handshake in the trace', async () => {
+    const requestId = 'req_xver_fail';
+    await connect(requestId, '/mcp', '2025-11-25');
+    const original = await echoCall(requestId);
+    const result = await service.replayOnVersion({
+      requestId,
+      invocation: { method: 'tools/call', params: { name: 'echo', arguments: { message: 'hi' } } },
+      version: '2024-11-05',
+      replayOf: original,
+    });
+    expect(result.correlationId).toBeUndefined();
+    expect(result.error).toBe(`The MCP server ${base}/mcp does not support protocol 2024-11-05.`);
+    expect(service.getTrace({ requestId }).some(e => e.via === '2024-11-05' && e.terminalStatus === 'error')).toBe(true);
+    await service.disconnect({ requestId });
+  });
+});

@@ -126,6 +126,12 @@ export type TraceEvent = {
    * events (a parent link to itself would be circular).
    */
   parentCorrelationId?: string;
+
+  /**
+   * 4348 (S3): set on events from a cross-version replay: the protocol version that call was sent over, which differs
+   * from the session's own. The call's correlationId is namespaced `xv-<version>-<id>` so it can't collide.
+   */
+  via?: string;
 };
 
 /**

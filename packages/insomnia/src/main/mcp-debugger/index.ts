@@ -16,6 +16,7 @@ export interface McpDebuggerBridgeAPI {
   cancel: (options: Parameters<typeof service.cancel>[0]) => Promise<void>;
   respondPeerRequest: (options: Parameters<typeof service.respondPeerRequest>[0]) => Promise<void>;
   setRoots: (options: Parameters<typeof service.setRoots>[0]) => Promise<void>;
+  replayOnVersion: typeof service.replayOnVersion;
 }
 
 export const registerMcpDebuggerHandlers = () => {
@@ -32,6 +33,9 @@ export const registerMcpDebuggerHandlers = () => {
   ipcMainHandle('mcpDebugger.cancel', (_, o: Parameters<typeof service.cancel>[0]) => service.cancel(o));
   ipcMainHandle('mcpDebugger.respondPeerRequest', (_, o: Parameters<typeof service.respondPeerRequest>[0]) =>
     service.respondPeerRequest(o),
+  );
+  ipcMainHandle('mcpDebugger.replayOnVersion', (_, o: Parameters<typeof service.replayOnVersion>[0]) =>
+    service.replayOnVersion(o),
   );
   ipcMainHandle('mcpDebugger.setRoots', (_, o: Parameters<typeof service.setRoots>[0]) => service.setRoots(o));
 };

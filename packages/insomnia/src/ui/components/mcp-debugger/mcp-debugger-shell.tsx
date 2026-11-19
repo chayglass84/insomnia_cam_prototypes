@@ -97,6 +97,7 @@ export const McpDebuggerShell = ({ request }: { request: McpRequest }) => {
                   isConnected={isConnected}
                   replays={state.replays}
                   serverUrl={state.url}
+                  currentVersion={state.protocolVersion}
                   onClear={clearTrace}
                 />
               </ErrorBoundary>

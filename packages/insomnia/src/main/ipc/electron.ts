@@ -131,6 +131,7 @@ export type HandleChannels =
   | 'mcpDebugger.cancel'
   | 'mcpDebugger.respondPeerRequest'
   | 'mcpDebugger.setRoots'
+  | 'mcpDebugger.replayOnVersion'
   | 'mcp.client.hasRequestResponded'
   | 'mcp.close'
   | 'mcp.connect'
