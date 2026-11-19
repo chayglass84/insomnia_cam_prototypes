@@ -18,6 +18,7 @@ interface Session {
   status: McpDebuggerStatus;
   error?: string;
   protocolIssue?: string;
+  url?: string;
   capabilities: Capability[];
   warnings: IntrospectionWarning[];
   trace: TraceEvent[];
@@ -84,6 +85,8 @@ export interface McpDebuggerState {
   error?: string;
   /** Set only when the failure is a protocol mismatch; the UI shows a banner for it. Every other failure is trace-only. */
   protocolIssue?: string;
+  /** The URL of the last connect attempt (after template rendering). */
+  url?: string;
   protocolVersion?: string;
   serverName?: string;
   capabilities: Capability[];
@@ -98,6 +101,7 @@ export const getState = ({ requestId }: { requestId: string }): McpDebuggerState
     status: s.status,
     error: s.error,
     protocolIssue: s.protocolIssue,
+    url: s.url,
     protocolVersion: s.conn?.protocolVersion,
     serverName: s.conn?.serverName,
     capabilities: s.capabilities,
@@ -127,6 +131,7 @@ export const connect = async (options: McpDebuggerConnectOptions): Promise<McpDe
   s.status = 'connecting';
   s.error = undefined;
   s.protocolIssue = undefined;
+  s.url = url;
   s.capabilities = [];
   s.warnings = [];
   const sink = sinkFor(s);

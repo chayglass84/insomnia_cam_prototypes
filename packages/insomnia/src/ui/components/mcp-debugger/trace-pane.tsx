@@ -4,6 +4,7 @@ import { useLocalStorage } from 'react-use';
 
 import type { TraceEvent, TraceStatus } from '~/common/mcp-debugger/protocol/TraceEvent';
 
+import { buildCurl } from './curl-command';
 import { JsonView } from './json-view';
 import { diffJson, type DiffLine, hasChanges } from './line-diff';
 
@@ -173,15 +174,34 @@ const CallDetail: FC<{
   call: Call;
   original?: Call;
   isConnected: boolean;
+  serverUrl?: string;
   onCancel: (correlationId: string) => void;
   onReplay: (call: Call, invocation: ReplayRequest) => void;
   onSelect: (correlationId: string) => void;
-}> = ({ call, original, isConnected, onCancel, onReplay, onSelect }) => {
+}> = ({ call, original, isConnected, serverUrl, onCancel, onReplay, onSelect }) => {
   const request = requestEventOf(call);
   const replies = call.events.filter(e => e !== request);
   const [editing, setEditing] = useState(false);
+  const [copied, setCopied] = useState<string[] | null>(null);
 
-  useEffect(() => setEditing(false), [call.correlationId]);
+  useEffect(() => {
+    setEditing(false);
+    setCopied(null);
+  }, [call.correlationId]);
+
+  const copyCurl = async () => {
+    if (!serverUrl) {
+      return;
+    }
+    const wire = wireRequestOf(request) as { method: string; params?: unknown; headers: Record<string, string> };
+    const { command, envVars } = buildCurl({ url: serverUrl, method: wire.method, params: wire.params, headers: wire.headers });
+    try {
+      await navigator.clipboard.writeText(command);
+      setCopied(envVars);
+    } catch (err) {
+      console.error('[mcp-debugger] copy failed', err);
+    }
+  };
 
   const requestDiff = original ? diffJson(wireRequestOf(requestEventOf(original)), wireRequestOf(request)) : null;
   const originalTerminal = original ? terminalEventOf(original) : undefined;
@@ -204,6 +224,15 @@ const CallDetail: FC<{
               Cancel request
             </Button>
           )}
+          {serverUrl && request.direction === 'client-to-server' && request.awaitsReply && (
+            <Button
+              className="rounded-xs border border-solid border-(--hl-md) px-2 py-0.5 text-xs hover:bg-(--hl-sm)"
+              onPress={copyCurl}
+              data-testid="mcp-copy-curl"
+            >
+              {copied ? 'Copied' : 'Copy cURL'}
+            </Button>
+          )}
           {isReplayable(call) && (
             <Button
               className="rounded-xs border border-solid border-(--hl-md) px-2 py-0.5 text-xs hover:bg-(--hl-sm) disabled:opacity-50"
@@ -216,6 +245,11 @@ const CallDetail: FC<{
           )}
         </div>
       </div>
+      {copied && copied.length > 0 && (
+        <p className="text-xs text-(--hl)" data-testid="mcp-curl-note">
+          Credentials are not copied. Set {copied.map(v => `$${v}`).join(', ')} in your shell before running it.
+        </p>
+      )}
       {original && (
         <p className="text-xs text-(--hl)" data-testid="mcp-replay-of">
           Replay of{' '}
@@ -405,8 +439,9 @@ export const McpTracePane: FC<{
   trace: TraceEvent[];
   isConnected: boolean;
   replays: Record<string, string>;
+  serverUrl?: string;
   onClear: () => void;
-}> = ({ requestId, trace, isConnected, replays, onClear }) => {
+}> = ({ requestId, trace, isConnected, replays, serverUrl, onClear }) => {
   // Calls: one row per request/response pair, newest request first. Stream: every message, newest received first.
   const [storedMode, setStoredMode] = useLocalStorage<TraceMode>('mcp-debugger:trace-mode', 'calls');
   const mode: TraceMode = storedMode === 'stream' ? 'stream' : 'calls';
@@ -519,6 +554,7 @@ export const McpTracePane: FC<{
                 call={selected}
                 original={original}
                 isConnected={isConnected}
+                serverUrl={serverUrl}
                 onCancel={correlationId => window.main.mcpDebugger.cancel({ requestId, correlationId })}
                 onReplay={replay}
                 onSelect={setSelectedId}

@@ -58,6 +58,8 @@ export const CapabilitySidebar: FC<{
       ),
     [capabilities, filter],
   );
+  // Tools, then resources, then prompts, in server order within each.
+  const ordered = useMemo(() => GROUPS.flatMap(({ type }) => visible.filter(c => c.type === type)), [visible]);
   const profile = isSupportedVersion(protocolVersion) ? getProfile(protocolVersion) : null;
   const mockTabs = profile ? profile.tabs.filter(t => MOCK_TABS[t]) : [];
 
@@ -73,31 +75,27 @@ export const CapabilitySidebar: FC<{
       </div>
       <div className="flex-1 overflow-y-auto">
         {!isConnected && <p className="p-3 text-sm text-(--hl)">Connect to list tools, resources and prompts.</p>}
+        {isConnected && capabilities.length === 0 && (
+          <p className="p-3 text-sm text-(--hl)">This server lists no tools, resources or prompts.</p>
+        )}
+        {isConnected && capabilities.length > 0 && ordered.length === 0 && (
+          <p className="p-3 text-sm text-(--hl)">No matches.</p>
+        )}
+        {/* One flat list: the chip says what each entry is, so no group headings. Rows use the trace list's spacing. */}
         {isConnected &&
-          GROUPS.map(({ type, label }) => {
-            const items = visible.filter(c => c.type === type);
+          ordered.map(c => {
+            const key = capabilityKey(c);
             return (
-              <section key={type}>
-                <h4 className="px-3 pt-3 pb-1 text-xs font-bold text-(--hl) uppercase">
-                  {label} <span className="font-normal">({items.length})</span>
-                </h4>
-                {items.length === 0 && <p className="px-3 py-1 text-xs text-(--hl)">None</p>}
-                {items.map(c => {
-                  const key = capabilityKey(c);
-                  return (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => onSelect(c)}
-                      data-testid={`mcp-capability-${key}`}
-                      className={`flex w-full items-center gap-2 px-3 py-1 text-left text-sm hover:bg-(--hl-xs) ${selectedKey === key ? 'bg-(--hl-sm)' : ''}`}
-                    >
-                      <span className={`${CHIP_BASE} ${CHIPS[c.type].className}`}>{CHIPS[c.type].label}</span>
-                      <span className="truncate">{c.metadata.name}</span>
-                    </button>
-                  );
-                })}
-              </section>
+              <button
+                key={key}
+                type="button"
+                onClick={() => onSelect(c)}
+                data-testid={`mcp-capability-${key}`}
+                className={`flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm hover:bg-(--hl-xs) ${selectedKey === key ? 'bg-(--hl-sm)' : ''}`}
+              >
+                <span className={`${CHIP_BASE} ${CHIPS[c.type].className}`}>{CHIPS[c.type].label}</span>
+                <span className="truncate">{c.metadata.name}</span>
+              </button>
             );
           })}
         {isConnected && mockTabs.length > 0 && (

@@ -89,6 +89,7 @@ export const McpDebuggerShell = ({ request }: { request: McpRequest }) => {
                   trace={trace}
                   isConnected={isConnected}
                   replays={state.replays}
+                  serverUrl={state.url}
                   onClear={clearTrace}
                 />
               </ErrorBoundary>
