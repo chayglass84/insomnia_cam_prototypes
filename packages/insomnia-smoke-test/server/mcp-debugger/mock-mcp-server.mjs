@@ -53,6 +53,27 @@ const echoTool = {
   },
 };
 
+// 4348: added for the Insomnia prototype (not in Ardi's fixture). Stays pending for `delayMs` (default 5000) so the
+// trace's pending state and Cancel can be tested by hand. Aborts if the client goes away.
+const slowEchoTool = {
+  name: "slow-echo",
+  description: "Echo a message after a delay (default 5000 ms). Stays pending, for testing in-flight calls and Cancel.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      message: { type: "string", description: "Message to echo" },
+      delayMs: { type: "integer", description: "Delay before replying, in ms", default: 5000 },
+    },
+    required: ["message"],
+  },
+};
+
+function respondSlowly(res, id, args) {
+  const delayMs = Number(args?.delayMs ?? 5000);
+  const timer = setTimeout(() => echoResult(res, id, args?.message ?? ""), delayMs);
+  res.on("close", () => clearTimeout(timer));
+}
+
 // Tools that return a task handle instead of a terminal result (2026-07-28 RC "tasks"
 // extension) — one tool per behavior, so the e2e spec picks a lifecycle by tool name.
 const taskTools = [
@@ -148,7 +169,7 @@ function writeToolList(res, id) {
   writeJson(res, 200, {
     jsonrpc: "2.0",
     id,
-    result: { tools: [echoTool, ...taskTools, ...uiTools] },
+    result: { tools: [echoTool, slowEchoTool, ...taskTools, ...uiTools] },
   });
 }
 
@@ -306,6 +327,10 @@ async function handleLegacy(req, res) {
       });
       return;
     }
+    if (payload.params?.name === "slow-echo") {
+      respondSlowly(res, payload.id, payload.params?.arguments);
+      return;
+    }
     // ui-chart / ui-hostile / ui-task / ui-pinned / ui-pinned-bad fall through to
     // the plain echo, same as every other tool this era doesn't special-case.
     echoResult(res, payload.id, payload.params?.arguments?.message ?? "");
@@ -454,6 +479,10 @@ async function handleStateless(req, res) {
     }
     if (isTaskTool(name)) {
       writeJson(res, 200, { jsonrpc: "2.0", id: payload.id, result: createTask(name) });
+      return;
+    }
+    if (name === "slow-echo") {
+      respondSlowly(res, payload.id, payload.params?.arguments);
       return;
     }
     // ui-chart / ui-hostile / ui-pinned / ui-pinned-bad fall through to the plain echo.

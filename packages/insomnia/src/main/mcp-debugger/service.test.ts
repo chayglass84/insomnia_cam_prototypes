@@ -85,6 +85,28 @@ describe('mcp-debugger service', () => {
     await service.disconnect({ requestId });
   });
 
+  it('keeps a slow call pending, then settles it (and cancel settles it as cancelled)', async () => {
+    const requestId = 'req_pending';
+    await service.connect({ requestId, url: `${base}/stateless`, headers: [], protocolVersion: 'auto' });
+    const slow = (delayMs: number) =>
+      service.invokeRaw({
+        requestId,
+        invocation: { method: 'tools/call', params: { name: 'slow-echo', arguments: { message: 'zzz', delayMs } } },
+      }).correlationId;
+    const statusOf = (id: string) => service.getTrace({ requestId }).find(e => e.correlationId === id && e.terminalStatus)?.terminalStatus;
+
+    const finishing = slow(400);
+    expect(statusOf(finishing)).toBeUndefined(); // pending: request sent, nothing terminal yet
+    await waitFor(() => statusOf(finishing) === 'success');
+
+    const cancelled = slow(5000);
+    expect(statusOf(cancelled)).toBeUndefined();
+    service.cancel({ requestId, correlationId: cancelled });
+    await waitFor(() => statusOf(cancelled) !== undefined);
+    expect(statusOf(cancelled)).toBe('cancelled');
+    await service.disconnect({ requestId });
+  });
+
   describe('failures', () => {
     const errorEvent = (requestId: string) => service.getTrace({ requestId }).find(e => e.terminalStatus === 'error');
 

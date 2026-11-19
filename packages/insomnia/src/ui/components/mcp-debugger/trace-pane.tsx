@@ -1,5 +1,6 @@
 import React, { type FC, useEffect, useMemo, useState } from 'react';
 import { Button, Focusable, Tooltip, TooltipTrigger } from 'react-aria-components';
+import { useLocalStorage } from 'react-use';
 
 import type { TraceEvent, TraceStatus } from '~/common/mcp-debugger/protocol/TraceEvent';
 
@@ -168,7 +169,9 @@ const CallDetail: FC<{
   return (
     <div className="flex h-full flex-col gap-3 overflow-y-auto p-3 text-sm" data-testid="mcp-trace-detail">
       <div className="flex items-center justify-between gap-2">
-        <strong className="truncate">{call.label}</strong>
+        <strong className="flex min-w-0">
+          <CallLabel label={call.label} />
+        </strong>
         <div className="flex shrink-0 items-center gap-2">
           {call.status === 'pending' && request.cancellable && (
             <Button
@@ -245,6 +248,135 @@ const CallDetail: FC<{
   );
 };
 
+const pad = (n: number, width = 2) => String(n).padStart(width, '0');
+/** Local time with milliseconds, e.g. 13:04:09.042. */
+export const formatTime = (iso: string) => {
+  const d = new Date(iso);
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}.${pad(d.getMilliseconds(), 3)}`;
+};
+
+const ReplayBadge: FC = () => (
+  <TooltipTrigger delay={200}>
+    <Focusable>
+      <span
+        role="img"
+        aria-label="Replayed call"
+        className="shrink-0 rounded-xs border border-solid border-(--hl-sm) px-1 text-[0.65rem] text-(--hl)"
+        data-testid="mcp-replay-badge"
+      >
+        ↻
+      </span>
+    </Focusable>
+    <Tooltip
+      offset={8}
+      className="max-w-xs rounded-md border border-solid border-(--hl-sm) bg-(--color-bg) px-3 py-2 text-xs text-(--color-font) shadow-lg select-none"
+    >
+      Replayed: an edited copy of an earlier call. Open it to compare against the original.
+    </Tooltip>
+  </TooltipTrigger>
+);
+
+const STATUS_TOOLTIP: Record<TraceStatus, string> = {
+  pending: 'Pending: sent, still waiting for the server to answer',
+  success: 'Success: the server answered with a result',
+  error: 'Error: the call failed (see the detail for the status and body)',
+  cancelled: 'Cancelled: you cancelled this request before it finished',
+  'no-response': 'No response: the server never answered',
+};
+
+/** The coloured status dot, with a tooltip saying what the colour means. `neutral` explains the grey dot. */
+const StatusDot: FC<{ status?: TraceStatus; neutral?: string }> = ({ status, neutral = 'No final status for this message' }) => (
+  <TooltipTrigger delay={200}>
+    <Focusable>
+      <span
+        role="img"
+        aria-label={status ?? 'no status'}
+        className={`h-2 w-2 shrink-0 rounded-full ${status ? STATUS_STYLE[status] : 'bg-(--hl-md)'}`}
+        data-testid="mcp-status-dot"
+      />
+    </Focusable>
+    <Tooltip
+      offset={8}
+      className="max-w-xs rounded-md border border-solid border-(--hl-sm) bg-(--color-bg) px-3 py-2 text-xs text-(--color-font) shadow-lg select-none"
+    >
+      {status ? STATUS_TOOLTIP[status] : neutral}
+    </Tooltip>
+  </TooltipTrigger>
+);
+
+/** Stream direction arrow: requests and responses get different colours so they scan apart. */
+const Arrow: FC<{ isRequest: boolean }> = ({ isRequest }) => (
+  <span
+    className={`shrink-0 ${isRequest ? 'text-(--color-surprise)' : 'text-(--color-info)'}`}
+    title={isRequest ? 'Request (client to server)' : 'Response (server to client)'}
+    data-testid={isRequest ? 'mcp-arrow-request' : 'mcp-arrow-response'}
+  >
+    {isRequest ? '→' : '←'}
+  </span>
+);
+
+/** "tools/call · echo" -> the method in the normal font, the tool/resource/prompt name in monospace. */
+const CallLabel: FC<{ label: string }> = ({ label }) => {
+  const [method, ...rest] = label.split(' · ');
+  const name = rest.join(' · ');
+  return (
+    <span className="truncate">
+      {method}
+      {name && (
+        <>
+          {' · '}
+          <span className="font-mono text-xs" data-testid="mcp-label-name">
+            {name}
+          </span>
+        </>
+      )}
+    </span>
+  );
+};
+
+const Time: FC<{ iso: string }> = ({ iso }) => (
+  <span className="shrink-0 font-mono text-xs text-(--hl) tabular-nums" data-testid="mcp-trace-time">
+    {formatTime(iso)}
+  </span>
+);
+
+const StreamEventDetail: FC<{ event: TraceEvent; call?: Call; onShowCall: (correlationId: string) => void }> = ({
+  event,
+  call,
+  onShowCall,
+}) => (
+  <div className="flex h-full flex-col gap-3 overflow-y-auto p-3 text-sm" data-testid="mcp-stream-detail">
+    <div className="flex items-center justify-between gap-2">
+      <strong className="flex min-w-0 items-center gap-1">
+        <Arrow isRequest={event.direction === 'client-to-server'} />
+        <CallLabel label={call?.label ?? event.label ?? event.messageType} />
+      </strong>
+      {call && (
+        <Button
+          className="shrink-0 rounded-xs border border-solid border-(--hl-md) px-2 py-0.5 text-xs hover:bg-(--hl-sm)"
+          onPress={() => onShowCall(event.correlationId)}
+          data-testid="mcp-show-call"
+        >
+          Show call
+        </Button>
+      )}
+    </div>
+    <p className="text-xs text-(--hl)">
+      {event.direction} · {event.messageType}
+      {event.terminalStatus && ` · ${event.terminalStatus}`} · {formatTime(event.timestamp)}
+    </p>
+    <JsonView value={event.payload} />
+    {(event.requestHeaders || event.responseHeaders) && (
+      <details>
+        <summary className="cursor-pointer text-xs text-(--hl)">Headers</summary>
+        <JsonView value={event.requestHeaders ?? event.responseHeaders} />
+      </details>
+    )}
+  </div>
+);
+
+type TraceMode = 'calls' | 'stream';
+
 export const McpTracePane: FC<{
   requestId: string;
   trace: TraceEvent[];
@@ -252,13 +384,24 @@ export const McpTracePane: FC<{
   replays: Record<string, string>;
   onClear: () => void;
 }> = ({ requestId, trace, isConnected, replays, onClear }) => {
+  // Calls: one row per request/response pair, newest request first. Stream: every message, newest received first.
+  const [storedMode, setStoredMode] = useLocalStorage<TraceMode>('mcp-debugger:trace-mode', 'calls');
+  const mode: TraceMode = storedMode === 'stream' ? 'stream' : 'calls';
   const calls = useMemo(() => groupCalls(trace), [trace]);
+  const stream = useMemo(() => [...trace].sort((a, b) => b.sequence - a.sequence), [trace]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const selected = calls.find(c => c.correlationId === selectedId) ?? calls[0] ?? null;
-  const original = selected && replays[selected.correlationId] ? calls.find(c => c.correlationId === replays[selected.correlationId]) : undefined;
+  const selectedEvent = stream.find(e => e.id === selectedEventId) ?? stream[0] ?? null;
+  const original =
+    selected && replays[selected.correlationId]
+      ? calls.find(c => c.correlationId === replays[selected.correlationId])
+      : undefined;
+  const callById = useMemo(() => new Map(calls.map(c => [c.correlationId, c])), [calls]);
 
   useEffect(() => {
     setSelectedId(null);
+    setSelectedEventId(null);
   }, [requestId]);
 
   const replay = async (call: Call, invocation: { method: string; params?: unknown }) => {
@@ -276,10 +419,27 @@ export const McpTracePane: FC<{
     }
   };
 
+  const modeButton = (value: TraceMode, label: string) => (
+    <Button
+      aria-pressed={mode === value}
+      onPress={() => setStoredMode(value)}
+      data-testid={`mcp-trace-mode-${value}`}
+      className={`px-2 py-0.5 text-xs ${mode === value ? 'bg-(--hl-sm) text-(--color-font)' : 'text-(--hl) hover:bg-(--hl-xs)'}`}
+    >
+      {label}
+    </Button>
+  );
+
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="mcp-trace-pane">
-      <div className="flex h-(--line-height-sm) shrink-0 items-center justify-between border-b border-solid border-(--hl-md) px-2">
-        <span className="text-xs font-bold text-(--hl) uppercase">Trace · {calls.length} calls</span>
+      <div className="flex h-(--line-height-sm) shrink-0 items-center justify-between gap-2 border-b border-solid border-(--hl-md) px-2">
+        <div className="flex items-center gap-3">
+          <span className="text-xs font-bold text-(--hl) uppercase">Trace</span>
+          <div className="flex overflow-hidden rounded-xs border border-solid border-(--hl-md)" role="group" aria-label="Trace view">
+            {modeButton('calls', 'Calls')}
+            {modeButton('stream', 'Stream')}
+          </div>
+        </div>
         <Button className="text-xs text-(--hl) hover:text-(--color-font)" onPress={onClear} isDisabled={calls.length === 0}>
           Clear
         </Button>
@@ -289,44 +449,48 @@ export const McpTracePane: FC<{
       ) : (
         <div className="flex min-h-0 flex-1">
           <div className="w-1/2 min-w-48 overflow-y-auto border-r border-solid border-(--hl-md)" data-testid="mcp-trace-list">
-            {calls.map(call => (
-              <button
-                key={call.correlationId}
-                type="button"
-                onClick={() => setSelectedId(call.correlationId)}
-                data-testid="mcp-trace-row"
-                className={`flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm hover:bg-(--hl-xs) ${selected?.correlationId === call.correlationId ? 'bg-(--hl-sm)' : ''}`}
-              >
-                <span className={`h-2 w-2 shrink-0 rounded-full ${STATUS_STYLE[call.status]}`} title={call.status} />
-                {replays[call.correlationId] && (
-                  <TooltipTrigger delay={200}>
-                    <Focusable>
-                      <span
-                        role="img"
-                        aria-label="Replayed call"
-                        className="shrink-0 rounded-xs border border-solid border-(--hl-sm) px-1 text-[0.65rem] text-(--hl)"
-                        data-testid="mcp-replay-badge"
-                      >
-                        ↻
-                      </span>
-                    </Focusable>
-                    <Tooltip
-                      offset={8}
-                      className="max-w-xs rounded-md border border-solid border-(--hl-sm) bg-(--color-bg) px-3 py-2 text-xs text-(--color-font) shadow-lg select-none"
-                    >
-                      Replayed: an edited copy of an earlier call. Open it to compare against the original.
-                    </Tooltip>
-                  </TooltipTrigger>
-                )}
-                <span className="truncate">{call.label}</span>
-                <span className="ml-auto shrink-0 text-xs text-(--hl)">
-                  {call.durationMs !== undefined ? `${call.durationMs} ms` : '…'}
-                </span>
-              </button>
-            ))}
+            {mode === 'calls' &&
+              calls.map(call => (
+                <button
+                  key={call.correlationId}
+                  type="button"
+                  onClick={() => setSelectedId(call.correlationId)}
+                  data-testid="mcp-trace-row"
+                  className={`flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm hover:bg-(--hl-xs) ${selected?.correlationId === call.correlationId ? 'bg-(--hl-sm)' : ''}`}
+                >
+                  <StatusDot status={call.status} />
+                  <Time iso={call.startedAt} />
+                  {replays[call.correlationId] && <ReplayBadge />}
+                  <CallLabel label={call.label} />
+                  <span className="ml-auto shrink-0 text-xs text-(--hl)">
+                    {call.durationMs !== undefined ? `${call.durationMs} ms` : 'pending…'}
+                  </span>
+                </button>
+              ))}
+            {mode === 'stream' &&
+              stream.map(event => {
+                const call = callById.get(event.correlationId);
+                const isRequest = event.direction === 'client-to-server';
+                // A request row is amber while its call is still waiting; replies show their own outcome.
+                const status: TraceStatus | undefined = event.terminalStatus ?? (event.awaitsReply && call?.status === 'pending' ? 'pending' : undefined);
+                return (
+                  <button
+                    key={event.id}
+                    type="button"
+                    onClick={() => setSelectedEventId(event.id)}
+                    data-testid="mcp-stream-row"
+                    className={`flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm hover:bg-(--hl-xs) ${selectedEvent?.id === event.id ? 'bg-(--hl-sm)' : ''}`}
+                  >
+                    <StatusDot status={status} neutral={isRequest ? 'Request sent' : 'Message received'} />
+                    <Time iso={event.timestamp} />
+                    <Arrow isRequest={isRequest} />
+                    <CallLabel label={call?.label ?? event.label ?? event.messageType} />
+                  </button>
+                );
+              })}
           </div>
           <div className="h-full min-h-0 min-w-0 flex-1 overflow-hidden">
-            {selected && (
+            {mode === 'calls' && selected && (
               <CallDetail
                 call={selected}
                 original={original}
@@ -334,6 +498,16 @@ export const McpTracePane: FC<{
                 onCancel={correlationId => window.main.mcpDebugger.cancel({ requestId, correlationId })}
                 onReplay={replay}
                 onSelect={setSelectedId}
+              />
+            )}
+            {mode === 'stream' && selectedEvent && (
+              <StreamEventDetail
+                event={selectedEvent}
+                call={callById.get(selectedEvent.correlationId)}
+                onShowCall={correlationId => {
+                  setSelectedId(correlationId);
+                  setStoredMode('calls');
+                }}
               />
             )}
           </div>
