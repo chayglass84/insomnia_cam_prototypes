@@ -36,7 +36,7 @@ const CREDENTIAL_HEADER_NAMES = new Set([
 // "auth" is deliberately NOT matched: WWW-Authenticate is a challenge, not a
 // secret, and this debugger needs it visible.
 const CREDENTIAL_NAME_PATTERN = /token|secret|password|api-?key|credential/;
-const REDACTED = "<redacted>";
+export const REDACTED = "<redacted>";
 
 function isCredentialHeader(name: string): boolean {
   const lower = name.toLowerCase();

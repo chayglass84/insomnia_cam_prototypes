@@ -98,23 +98,41 @@ const DiffView: FC<{ title: string; lines: DiffLine[] }> = ({ title, lines }) =>
   </section>
 );
 
+/** What the replay editor edits: the request exactly as it goes on the wire (S2: method, params incl. `_meta`, headers). */
+interface ReplayRequest {
+  method: string;
+  params?: unknown;
+  headers: Record<string, string>;
+}
+
+/** The wire request of a trace request event, in the shape the editor and the request diff both use. */
+const wireRequestOf = (event: TraceEvent) => ({
+  ...(event.payload as { method?: unknown; params?: unknown }),
+  headers: event.requestHeaders ?? {},
+});
+
 const ReplayEditor: FC<{
   request: TraceEvent;
-  onSend: (invocation: { method: string; params?: unknown }) => void;
+  onSend: (invocation: ReplayRequest) => void;
   onClose: () => void;
 }> = ({ request, onSend, onClose }) => {
-  const [text, setText] = useState(() => JSON.stringify(request.payload, null, 2));
+  const [text, setText] = useState(() => JSON.stringify(wireRequestOf(request), null, 2));
   const [error, setError] = useState<string | null>(null);
 
   const send = () => {
     try {
-      const parsed = JSON.parse(text) as { method?: unknown; params?: unknown };
+      const parsed = JSON.parse(text) as { method?: unknown; params?: unknown; headers?: unknown };
       if (typeof parsed.method !== 'string' || !parsed.method) {
         setError('"method" must be a non-empty string');
         return;
       }
+      const headers = parsed.headers ?? {};
+      if (typeof headers !== 'object' || Array.isArray(headers) || Object.values(headers).some(v => typeof v !== 'string')) {
+        setError('"headers" must be an object of string values');
+        return;
+      }
       setError(null);
-      onSend({ method: parsed.method, params: parsed.params });
+      onSend({ method: parsed.method, params: parsed.params, headers: headers as Record<string, string> });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Invalid JSON');
     }
@@ -123,6 +141,11 @@ const ReplayEditor: FC<{
   return (
     <section className="flex flex-col gap-2 rounded-xs border border-solid border-(--hl-md) p-2" data-testid="mcp-replay-editor">
       <h4 className="text-xs font-bold text-(--hl) uppercase">Edit &amp; replay</h4>
+      <p className="text-xs text-(--hl)">
+        Sent exactly as written: params go out untouched (including <code>_meta</code>) and these headers replace the
+        protocol&apos;s. Credential values shown as <code>&lt;redacted&gt;</code> are filled in from the connection;
+        delete a header to send without it.
+      </p>
       <textarea
         aria-label="Edit request"
         className="h-48 w-full rounded-xs border border-solid border-(--hl-md) bg-transparent p-2 font-mono text-xs"
@@ -151,7 +174,7 @@ const CallDetail: FC<{
   original?: Call;
   isConnected: boolean;
   onCancel: (correlationId: string) => void;
-  onReplay: (call: Call, invocation: { method: string; params?: unknown }) => void;
+  onReplay: (call: Call, invocation: ReplayRequest) => void;
   onSelect: (correlationId: string) => void;
 }> = ({ call, original, isConnected, onCancel, onReplay, onSelect }) => {
   const request = requestEventOf(call);
@@ -160,7 +183,7 @@ const CallDetail: FC<{
 
   useEffect(() => setEditing(false), [call.correlationId]);
 
-  const requestDiff = original ? diffJson(requestEventOf(original).payload, request.payload) : null;
+  const requestDiff = original ? diffJson(wireRequestOf(requestEventOf(original)), wireRequestOf(request)) : null;
   const originalTerminal = original ? terminalEventOf(original) : undefined;
   const terminal = terminalEventOf(call);
   const responseDiff =
@@ -404,11 +427,12 @@ export const McpTracePane: FC<{
     setSelectedEventId(null);
   }, [requestId]);
 
-  const replay = async (call: Call, invocation: { method: string; params?: unknown }) => {
+  const replay = async (call: Call, invocation: ReplayRequest) => {
     try {
       const { correlationId } = await window.main.mcpDebugger.invokeRaw({
         requestId,
-        invocation,
+        invocation: { method: invocation.method, params: invocation.params },
+        exactHeaders: invocation.headers,
         replayOf: call.correlationId,
       });
       if (correlationId) {

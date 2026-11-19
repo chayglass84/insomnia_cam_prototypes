@@ -45,7 +45,7 @@ import { shouldFallBackToLegacy, STATELESS_VERSION } from "./negotiate/versions"
 import { pickServerIcon } from "./serverIcon";
 import { TASKS_CANCEL, TASKS_GET, TASKS_UPDATE } from "./tasks/taskMethods";
 import { isTaskResult } from "./tasks/taskModel";
-import { traceEventsFor } from "./traceEvents";
+import { REDACTED, traceEventsFor } from "./traceEvents";
 import { classifyFetchError } from "./wire/classify";
 import {
   BEST_EFFORT_TIMEOUT_MS,
@@ -232,7 +232,9 @@ export class MCPHTTPProtocol implements Protocol<MCPConnectConfig> {
         ?.inputResponses;
       onTrace?.(this.trace.inputResponse(correlationId, { inputResponses: answers }));
     } else {
-      onTrace?.(this.trace.request(correlationId, invocation.method, invocation.params, headers));
+      // 4348: trace the params as actually sent (including the injected `_meta` on stateless), so an edit starts from
+      // the real wire request.
+      onTrace?.(this.trace.request(correlationId, invocation.method, payload.params, headers));
     }
 
     const userAbort = new AbortController();
@@ -448,6 +450,21 @@ export class MCPHTTPProtocol implements Protocol<MCPConnectConfig> {
 
   /** Build the wire payload and headers for one invocation. */
   private prepareCall(conn: MCPConnection, id: number, invocation: MCPInvocation) {
+    if (invocation.exact) {
+      const live = Object.fromEntries(
+        Object.entries(conn.getRequestHeaders()).map(([k, v]) => [k.toLowerCase(), v]),
+      );
+      const headers = Object.fromEntries(
+        Object.entries(invocation.exact.headers).map(([name, value]) => [
+          name,
+          value === REDACTED ? (live[name.toLowerCase()] ?? value) : value,
+        ]),
+      );
+      return {
+        payload: { jsonrpc: "2.0" as const, id, method: invocation.method, params: invocation.params },
+        headers,
+      };
+    }
     const stateless = isStatelessConnection(conn);
     const params = stateless
       ? withStatelessMeta(conn.protocolVersion, invocation.params)
@@ -564,7 +581,7 @@ export class MCPHTTPProtocol implements Protocol<MCPConnectConfig> {
     // (JSON-RPC error replies resolve in the try via envelope.error, never here.)
     if (isServerReply(ex.error)) {
       onTrace?.(
-        this.trace.error(correlationId, { kind: ex.error.kind, message: ex.error.message }),
+        this.trace.error(correlationId, failureTrace(ex).payload, failureTrace(ex).responseHeaders),
       );
     } else {
       onTrace?.(this.trace.diagnostic(correlationId, ex.error.message));

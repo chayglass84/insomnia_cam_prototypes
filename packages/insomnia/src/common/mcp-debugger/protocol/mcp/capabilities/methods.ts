@@ -27,6 +27,12 @@ export interface MCPCapability extends Capability {
  */
 export interface MCPInvocation extends Invocation {
   mcpParamHeaders?: Record<string, string>;
+  /**
+   * 4348 (S2 edit & replay): send exactly this request. `params` go on the wire untouched (no `_meta` injection) and
+   * `headers` replace the protocol-built ones. Credential values shown as redacted in the trace are restored by name
+   * from the connection's live auth headers, so a replay doesn't send the literal redaction marker.
+   */
+  exact?: { headers: Record<string, string> };
 }
 
 /** Build the JSON-RPC invocation for a capability + user-supplied arguments. */

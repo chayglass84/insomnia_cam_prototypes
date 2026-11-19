@@ -107,6 +107,81 @@ describe('mcp-debugger service', () => {
     await service.disconnect({ requestId });
   });
 
+  describe('exact replay (edited _meta and headers)', () => {
+    const callEcho = (requestId: string, opts: { exactHeaders?: Record<string, string>; params?: unknown } = {}) =>
+      service.invokeRaw({
+        requestId,
+        invocation: {
+          method: 'tools/call',
+          params: opts.params ?? { name: 'echo', arguments: { message: 'x' } },
+        },
+        exactHeaders: opts.exactHeaders,
+      }).correlationId;
+    const settled = (requestId: string, id: string) =>
+      service.getTrace({ requestId }).find(e => e.correlationId === id && e.terminalStatus);
+    const requestEvent = (requestId: string, id: string) =>
+      service.getTrace({ requestId }).find(e => e.correlationId === id && e.awaitsReply)!;
+
+    it('sends the headers exactly as written (a deleted Mcp-Name header makes the server reject it)', async () => {
+      const requestId = 'req_exact_headers';
+      await service.connect({ requestId, url: `${base}/stateless`, headers: [], protocolVersion: 'auto' });
+      const normal = callEcho(requestId);
+      await waitFor(() => settled(requestId, normal)?.terminalStatus === 'success');
+
+      const headers = { ...requestEvent(requestId, normal).requestHeaders };
+      expect(headers['Mcp-Name']).toBe('echo');
+      delete headers['Mcp-Name'];
+      // Start from the traced wire request (params include the injected _meta), as the editor does.
+      const wireParams = (requestEvent(requestId, normal).payload as { params: unknown }).params;
+      const edited = callEcho(requestId, { params: wireParams, exactHeaders: headers });
+      await waitFor(() => settled(requestId, edited) !== undefined);
+      expect(settled(requestId, edited)!.terminalStatus).toBe('error');
+      expect(JSON.stringify(settled(requestId, edited)!.payload)).toContain('Mcp-Name');
+      expect(requestEvent(requestId, edited).requestHeaders).not.toHaveProperty('Mcp-Name');
+      await service.disconnect({ requestId });
+    });
+
+    it('leaves an edited _meta untouched and traces the params as actually sent', async () => {
+      const requestId = 'req_exact_meta';
+      await service.connect({ requestId, url: `${base}/stateless`, headers: [], protocolVersion: 'auto' });
+      const normal = callEcho(requestId);
+      await waitFor(() => settled(requestId, normal) !== undefined);
+      // Normal calls now trace the wire params, including the injected _meta.
+      const sent = requestEvent(requestId, normal).payload as { params: { _meta: Record<string, unknown> } };
+      expect(sent.params._meta['io.modelcontextprotocol/protocolVersion']).toBe('2026-07-28');
+
+      const params = { name: 'echo', arguments: { message: 'x' }, _meta: { custom: 'kept' } };
+      const edited = callEcho(requestId, { params, exactHeaders: requestEvent(requestId, normal).requestHeaders });
+      const editedSent = requestEvent(requestId, edited).payload as { params: { _meta: Record<string, unknown> } };
+      expect(editedSent.params._meta).toEqual({ custom: 'kept' });
+      await service.disconnect({ requestId });
+    });
+
+    it('fills credential values shown as redacted back in from the connection, and honours deleting them', async () => {
+      const requestId = 'req_exact_auth';
+      await service.connect({
+        requestId,
+        url: `${base}/protected`,
+        headers: [{ name: 'Authorization', value: 'Bearer good-token' }],
+        protocolVersion: 'auto',
+      });
+      const normal = callEcho(requestId);
+      await waitFor(() => settled(requestId, normal)?.terminalStatus === 'success');
+      const headers = { ...requestEvent(requestId, normal).requestHeaders };
+      expect(headers.Authorization).toBe('<redacted>');
+
+      const replayed = callEcho(requestId, { exactHeaders: headers });
+      await waitFor(() => settled(requestId, replayed) !== undefined);
+      expect(settled(requestId, replayed)!.terminalStatus).toBe('success'); // marker was swapped for the real token
+
+      delete headers.Authorization;
+      const noAuth = callEcho(requestId, { exactHeaders: headers });
+      await waitFor(() => settled(requestId, noAuth) !== undefined);
+      expect(settled(requestId, noAuth)!.terminalStatus).toBe('error'); // sent without credentials -> 401
+      await service.disconnect({ requestId });
+    });
+  });
+
   describe('failures', () => {
     const errorEvent = (requestId: string) => service.getTrace({ requestId }).find(e => e.terminalStatus === 'error');
 

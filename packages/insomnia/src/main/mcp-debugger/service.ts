@@ -1,4 +1,5 @@
 import { isProtocolException } from '~/common/mcp-debugger/protocol/errors';
+import type { MCPInvocation } from '~/common/mcp-debugger/protocol/mcp/capabilities/methods';
 import { type MCPConnectConfig,MCPHTTPProtocol } from '~/common/mcp-debugger/protocol/mcp/MCPHTTPProtocol';
 import type { Capability, Connection, IntrospectionWarning,Invocation } from '~/common/mcp-debugger/protocol/Protocol';
 import type { TraceEvent } from '~/common/mcp-debugger/protocol/TraceEvent';
@@ -167,7 +168,7 @@ export const disconnect = async ({ requestId }: { requestId: string }): Promise<
 };
 
 /** Returns the new call's correlationId (captured from its request event, which is emitted synchronously). */
-const run = (requestId: string, invocation: Invocation, replayOf?: string): { correlationId: string } => {
+const run = (requestId: string, invocation: MCPInvocation, replayOf?: string): { correlationId: string } => {
   const s = sessionFor(requestId);
   if (!s.conn || s.status !== 'connected') {
     throw new Error('Not connected');
@@ -203,12 +204,15 @@ export const invokeRaw = ({
   requestId,
   invocation,
   replayOf,
+  exactHeaders,
 }: {
   requestId: string;
   invocation: Invocation;
   /** correlationId of the trace call this edits and replays, if any. */
   replayOf?: string;
-}) => run(requestId, invocation, replayOf);
+  /** Send exactly `invocation.params` with exactly these headers (no protocol-managed `_meta` or headers added). */
+  exactHeaders?: Record<string, string>;
+}) => run(requestId, exactHeaders ? { ...invocation, exact: { headers: exactHeaders } } : invocation, replayOf);
 
 export const cancel = ({ requestId, correlationId }: { requestId: string; correlationId: string }) => {
   const s = sessionFor(requestId);
