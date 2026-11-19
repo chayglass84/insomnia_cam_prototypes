@@ -209,3 +209,43 @@ describe('mcp-debugger service', () => {
     });
   });
 });
+
+describe('multi round-trip requests (input_required)', () => {
+  it('surfaces input_required as a pending call, and a continuation completes it', async () => {
+    const requestId = 'req_mrtr';
+    await service.connect({ requestId, url: `${base}/stateless`, headers: [], protocolVersion: 'auto' });
+    const { correlationId } = service.invokeRaw({
+      requestId,
+      invocation: { method: 'tools/call', params: { name: 'ask-input', arguments: {} } },
+    });
+    const events = () => service.getTrace({ requestId }).filter(e => e.correlationId === correlationId);
+    await waitFor(() => events().some(e => e.messageType === 'input-required'));
+    expect(events().some(e => e.terminalStatus)).toBe(false); // still pending
+
+    const prompt = events().find(e => e.messageType === 'input-required')!.payload as {
+      inputRequests: Record<string, unknown>;
+      requestState: unknown;
+    };
+    expect(Object.keys(prompt.inputRequests)).toEqual(['who']);
+    const original = events().find(e => e.awaitsReply && e.direction === 'client-to-server')!.payload as {
+      method: string;
+      params: Record<string, unknown>;
+    };
+    service.invokeRaw({
+      requestId,
+      invocation: {
+        method: original.method,
+        correlationId, // thread the retry under the same call
+        params: {
+          ...original.params,
+          inputResponses: { who: { action: 'accept', content: { name: 'Cam' } } },
+          requestState: prompt.requestState,
+        },
+      },
+    });
+    await waitFor(() => events().some(e => e.terminalStatus === 'success'));
+    expect(JSON.stringify(events().find(e => e.terminalStatus)!.payload)).toContain('Hello, Cam!');
+    expect(events().some(e => e.messageType === 'input-response')).toBe(true);
+    await service.disconnect({ requestId });
+  });
+});

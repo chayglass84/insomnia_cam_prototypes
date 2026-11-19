@@ -68,6 +68,50 @@ const slowEchoTool = {
   },
 };
 
+// 4348: plain MRTR (SEP-2322) on tools/call, not in Ardi's fixture (which only has the task-level input_required).
+// First call answers `resultType: "input_required"` with an elicitation request; the retry carries `inputResponses`
+// and the echoed `requestState`, and completes.
+const askInputTool = {
+  name: "ask-input",
+  description: "Asks the client for input (multi round-trip request), then greets by name.",
+  inputSchema: { type: "object", properties: {} },
+};
+
+function respondAskInput(res, id, params) {
+  const answer = params?.inputResponses?.who;
+  if (!answer) {
+    writeJson(res, 200, {
+      jsonrpc: "2.0",
+      id,
+      result: {
+        resultType: "input_required",
+        inputRequests: {
+          who: {
+            method: "elicitation/create",
+            params: {
+              message: "What is your name?",
+              requestedSchema: {
+                type: "object",
+                properties: { name: { type: "string", title: "Name" } },
+                required: ["name"],
+              },
+            },
+          },
+        },
+        requestState: "mrtr-state-1",
+      },
+    });
+    return;
+  }
+  const text =
+    answer.action === "accept" ? `Hello, ${answer.content?.name ?? "stranger"}!` : `The user chose to ${answer.action}.`;
+  writeJson(res, 200, {
+    jsonrpc: "2.0",
+    id,
+    result: { resultType: "complete", content: [{ type: "text", text }], isError: false },
+  });
+}
+
 function respondSlowly(res, id, args) {
   const delayMs = Number(args?.delayMs ?? 5000);
   const timer = setTimeout(() => echoResult(res, id, args?.message ?? ""), delayMs);
@@ -169,7 +213,7 @@ function writeToolList(res, id) {
   writeJson(res, 200, {
     jsonrpc: "2.0",
     id,
-    result: { tools: [echoTool, slowEchoTool, ...taskTools, ...uiTools] },
+    result: { tools: [echoTool, slowEchoTool, askInputTool, ...taskTools, ...uiTools] },
   });
 }
 
@@ -483,6 +527,10 @@ async function handleStateless(req, res) {
     }
     if (name === "slow-echo") {
       respondSlowly(res, payload.id, payload.params?.arguments);
+      return;
+    }
+    if (name === "ask-input") {
+      respondAskInput(res, payload.id, payload.params);
       return;
     }
     // ui-chart / ui-hostile / ui-pinned / ui-pinned-bad fall through to the plain echo.

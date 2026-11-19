@@ -44,7 +44,8 @@ const sessionFor = (requestId: string): Session => {
 };
 
 const sinkFor = (s: Session) => (event: TraceEvent) => {
-  s.trace.push({ ...event, sequence: ++s.seq });
+  // Event ids repeat across rounds of one call (e.g. a second input_required), so make them unique per event.
+  s.trace.push({ ...event, id: `${event.id}~${s.seq + 1}`, sequence: ++s.seq });
   if (s.trace.length > MAX_TRACE_EVENTS) {
     s.trace.splice(0, s.trace.length - MAX_TRACE_EVENTS);
   }

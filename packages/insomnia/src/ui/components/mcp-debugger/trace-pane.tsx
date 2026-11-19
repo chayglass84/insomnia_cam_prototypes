@@ -2,6 +2,11 @@ import React, { type FC, useEffect, useMemo, useState } from 'react';
 import { Button, Focusable, Tooltip, TooltipTrigger } from 'react-aria-components';
 import { useLocalStorage } from 'react-use';
 
+import {
+  buildElicitationContinuation,
+  type InputResponses,
+  parseInputRequired,
+} from '~/common/mcp-debugger/protocol/mcp/elicitation';
 import type { TraceEvent, TraceStatus } from '~/common/mcp-debugger/protocol/TraceEvent';
 import { SUPPORTED_VERSIONS } from '~/common/mcp-debugger/versions';
 import { Dropdown, DropdownItem, DropdownSection, ItemContent } from '~/ui/components/base/dropdown';
@@ -9,6 +14,7 @@ import { Dropdown, DropdownItem, DropdownSection, ItemContent } from '~/ui/compo
 import { buildCurl } from './curl-command';
 import { JsonView } from './json-view';
 import { diffJson, type DiffLine, hasChanges } from './line-diff';
+import { InputRequiredResponder } from './mrtr-form';
 import { SegmentedToggle } from './segmented-toggle';
 import { ElicitationResponder, SamplingResponder, type ServerRequestOutcome } from './server-request-forms';
 
@@ -73,6 +79,12 @@ const isWaitingServerRequest = (call: Call) => {
   return (
     request.direction === 'server-to-client' && call.status === 'pending' && method !== undefined && HELD_SERVER_METHODS.has(method)
   );
+};
+
+/** The call is paused on an `input_required` result (multi round-trip request) and waiting for the user's answers. */
+const pendingInputRequired = (call: Call) => {
+  const last = call.events.at(-1);
+  return call.status === 'pending' && last?.messageType === 'input-required' ? parseInputRequired(last.payload) : null;
 };
 
 /** A call can be edited and replayed when it is a client request other than the connect handshake. */
@@ -195,10 +207,11 @@ const CallDetail: FC<{
   onCancel: (correlationId: string) => void;
   onReplay: (call: Call, invocation: ReplayRequest) => void;
   onRespond: (call: Call, outcome: ServerRequestOutcome) => void;
+  onSubmitInput: (call: Call, inputResponses: InputResponses, requestState: unknown) => void;
   currentVersion?: string;
   onReplayVersion: (call: Call, version: string) => Promise<string | undefined>;
   onSelect: (correlationId: string) => void;
-}> = ({ call, original, isConnected, serverUrl, onCancel, onReplay, onRespond, currentVersion, onReplayVersion, onSelect }) => {
+}> = ({ call, original, isConnected, serverUrl, onCancel, onReplay, onRespond, currentVersion, onReplayVersion, onSubmitInput, onSelect }) => {
   const request = requestEventOf(call);
   const replies = call.events.filter(e => e !== request);
   const [editing, setEditing] = useState(false);
@@ -300,6 +313,15 @@ const CallDetail: FC<{
           {versionError} The failed handshake is in the trace.
         </p>
       )}
+      {(() => {
+        const prompt = pendingInputRequired(call);
+        return prompt ? (
+          <InputRequiredResponder
+            prompt={prompt}
+            onSubmit={inputResponses => onSubmitInput(call, inputResponses, prompt.requestState)}
+          />
+        ) : null;
+      })()}
       {isWaitingServerRequest(call) &&
         ((request.payload as { method?: string }).method === 'elicitation/create' ? (
           <ElicitationResponder
@@ -559,7 +581,21 @@ export const McpTracePane: FC<{
       console.error('[mcp-debugger] responding to the server request failed', err);
     }
   };
-  const waiting = calls.find(isWaitingServerRequest);
+  const waiting = calls.find(c => isWaitingServerRequest(c) || pendingInputRequired(c));
+
+  /** Answer an `input_required` result: retry the original call with the answers, threaded under the same row. */
+  const submitInput = (call: Call, inputResponses: InputResponses, requestState: unknown) => {
+    const original = wireRequestOf(requestEventOf(call));
+    const invocation = buildElicitationContinuation(
+      { method: original.method as string, params: original.params },
+      inputResponses,
+      requestState,
+      call.correlationId,
+    );
+    window.main.mcpDebugger.invokeRaw({ requestId, invocation }).catch(err => {
+      console.error('[mcp-debugger] submitting input failed', err);
+    });
+  };
 
   /** Replay a call's method and params over another protocol version; resolves to an error message, if any. */
   const replayOnVersion = async (call: Call, version: string): Promise<string | undefined> => {
@@ -691,6 +727,7 @@ export const McpTracePane: FC<{
                 onCancel={correlationId => window.main.mcpDebugger.cancel({ requestId, correlationId })}
                 onReplay={replay}
                 onRespond={respond}
+                onSubmitInput={submitInput}
                 currentVersion={currentVersion}
                 onReplayVersion={replayOnVersion}
                 onSelect={setSelectedId}
