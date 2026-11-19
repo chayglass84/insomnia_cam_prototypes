@@ -7,6 +7,7 @@ import type { TraceEvent, TraceStatus } from '~/common/mcp-debugger/protocol/Tra
 import { buildCurl } from './curl-command';
 import { JsonView } from './json-view';
 import { diffJson, type DiffLine, hasChanges } from './line-diff';
+import { SegmentedToggle } from './segmented-toggle';
 
 // Task 4348 trace pane: one row per call (events grouped by correlationId), click for request/response detail.
 // S2: "Edit & replay" on any request row (raw JSON-RPC editor), replay rows link to their original, and request /
@@ -478,26 +479,21 @@ export const McpTracePane: FC<{
     }
   };
 
-  const modeButton = (value: TraceMode, label: string) => (
-    <Button
-      aria-pressed={mode === value}
-      onPress={() => setStoredMode(value)}
-      data-testid={`mcp-trace-mode-${value}`}
-      className={`px-2 py-0.5 text-xs ${mode === value ? 'bg-(--hl-sm) text-(--color-font)' : 'text-(--hl) hover:bg-(--hl-xs)'}`}
-    >
-      {label}
-    </Button>
-  );
-
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="mcp-trace-pane">
       <div className="flex h-(--line-height-sm) shrink-0 items-center justify-between gap-2 border-b border-solid border-(--hl-md) px-2">
         <div className="flex items-center gap-3">
           <span className="text-xs font-bold text-(--hl) uppercase">Trace</span>
-          <div className="flex overflow-hidden rounded-xs border border-solid border-(--hl-md)" role="group" aria-label="Trace view">
-            {modeButton('calls', 'Calls')}
-            {modeButton('stream', 'Stream')}
-          </div>
+          <SegmentedToggle
+            label="Trace view"
+            testIdPrefix="mcp-trace-mode"
+            value={mode}
+            onChange={setStoredMode}
+            options={[
+              { id: 'calls', label: 'Calls' },
+              { id: 'stream', label: 'Stream' },
+            ]}
+          />
         </div>
         <Button className="text-xs text-(--hl) hover:text-(--color-font)" onPress={onClear} isDisabled={calls.length === 0}>
           Clear

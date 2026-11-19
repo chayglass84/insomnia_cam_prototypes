@@ -12,6 +12,7 @@ import { RequestHeadersEditor } from '~/ui/components/editors/request-headers-ed
 import { InsomniaRjsfForm, type InsomniaRjsfFormHandle } from '~/ui/components/rjsf';
 
 import { PrototypeMock } from './prototype-mock';
+import { SegmentedToggle } from './segmented-toggle';
 
 // Task 4348 S1 request pane: Params (schema form or raw JSON) / Auth / Headers for the selected capability.
 // PROTOTYPE-MOCK: params live in component state per capability (not persisted to McpPayload); S2 persists runs.
@@ -102,29 +103,31 @@ export const McpDebuggerRequestPane: FC<{
           <p className="notice info m-(--padding-md)">Select a tool, resource or prompt from the list.</p>
         ) : (
           <div className="flex flex-col gap-3 p-(--padding-md)">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
+            {/* The toggle is first and fixed-width so it stays put while the tool name/description change size. */}
+            <div className="flex items-center gap-3">
+              {hasParams && (
+                <SegmentedToggle
+                  label="Params view"
+                  testIdPrefix="mcp-params-mode"
+                  value={rawMode ? 'json' : 'form'}
+                  onChange={mode => setRawMode(mode === 'json')}
+                  options={[
+                    { id: 'json', label: 'JSON' },
+                    { id: 'form', label: 'Form' },
+                  ]}
+                />
+              )}
+              <div className="min-w-0 flex-1">
                 <p className="font-bold">{capability.metadata.name}</p>
                 <p className="text-sm text-(--hl)">{capability.metadata.description}</p>
               </div>
-              <div className="flex shrink-0 items-center gap-2">
-                {hasParams && (
-                  <Button
-                    className="rounded-xs border border-solid border-(--hl-md) px-2 py-1 text-xs hover:bg-(--hl-sm)"
-                    onPress={() => setRawMode(m => !m)}
-                    data-testid="mcp-raw-toggle"
-                  >
-                    {rawMode ? 'Form' : 'Raw JSON'}
-                  </Button>
-                )}
-                <Button
-                  className="rounded-sm bg-(--color-surprise) px-(--padding-md) py-1 text-(--color-font-surprise)"
-                  onPress={send}
-                  data-testid="mcp-send"
-                >
-                  {SEND_LABEL[capability.type]}
-                </Button>
-              </div>
+              <Button
+                className="shrink-0 rounded-sm bg-(--color-surprise) px-(--padding-md) py-1 text-(--color-font-surprise)"
+                onPress={send}
+                data-testid="mcp-send"
+              >
+                {SEND_LABEL[capability.type]}
+              </Button>
             </div>
             {capability.type === 'resource' && (
               <p className="text-sm">uri: {String(capability.metadata.uri ?? capability.id)}</p>
