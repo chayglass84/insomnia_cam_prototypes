@@ -112,6 +112,75 @@ function respondAskInput(res, id, params) {
   });
 }
 
+// 4348: subscriptions/listen (2026-07-28), not in Ardi's fixture. The response is a long-lived SSE stream: the first
+// message acknowledges the subset of the requested filter this mock honors, then change notifications follow.
+// This mock honors tools/resources list changes and resource subscriptions, but NOT promptsListChanged, so the
+// acknowledgement shows a type being omitted. The `trigger-change` tool pushes notifications to open listeners.
+const listeners = new Set();
+const HONORED = ["toolsListChanged", "resourcesListChanged", "resourceSubscriptions"];
+
+const triggerChangeTool = {
+  name: "trigger-change",
+  description: "Push a change notification to open subscriptions/listen streams (kind: tools | resources | prompts | resource).",
+  inputSchema: {
+    type: "object",
+    properties: {
+      kind: {
+        type: "string",
+        enum: ["tools", "resources", "prompts", "resource"],
+        description: "What changed. Leave empty to send a resource update when `uri` is set, otherwise a tools list change.",
+      },
+      uri: { type: "string", description: "For a resource update: the resource URI that changed" },
+    },
+  },
+};
+
+function sseSend(res, message) {
+  res.write(`event: message\ndata: ${JSON.stringify(message)}\n\n`);
+}
+
+function openListenStream(req, res, payload) {
+  const requested = payload.params?.notifications ?? {};
+  const acknowledged = {};
+  for (const key of HONORED) {
+    if (key === "resourceSubscriptions") {
+      if (Array.isArray(requested[key]) && requested[key].length > 0) acknowledged[key] = requested[key];
+    } else if (requested[key] === true) {
+      acknowledged[key] = true;
+    }
+  }
+  res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
+  const listener = { res, id: payload.id, filter: acknowledged };
+  listeners.add(listener);
+  req.on("close", () => listeners.delete(listener));
+  sseSend(res, {
+    jsonrpc: "2.0",
+    method: "notifications/subscriptions/acknowledged",
+    params: { _meta: { "io.modelcontextprotocol/subscriptionId": payload.id }, notifications: acknowledged },
+  });
+}
+
+function triggerChange(kind, uri) {
+  let delivered = 0;
+  for (const { res, id, filter } of listeners) {
+    const meta = { "io.modelcontextprotocol/subscriptionId": id };
+    if (kind === "tools" && filter.toolsListChanged) {
+      sseSend(res, { jsonrpc: "2.0", method: "notifications/tools/list_changed", params: { _meta: meta } });
+      delivered += 1;
+    } else if (kind === "resources" && filter.resourcesListChanged) {
+      sseSend(res, { jsonrpc: "2.0", method: "notifications/resources/list_changed", params: { _meta: meta } });
+      delivered += 1;
+    } else if (kind === "prompts" && filter.promptsListChanged) {
+      sseSend(res, { jsonrpc: "2.0", method: "notifications/prompts/list_changed", params: { _meta: meta } });
+      delivered += 1;
+    } else if (kind === "resource" && uri && filter.resourceSubscriptions?.some((u) => uri === u || uri.startsWith(u))) {
+      sseSend(res, { jsonrpc: "2.0", method: "notifications/resources/updated", params: { _meta: meta, uri } });
+      delivered += 1;
+    }
+  }
+  return delivered;
+}
+
 function respondSlowly(res, id, args) {
   const delayMs = Number(args?.delayMs ?? 5000);
   const timer = setTimeout(() => echoResult(res, id, args?.message ?? ""), delayMs);
@@ -213,7 +282,7 @@ function writeToolList(res, id) {
   writeJson(res, 200, {
     jsonrpc: "2.0",
     id,
-    result: { tools: [echoTool, slowEchoTool, askInputTool, ...taskTools, ...uiTools] },
+    result: { tools: [echoTool, slowEchoTool, askInputTool, triggerChangeTool, ...taskTools, ...uiTools] },
   });
 }
 
@@ -455,6 +524,16 @@ async function handleStateless(req, res) {
     return;
   }
 
+  if (payload.method === "subscriptions/listen") {
+    const err = checkStatelessContract(req, payload, "subscriptions/listen");
+    if (err) {
+      statelessError(res, payload.id, -32600, err);
+      return;
+    }
+    openListenStream(req, res, payload);
+    return;
+  }
+
   if (payload.method === "server/discover") {
     const err = checkStatelessContract(req, payload, "server/discover");
     // -32004 UnsupportedProtocolVersion carries supported[] so a mismatched
@@ -531,6 +610,14 @@ async function handleStateless(req, res) {
     }
     if (name === "ask-input") {
       respondAskInput(res, payload.id, payload.params);
+      return;
+    }
+    if (name === "trigger-change") {
+      const args = payload.params?.arguments ?? {};
+      // No default kind in the schema: a `uri` on its own means "this resource changed".
+      const kind = args.kind || (args.uri ? "resource" : "tools");
+      const delivered = triggerChange(kind, args.uri);
+      echoResult(res, payload.id, `kind=${kind}${args.uri ? ` uri=${args.uri}` : ""}: notified ${delivered} listener(s)`);
       return;
     }
     // ui-chart / ui-hostile / ui-pinned / ui-pinned-bad fall through to the plain echo.

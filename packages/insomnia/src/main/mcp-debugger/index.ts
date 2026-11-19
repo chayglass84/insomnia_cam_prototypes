@@ -18,6 +18,8 @@ export interface McpDebuggerBridgeAPI {
   setRoots: (options: Parameters<typeof service.setRoots>[0]) => Promise<void>;
   replayOnVersion: typeof service.replayOnVersion;
   taskAction: (options: Parameters<typeof service.taskAction>[0]) => Promise<void>;
+  subscribe: (options: Parameters<typeof service.subscribe>[0]) => Promise<void>;
+  unsubscribe: (options: Parameters<typeof service.unsubscribe>[0]) => Promise<void>;
 }
 
 export const registerMcpDebuggerHandlers = () => {
@@ -38,6 +40,8 @@ export const registerMcpDebuggerHandlers = () => {
   ipcMainHandle('mcpDebugger.replayOnVersion', (_, o: Parameters<typeof service.replayOnVersion>[0]) =>
     service.replayOnVersion(o),
   );
+  ipcMainHandle('mcpDebugger.subscribe', (_, o: Parameters<typeof service.subscribe>[0]) => service.subscribe(o));
+  ipcMainHandle('mcpDebugger.unsubscribe', (_, o: Parameters<typeof service.unsubscribe>[0]) => service.unsubscribe(o));
   ipcMainHandle('mcpDebugger.taskAction', (_, o: Parameters<typeof service.taskAction>[0]) => service.taskAction(o));
   ipcMainHandle('mcpDebugger.setRoots', (_, o: Parameters<typeof service.setRoots>[0]) => service.setRoots(o));
 };

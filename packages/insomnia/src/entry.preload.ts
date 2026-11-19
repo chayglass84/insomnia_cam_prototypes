@@ -130,6 +130,8 @@ const mcpDebugger: McpDebuggerBridgeAPI = {
   setRoots: options => invokeWithNormalizedError('mcpDebugger.setRoots', options),
   replayOnVersion: options => invokeWithNormalizedError('mcpDebugger.replayOnVersion', options),
   taskAction: options => invokeWithNormalizedError('mcpDebugger.taskAction', options),
+  subscribe: options => invokeWithNormalizedError('mcpDebugger.subscribe', options),
+  unsubscribe: options => invokeWithNormalizedError('mcpDebugger.unsubscribe', options),
 };
 
 const cookies: CookiesBridgeAPI = {

@@ -341,3 +341,92 @@ describe('tasks (io.modelcontextprotocol/tasks)', () => {
     await service.disconnect({ requestId });
   });
 });
+
+describe('subscriptions/listen', () => {
+  const trigger = (requestId: string, args: Record<string, unknown>) => {
+    service.invokeRaw({
+      requestId,
+      invocation: { method: 'tools/call', params: { name: 'trigger-change', arguments: args } },
+    });
+  };
+  const notifications = (requestId: string, method: string) =>
+    service
+      .getTrace({ requestId })
+      .filter(e => e.messageType === 'notification' && (e.payload as { method?: string }).method === method);
+
+  it('opens a stream, records what the server acknowledged, and delivers the opted-in notifications', async () => {
+    const requestId = 'req_listen';
+    await service.connect({ requestId, url: `${base}/stateless`, headers: [], protocolVersion: 'auto' });
+    service.subscribe({
+      requestId,
+      notifications: {
+        toolsListChanged: true,
+        promptsListChanged: true, // the mock does not honor this one
+        resourceSubscriptions: ['file:///project/config.json'],
+      },
+    });
+    await waitFor(() => service.getState({ requestId }).subscription?.status === 'active');
+    const sub = service.getState({ requestId }).subscription!;
+    expect(sub.subscriptionId).toBeDefined();
+    expect(sub.acknowledged).toEqual({
+      toolsListChanged: true,
+      resourceSubscriptions: ['file:///project/config.json'],
+    }); // promptsListChanged was omitted by the server
+
+    trigger(requestId, { kind: 'tools' });
+    await waitFor(() => notifications(requestId, 'notifications/tools/list_changed').length === 1);
+    const delivered = notifications(requestId, 'notifications/tools/list_changed')[0].payload as {
+      params: { _meta: Record<string, unknown> };
+    };
+    expect(delivered.params._meta['io.modelcontextprotocol/subscriptionId']).toBe(sub.subscriptionId);
+
+    trigger(requestId, { kind: 'resource', uri: 'file:///project/config.json' });
+    await waitFor(() => notifications(requestId, 'notifications/resources/updated').length === 1);
+    expect(notifications(requestId, 'notifications/resources/updated')[0].payload).toMatchObject({
+      params: { uri: 'file:///project/config.json' },
+    });
+
+    // A type that was not acknowledged is never delivered.
+    trigger(requestId, { kind: 'prompts' });
+    await new Promise(r => setTimeout(r, 150));
+    expect(notifications(requestId, 'notifications/prompts/list_changed')).toHaveLength(0);
+
+    service.unsubscribe({ requestId });
+    await waitFor(() => service.getState({ requestId }).subscription?.status === 'cancelled');
+    await service.disconnect({ requestId });
+  });
+
+  it('trigger-change: a uri alone means a resource update, and a non-matching uri reaches no one', async () => {
+    const requestId = 'req_listen_uri';
+    await service.connect({ requestId, url: `${base}/stateless`, headers: [], protocolVersion: 'auto' });
+    service.subscribe({
+      requestId,
+      notifications: { toolsListChanged: true, resourceSubscriptions: ['file:///project/config.json'] },
+    });
+    await waitFor(() => service.getState({ requestId }).subscription?.status === 'active');
+    const reply = async (args: Record<string, unknown>) => {
+      const { correlationId } = service.invokeRaw({
+        requestId,
+        invocation: { method: 'tools/call', params: { name: 'trigger-change', arguments: args } },
+      });
+      await waitFor(() => service.getTrace({ requestId }).some(e => e.correlationId === correlationId && e.terminalStatus));
+      return JSON.stringify(service.getTrace({ requestId }).find(e => e.correlationId === correlationId && e.terminalStatus)!.payload);
+    };
+    expect(await reply({ uri: 'file:///project/config.json' })).toContain('kind=resource');
+    await waitFor(() => notifications(requestId, 'notifications/resources/updated').length === 1);
+    expect(await reply({ uri: 'file:///made/up.txt' })).toContain('notified 0 listener(s)');
+    expect(notifications(requestId, 'notifications/resources/updated')).toHaveLength(1);
+    expect(notifications(requestId, 'notifications/tools/list_changed')).toHaveLength(0);
+    service.unsubscribe({ requestId });
+    await service.disconnect({ requestId });
+  });
+
+  it('refuses a second subscription while one is open', async () => {
+    const requestId = 'req_listen_twice';
+    await service.connect({ requestId, url: `${base}/stateless`, headers: [], protocolVersion: 'auto' });
+    service.subscribe({ requestId, notifications: { toolsListChanged: true } });
+    expect(() => service.subscribe({ requestId, notifications: { toolsListChanged: true } })).toThrow(/Already subscribed/);
+    service.unsubscribe({ requestId });
+    await service.disconnect({ requestId });
+  });
+});

@@ -189,7 +189,7 @@ export class MCPHTTPProtocol implements Protocol<MCPConnectConfig> {
 
   async invoke(
     connection: Connection,
-    invocation: Invocation,
+    invocation: MCPInvocation,
     signal?: AbortSignal,
     onTrace?: TraceSink,
   ): Promise<void> {
@@ -213,7 +213,7 @@ export class MCPHTTPProtocol implements Protocol<MCPConnectConfig> {
    */
   async relayCall(
     connection: Connection,
-    invocation: Invocation,
+    invocation: MCPInvocation,
     signal?: AbortSignal,
     onTrace?: TraceSink,
   ): Promise<unknown> {
@@ -236,7 +236,8 @@ export class MCPHTTPProtocol implements Protocol<MCPConnectConfig> {
     } else {
       // 4348: trace the params as actually sent (including the injected `_meta` on stateless), so an edit starts from
       // the real wire request.
-      onTrace?.(this.trace.request(correlationId, invocation.method, payload.params, headers));
+      const requestEvent = this.trace.request(correlationId, invocation.method, payload.params, headers);
+      onTrace?.(invocation.longLived ? { ...requestEvent, cancellable: true } : requestEvent);
     }
 
     const userAbort = new AbortController();
@@ -258,9 +259,11 @@ export class MCPHTTPProtocol implements Protocol<MCPConnectConfig> {
     try {
       let settled: SettledReply;
       try {
-        settled = await withTimeout(combined, INVOKE_TIMEOUT_MS, conn.url, (sig) =>
-          sendRequest(conn, id, payload, { signal: sig, headers, proxyUrl }),
-        );
+        settled = invocation.longLived
+          ? await sendRequest(conn, id, payload, { signal: combined, headers })
+          : await withTimeout(combined, INVOKE_TIMEOUT_MS, conn.url, (sig) =>
+              sendRequest(conn, id, payload, { signal: sig, headers, proxyUrl }),
+            );
       } catch (e) {
         // Trace the failure, then surface it to the caller (invoke swallows it).
         this.handleInvokeError(conn, id, correlationId, combined, e, onTrace);

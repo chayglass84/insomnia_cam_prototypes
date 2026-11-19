@@ -6,7 +6,8 @@ import { Button, Tab, TabList, TabPanel, Tabs } from 'react-aria-components';
 import type { AuthTypes } from '~/common/constants';
 import { capabilityKey } from '~/common/mcp-debugger/protocol/mcp/capabilities/methods';
 import type { Capability } from '~/common/mcp-debugger/protocol/Protocol';
-import type { TaskView } from '~/main/mcp-debugger/service';
+import type { TraceEvent } from '~/common/mcp-debugger/protocol/TraceEvent';
+import type { SubscriptionView, TaskView } from '~/main/mcp-debugger/service';
 import { getAuthObjectOrNull } from '~/network/authentication';
 import { AuthWrapper } from '~/ui/components/editors/auth/auth-wrapper';
 import { RequestHeadersEditor } from '~/ui/components/editors/request-headers-editor';
@@ -30,9 +31,12 @@ export const McpDebuggerRequestPane: FC<{
   capability: Capability | null;
   session: SessionTab | null;
   tasks: TaskView[];
+  subscription?: SubscriptionView;
+  trace: TraceEvent[];
+  capabilities: Capability[];
   isConnected: boolean;
   uniqueKey: string;
-}> = ({ request, capability, session, tasks, isConnected, uniqueKey }) => {
+}> = ({ request, capability, session, tasks, subscription, trace, capabilities, isConnected, uniqueKey }) => {
   const [tab, setTab] = useState<'params' | 'auth' | 'headers'>('params');
   const [argsByCapability, setArgsByCapability] = useState<Record<string, Record<string, unknown>>>({});
   const [rawMode, setRawMode] = useState(false);
@@ -105,7 +109,15 @@ export const McpDebuggerRequestPane: FC<{
         {!isConnected ? (
           <p className="notice info m-(--padding-md)">Connect to an MCP server to build requests.</p>
         ) : session ? (
-          <SessionPanel tab={session} request={request} isConnected={isConnected} tasks={tasks} />
+          <SessionPanel
+            tab={session}
+            request={request}
+            isConnected={isConnected}
+            tasks={tasks}
+            subscription={subscription}
+            trace={trace}
+            capabilities={capabilities}
+          />
         ) : !capability ? (
           <p className="notice info m-(--padding-md)">Select a tool, resource or prompt from the list.</p>
         ) : (

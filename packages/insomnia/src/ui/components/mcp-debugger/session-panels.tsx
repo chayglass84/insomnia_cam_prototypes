@@ -2,10 +2,13 @@ import type { McpRequest } from 'insomnia-data';
 import React, { type FC, useState } from 'react';
 import { Button } from 'react-aria-components';
 
-import type { TaskView } from '~/main/mcp-debugger/service';
+import type { Capability } from '~/common/mcp-debugger/protocol/Protocol';
+import type { TraceEvent } from '~/common/mcp-debugger/protocol/TraceEvent';
+import type { SubscriptionView, TaskView } from '~/main/mcp-debugger/service';
 import { useRequestPatcher } from '~/ui/hooks/use-request';
 
 import type { SessionTab } from './capability-sidebar';
+import { SubscriptionsPanel } from './subscriptions-panel';
 import { TasksPanel } from './task-card';
 
 // Task 4348 S3: panels for the features that exist only in session-era (older) protocol versions.
@@ -135,12 +138,15 @@ const SamplingInfoPanel: FC = () => (
   </div>
 );
 
-export const SessionPanel: FC<{ tab: SessionTab; request: McpRequest; isConnected: boolean; tasks: TaskView[] }> = ({
-  tab,
-  request,
-  isConnected,
-  tasks,
-}) => (
+export const SessionPanel: FC<{
+  tab: SessionTab;
+  request: McpRequest;
+  isConnected: boolean;
+  tasks: TaskView[];
+  subscription?: SubscriptionView;
+  trace: TraceEvent[];
+  capabilities: Capability[];
+}> = ({ tab, request, isConnected, tasks, subscription, trace, capabilities }) => (
   <div className="flex flex-col gap-3 p-(--padding-md)" data-testid={`mcp-session-panel-${tab}`}>
     <p className="font-bold capitalize">{tab}</p>
     {tab === 'ping' && <PingPanel requestId={request._id} />}
@@ -148,5 +154,8 @@ export const SessionPanel: FC<{ tab: SessionTab; request: McpRequest; isConnecte
     {tab === 'roots' && <RootsPanel request={request} isConnected={isConnected} />}
     {tab === 'sampling' && <SamplingInfoPanel />}
     {tab === 'tasks' && <TasksPanel requestId={request._id} tasks={tasks} />}
+    {tab === 'subscriptions' && (
+      <SubscriptionsPanel requestId={request._id} subscription={subscription} trace={trace} capabilities={capabilities} />
+    )}
   </div>
 );

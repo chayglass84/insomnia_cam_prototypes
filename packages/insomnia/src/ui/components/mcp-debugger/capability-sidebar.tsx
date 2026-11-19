@@ -35,7 +35,7 @@ const CHIPS: Record<CapabilityType, { label: string; className: string }> = {
 };
 
 // Session-era (legacy) panels that exist only in the older protocol versions. Built in S3.
-export type SessionTab = 'ping' | 'logging' | 'roots' | 'sampling' | 'tasks';
+export type SessionTab = 'ping' | 'logging' | 'roots' | 'sampling' | 'tasks' | 'subscriptions';
 const SESSION_TABS: Partial<Record<McpDebuggerTabId, { id: SessionTab; label: string; chip?: string }>> = {
   ping: { id: 'ping', label: 'Ping' },
   logging: { id: 'logging', label: 'Logging' },
@@ -43,12 +43,11 @@ const SESSION_TABS: Partial<Record<McpDebuggerTabId, { id: SessionTab; label: st
   sampling: { id: 'sampling', label: 'Sampling' },
   // The tasks extension (2026-07-28): same kind of non-capability panel, so it lives in this section too.
   tasks: { id: 'tasks', label: 'Tasks', chip: 'Ext' },
+  subscriptions: { id: 'subscriptions', label: 'Subscriptions', chip: 'Ext' },
 };
 
-// Still to build (slice S4): shown as visible mock rows.
-const MOCK_TABS: Partial<Record<McpDebuggerTabId, string>> = {
-  subscriptions: 'Subscriptions (slice S4)',
-};
+// Anything in the profile that is not built yet is shown as a visible mock row. Nothing is left as of S4.
+const MOCK_TABS: Partial<Record<McpDebuggerTabId, string>> = {};
 
 export const CapabilitySidebar: FC<{
   capabilities: Capability[];
@@ -59,8 +58,9 @@ export const CapabilitySidebar: FC<{
   onSelectSession: (tab: SessionTab) => void;
   /** Tasks still running, shown next to the Tasks entry. */
   activeTaskCount: number;
+  subscriptionActive: boolean;
   isConnected: boolean;
-}> = ({ capabilities, protocolVersion, selectedKey, onSelect, selectedSession, onSelectSession, activeTaskCount, isConnected }) => {
+}> = ({ capabilities, protocolVersion, selectedKey, onSelect, selectedSession, onSelectSession, activeTaskCount, subscriptionActive, isConnected }) => {
   const [filter, setFilter] = useState('');
   const visible = useMemo(
     () =>
@@ -122,6 +122,11 @@ export const CapabilitySidebar: FC<{
               >
                 <span className={`${CHIP_BASE} border-(--hl-md) text-(--hl)`}>{tab.chip ?? 'Sess'}</span>
                 <span className="truncate">{tab.label}</span>
+                {tab.id === 'subscriptions' && subscriptionActive && (
+                  <span className="ml-auto text-xs text-green-500" title="A subscription stream is open">
+                    live
+                  </span>
+                )}
                 {tab.id === 'tasks' && activeTaskCount > 0 && (
                   <span className="ml-auto text-xs text-amber-500" title="Tasks still running">
                     {activeTaskCount} active

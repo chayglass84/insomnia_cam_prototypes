@@ -133,6 +133,8 @@ export type HandleChannels =
   | 'mcpDebugger.setRoots'
   | 'mcpDebugger.replayOnVersion'
   | 'mcpDebugger.taskAction'
+  | 'mcpDebugger.subscribe'
+  | 'mcpDebugger.unsubscribe'
   | 'mcp.client.hasRequestResponded'
   | 'mcp.close'
   | 'mcp.connect'

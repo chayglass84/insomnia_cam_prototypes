@@ -71,6 +71,7 @@ export const McpDebuggerShell = ({ request }: { request: McpRequest }) => {
               setSession(null);
             }}
             selectedSession={session}
+            subscriptionActive={state.subscription?.status === 'active' || state.subscription?.status === 'subscribing'}
             activeTaskCount={state.tasks.filter(t => t.status === 'working' || t.status === 'input_required').length}
             onSelectSession={setSession}
           />
@@ -85,6 +86,9 @@ export const McpDebuggerShell = ({ request }: { request: McpRequest }) => {
                   capability={selected}
                   session={isConnected ? session : null}
                   tasks={state.tasks}
+                  subscription={state.subscription}
+                  trace={trace}
+                  capabilities={state.capabilities}
                   isConnected={isConnected}
                   uniqueKey={uniqueKey}
                 />

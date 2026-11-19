@@ -38,6 +38,8 @@ interface Session {
   taskIntervals: Map<string, number>;
   /** correlationId of a tasks/get|update|cancel call we issued -> the task it concerns. */
   taskCalls: Map<string, string>;
+  /** The active `subscriptions/listen` stream, if any (S4). One at a time in this prototype. */
+  subscription?: SubscriptionView;
 }
 
 const MAX_TRACE_EVENTS = 5000;
@@ -46,7 +48,7 @@ const sessions = new Map<string, Session>();
 const sessionFor = (requestId: string): Session => {
   let s = sessions.get(requestId);
   if (!s) {
-    s = { protocol: new MCPHTTPProtocol(), status: 'disconnected', capabilities: [], warnings: [], trace: [], seq: 0, replays: {}, roots: [], tasks: new Map(), taskTimers: new Map(), taskIntervals: new Map(), taskCalls: new Map() };
+    s = { protocol: new MCPHTTPProtocol(), status: 'disconnected', capabilities: [], warnings: [], trace: [], seq: 0, replays: {}, roots: [], tasks: new Map(), taskTimers: new Map(), taskIntervals: new Map(), taskCalls: new Map(), subscription: undefined };
     sessions.set(requestId, s);
   }
   return s;
@@ -56,6 +58,7 @@ const sinkFor = (s: Session) => (event: TraceEvent) => {
   // Event ids repeat across rounds of one call (e.g. a second input_required), so make them unique per event.
   s.trace.push({ ...event, id: `${event.id}~${s.seq + 1}`, sequence: ++s.seq });
   observeTaskEvent(s, event);
+  observeSubscriptionEvent(s, event);
   if (s.trace.length > MAX_TRACE_EVENTS) {
     s.trace.splice(0, s.trace.length - MAX_TRACE_EVENTS);
   }
@@ -114,6 +117,7 @@ export interface McpDebuggerState {
   lastSequence: number;
   replays: Record<string, string>;
   tasks: TaskView[];
+  subscription?: SubscriptionView;
 }
 
 export const getState = ({ requestId }: { requestId: string }): McpDebuggerState => {
@@ -129,6 +133,7 @@ export const getState = ({ requestId }: { requestId: string }): McpDebuggerState
     warnings: s.warnings,
     lastSequence: s.seq,
     replays: s.replays,
+    subscription: s.subscription,
     tasks: [...s.tasks.values()].map(t => ({
       ...t,
       polling: s.taskTimers.has(t.taskId),
@@ -159,6 +164,7 @@ export const connect = async (options: McpDebuggerConnectOptions): Promise<McpDe
   s.url = url;
   void closeAlts(requestId);
   clearTasks(s);
+  s.subscription = undefined;
   s.roots = (options.roots ?? []).filter(r => r.uri);
   s.capabilities = [];
   s.warnings = [];
@@ -204,6 +210,7 @@ export const disconnect = async ({ requestId }: { requestId: string }): Promise<
   const s = sessionFor(requestId);
   await closeAlts(requestId);
   clearTasks(s);
+  s.subscription = undefined;
   if (s.conn) {
     try {
       await s.protocol.disconnect(s.conn, sinkFor(s));
@@ -519,6 +526,72 @@ export const taskAction = ({
     default: {
       break;
     }
+  }
+};
+
+// ---------- subscriptions (S4) ----------
+// `subscriptions/listen` (2026-07-28): a POST whose response is a long-lived SSE stream of the change notifications the
+// client opted in to. The first message is `notifications/subscriptions/acknowledged` naming the subset the server
+// agreed to; every notification after it carries `_meta["io.modelcontextprotocol/subscriptionId"]`. Closing the stream
+// ends the subscription. Not in Ardi (it only mentions the method in comments), so this is new work against the spec.
+
+export interface SubscriptionFilter {
+  toolsListChanged?: boolean;
+  promptsListChanged?: boolean;
+  resourcesListChanged?: boolean;
+  resourceSubscriptions?: string[];
+}
+export interface SubscriptionView {
+  /** The trace correlationId of the listen call. */
+  correlationId: string;
+  requested: SubscriptionFilter;
+  /** What the server agreed to (from the acknowledgement); undefined until it arrives. */
+  acknowledged?: SubscriptionFilter;
+  subscriptionId?: string | number;
+  status: 'subscribing' | 'active' | 'ended' | 'cancelled' | 'error';
+}
+
+const SUBSCRIPTION_ID_KEY = 'io.modelcontextprotocol/subscriptionId';
+const ACK_METHOD = 'notifications/subscriptions/acknowledged';
+
+function observeSubscriptionEvent(s: Session, event: TraceEvent) {
+  const sub = s.subscription;
+  if (!sub) {
+    return;
+  }
+  const payload = event.payload as { method?: string; params?: { _meta?: Record<string, unknown>; notifications?: SubscriptionFilter } };
+  if (event.messageType === 'notification' && payload?.method === ACK_METHOD) {
+    s.subscription = {
+      ...sub,
+      acknowledged: payload.params?.notifications ?? {},
+      subscriptionId: payload.params?._meta?.[SUBSCRIPTION_ID_KEY] as string | number | undefined,
+      status: 'active',
+    };
+    return;
+  }
+  if (event.correlationId === sub.correlationId && event.terminalStatus) {
+    const status = event.terminalStatus === 'success' ? 'ended' : event.terminalStatus === 'cancelled' ? 'cancelled' : 'error';
+    s.subscription = { ...sub, status };
+  }
+}
+
+export const subscribe = ({ requestId, notifications }: { requestId: string; notifications: SubscriptionFilter }) => {
+  const s = sessionFor(requestId);
+  if (s.subscription && (s.subscription.status === 'subscribing' || s.subscription.status === 'active')) {
+    throw new Error('Already subscribed. Stop the current subscription first.');
+  }
+  const { correlationId } = run(requestId, {
+    method: 'subscriptions/listen',
+    params: { notifications },
+    longLived: true,
+  });
+  s.subscription = { correlationId, requested: notifications, status: 'subscribing' };
+};
+
+export const unsubscribe = ({ requestId }: { requestId: string }) => {
+  const s = sessionFor(requestId);
+  if (s.conn && s.subscription) {
+    s.protocol.cancel(s.conn, s.subscription.correlationId, 'Unsubscribed');
   }
 };
 

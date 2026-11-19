@@ -33,6 +33,11 @@ export interface MCPInvocation extends Invocation {
    * from the connection's live auth headers, so a replay doesn't send the literal redaction marker.
    */
   exact?: { headers: Record<string, string> };
+  /**
+   * 4348 (S4): a call that is expected to stay open (`subscriptions/listen`: the response is a long-lived SSE stream).
+   * It skips the per-call timeout and is cancellable, so closing the stream ends the subscription.
+   */
+  longLived?: boolean;
 }
 
 /** Build the JSON-RPC invocation for a capability + user-supplied arguments. */
