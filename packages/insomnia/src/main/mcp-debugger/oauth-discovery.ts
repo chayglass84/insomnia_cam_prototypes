@@ -18,14 +18,24 @@ export interface OAuthExchange {
   durationMs: number;
 }
 
+/** Tokens a step produced, shown (and copyable) in the wizard. */
+export interface OAuthTokens {
+  accessToken: string;
+  refreshToken?: string;
+  /** Epoch ms, from expires_in. */
+  expiresAt?: number;
+  scope?: string;
+}
+
 export interface OAuthStep {
-  id: 'challenge' | 'protected-resource' | 'authorization-server' | 'registration' | 'authorize' | 'callback';
+  id: 'challenge' | 'protected-resource' | 'authorization-server' | 'registration' | 'authorize' | 'callback' | 'token' | 'verify' | 'refresh';
   title: string;
   status: OAuthStepStatus;
   summary: string;
   /** Every request tried for this step, in order (metadata lookups probe several candidate URLs). */
   exchanges: OAuthExchange[];
   findings: OAuthFinding[];
+  tokens?: OAuthTokens;
 }
 
 /** What discovery learned, handed to the authorization flow (S5b) so it does not have to rediscover. */
@@ -178,7 +188,7 @@ export const exchange = async (method: string, url: string, headers: Record<stri
     const res = await fetch(url, {
       method,
       headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined ? undefined : typeof body === 'string' ? body : JSON.stringify(body),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     const text = await res.text();
@@ -365,4 +375,7 @@ export const STEP_TITLES: Record<OAuthStep['id'], string> = {
   registration: 'Client registration',
   authorize: 'Authorize in browser',
   callback: 'Authorization response',
+  token: 'Token exchange',
+  verify: 'Call the MCP server with the token',
+  refresh: 'Refresh the token',
 };

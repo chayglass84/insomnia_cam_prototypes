@@ -16,6 +16,10 @@
  *   ?fail=1            – redirect back with error=access_denied instead of a code
  *   ?short_ttl=1       – issue access_token with 2s expiry (triggers refresh)
  *   ?fail_refresh=1    – return invalid_grant on /token with grant_type=refresh_token
+ *
+ * Consent page (4348): with MOCK_AUTH_CONSENT=1 (or the `consent` flag via /admin/flags), /authorize shows a silly
+ * Absolutely / No Way page instead of auto-granting, so the browser leg of the flow is visible. Off by default so the
+ * e2e specs, which rely on the auto-grant redirect, are unaffected.
  */
 
 import crypto from "node:crypto";
@@ -41,6 +45,7 @@ const flags = {
   fail: false,
   shortTtl: false,
   failRefresh: false,
+  consent: process.env.MOCK_AUTH_CONSENT === "1",
 };
 
 // ---------------------------------------------------------------------------
@@ -217,6 +222,44 @@ async function handleRegister(req, res) {
   writeJson(res, 201, response);
 }
 
+const escapeHtml = (value) =>
+  String(value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+
+/** The silly consent page. Both buttons re-request /authorize with consent_decision, keeping every other parameter. */
+function consentPage(url, clientId, resource) {
+  const link = (decision) => {
+    const next = new URL(url);
+    next.searchParams.set("consent_decision", decision);
+    return escapeHtml(next.pathname + next.search);
+  };
+  const scope = url.searchParams.get("scope");
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><title>Mock authorization server</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #f4f1fa; color: #1c1b22; display: flex; justify-content: center; padding-top: 12vh; }
+  main { background: #fff; border-radius: 12px; padding: 2rem 2.5rem; max-width: 34rem; box-shadow: 0 4px 24px rgba(0,0,0,.12); }
+  h1 { font-size: 1.15rem; margin-top: 0; }
+  dl { font-size: .85rem; color: #555; display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem; }
+  dd { margin: 0; font-family: ui-monospace, monospace; word-break: break-all; }
+  .buttons { display: flex; gap: 1rem; margin-top: 1.5rem; }
+  a.button { flex: 1; text-align: center; padding: .7rem 1rem; border-radius: 8px; text-decoration: none; font-weight: 600; }
+  a.yes { background: #5b3df5; color: #fff; }
+  a.no { background: #fff; color: #5b3df5; border: 2px solid #5b3df5; }
+</style></head>
+<body><main data-testid="mock-consent">
+  <h1>Since this is the internet, do you have blind faith in letting this client access your account on this server?</h1>
+  <dl>
+    <dt>Client</dt><dd>${escapeHtml(clientId)}</dd>
+    <dt>Resource</dt><dd>${escapeHtml(resource ?? "(none)")}</dd>
+    <dt>Scope</dt><dd>${escapeHtml(scope ?? "(none)")}</dd>
+  </dl>
+  <div class="buttons">
+    <a class="button yes" href="${link("allow")}" data-testid="mock-consent-allow">Absolutely</a>
+    <a class="button no" href="${link("deny")}" data-testid="mock-consent-deny">No Way</a>
+  </div>
+</main></body></html>`;
+}
+
 /**
  * /authorize: validate params, auto-grant, redirect back with code (+ iss).
  * In tests Playwright intercepts this page and checks the redirect instead of
@@ -280,13 +323,32 @@ async function handleAuthorize(req, res) {
     return;
   }
 
-  if (flags.fail) {
+  // RFC 9207: iss goes on error responses too. Tamper it if the flag is set.
+  const iss = flags.tamperIss ? "https://attacker.example.com" : issuer;
+  const denyRedirect = () => {
     const callbackUrl = new URL(redirectUri);
     callbackUrl.searchParams.set("error", "access_denied");
     callbackUrl.searchParams.set("error_description", "The resource owner denied the request.");
     callbackUrl.searchParams.set("state", state);
+    callbackUrl.searchParams.set("iss", iss);
     res.writeHead(302, { Location: callbackUrl.toString() });
     res.end();
+  };
+
+  if (flags.fail) {
+    denyRedirect();
+    return;
+  }
+
+  // 4348 consent page: ask the human before granting (see header comment).
+  const decision = url.searchParams.get("consent_decision");
+  if (flags.consent && !decision) {
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(consentPage(url, clientId, resource));
+    return;
+  }
+  if (decision === "deny") {
+    denyRedirect();
     return;
   }
 
@@ -302,8 +364,7 @@ async function handleAuthorize(req, res) {
   callbackUrl.searchParams.set("code", code);
   callbackUrl.searchParams.set("state", state);
 
-  // RFC 9207: include iss on authorization response. Tamper it if the flag is set.
-  const iss = flags.tamperIss ? "https://attacker.example.com" : issuer;
+  // RFC 9207: include iss on the authorization response.
   callbackUrl.searchParams.set("iss", iss);
 
   // Auto-grant: immediate redirect with no human interaction.
@@ -443,6 +504,7 @@ async function handleAdmin(req, res) {
     flags.fail = false;
     flags.shortTtl = false;
     flags.failRefresh = false;
+    flags.consent = process.env.MOCK_AUTH_CONSENT === "1";
     return writeJson(res, 200, { ok: true });
   }
 

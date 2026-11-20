@@ -2,6 +2,7 @@ import { shell } from 'electron';
 
 import { ipcMainHandle } from '../ipc/electron';
 import { cancelAuthorization, runAuthorization } from './oauth-flow';
+import { exchangeCode, refreshToken } from './oauth-token';
 import { discoverOAuth } from './oauth-discovery';
 import { probeMcpServer } from './probe';
 import * as service from './service';
@@ -13,6 +14,8 @@ export interface McpDebuggerBridgeAPI {
   oauthDiscover: typeof discoverOAuth;
   oauthAuthorize: (options: Omit<Parameters<typeof runAuthorization>[0], 'openUrl'>) => ReturnType<typeof runAuthorization>;
   oauthCancel: typeof cancelAuthorization;
+  oauthExchange: typeof exchangeCode;
+  oauthRefresh: typeof refreshToken;
   connect: typeof service.connect;
   disconnect: typeof service.disconnect;
   getState: (options: Parameters<typeof service.getState>[0]) => Promise<ReturnType<typeof service.getState>>;
@@ -36,6 +39,8 @@ export const registerMcpDebuggerHandlers = () => {
     runAuthorization({ ...o, openUrl: url => shell.openExternal(url) }),
   );
   ipcMainHandle('mcpDebugger.oauthCancel', (_, o: Parameters<typeof cancelAuthorization>[0]) => cancelAuthorization(o));
+  ipcMainHandle('mcpDebugger.oauthExchange', (_, o: Parameters<typeof exchangeCode>[0]) => exchangeCode(o));
+  ipcMainHandle('mcpDebugger.oauthRefresh', (_, o: Parameters<typeof refreshToken>[0]) => refreshToken(o));
   ipcMainHandle('mcpDebugger.connect', (_, o: Parameters<typeof service.connect>[0]) => service.connect(o));
   ipcMainHandle('mcpDebugger.disconnect', (_, o: Parameters<typeof service.disconnect>[0]) => service.disconnect(o));
   ipcMainHandle('mcpDebugger.getState', (_, o: Parameters<typeof service.getState>[0]) => service.getState(o));

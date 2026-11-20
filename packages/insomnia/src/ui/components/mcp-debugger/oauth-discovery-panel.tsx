@@ -1,8 +1,9 @@
 import type { McpRequest } from 'insomnia-data';
-import React, { type FC, useState } from 'react';
+import React, { type FC, useEffect, useState } from 'react';
 import { Button, Dialog, Heading, Input, Modal, ModalOverlay, TextField, Tooltip, TooltipTrigger } from 'react-aria-components';
 
-import type { OAuthDiscoveryResult, OAuthExchange, OAuthStep, OAuthStepStatus } from '~/main/mcp-debugger/oauth-discovery';
+import { decodeJwt, JWT_TIME_CLAIMS } from '~/common/mcp-debugger/jwt';
+import type { OAuthDiscoveryResult, OAuthExchange, OAuthStep, OAuthStepStatus, OAuthTokens } from '~/main/mcp-debugger/oauth-discovery';
 import { Icon } from '~/ui/components/icon';
 import { tryToInterpolateRequestAndCollectSensitiveValues } from '~/ui/utils/try-interpolate';
 
@@ -11,7 +12,7 @@ import { JsonView } from './json-view';
 // Task 4348 S5: a lightweight OAuth wizard in a modal, opened from the Auth tab when no auth type is chosen.
 //   Step 1 Discover (S5a): 401 -> protected resource metadata -> authorization server metadata (+ what a client can do).
 //   Step 2 Register & authorize (S5b): client registration, browser authorize redirect, response checks.
-//   Step 3 will be the token exchange, refresh and step-up (S5c).
+//   Step 3 Get a token (S5c): code exchange, proof the MCP server accepts it, refresh.
 // Each step shows its sub-steps with the raw exchange behind them.
 // PROTOTYPE-MOCK: lives beside the legacy auth type picker rather than as its own auth type; results are not persisted.
 
@@ -54,6 +55,85 @@ const ExchangeView: FC<{ exchange: OAuthExchange }> = ({ exchange }) => (
   </div>
 );
 
+const CopyButton: FC<{ text: string; label: string; testId?: string }> = ({ text, label, testId }) => {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) {
+      return;
+    }
+    const timer = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(timer);
+  }, [copied]);
+  return (
+    <Button
+      aria-label={`Copy ${label}`}
+      className="shrink-0 rounded-xs border border-solid border-(--hl-md) px-2 py-0.5 text-xs hover:bg-(--hl-sm)"
+      onPress={async () => {
+        try {
+          await navigator.clipboard.writeText(text);
+          setCopied(true);
+        } catch (error) {
+          console.error('[mcp-debugger] copy failed', error);
+        }
+      }}
+      data-testid={testId}
+    >
+      {copied ? 'Copied' : 'Copy'}
+    </Button>
+  );
+};
+
+const formatExpiry = (expiresAt: number) => {
+  const seconds = Math.round((expiresAt - Date.now()) / 1000);
+  const when = new Date(expiresAt).toLocaleTimeString();
+  return seconds > 0 ? `${when} (in ${seconds >= 120 ? `${Math.round(seconds / 60)} min` : `${seconds} s`})` : `${when} (expired)`;
+};
+
+const TokenRow: FC<{ label: string; value: string; testId: string }> = ({ label, value, testId }) => (
+  <div className="flex flex-col gap-1">
+    <div className="flex items-center gap-2">
+      <span className="text-xs font-semibold">{label}</span>
+      <span className="ml-auto" />
+      <CopyButton text={value} label={label} testId={`${testId}-copy`} />
+    </div>
+    <code className="rounded-xs bg-(--hl-xs) p-2 text-xs break-all select-all" data-testid={testId}>
+      {value}
+    </code>
+  </div>
+);
+
+/** Full, copyable tokens for a developer debugging their own server. Decoded when the access token is a JWT (never verified). */
+const TokenCard: FC<{ tokens: OAuthTokens }> = ({ tokens }) => {
+  const jwt = decodeJwt(tokens.accessToken);
+  return (
+    <div className="mx-3 mb-1 flex flex-col gap-2 rounded-xs border border-solid border-(--hl-md) p-2" data-testid="mcp-oauth-tokens">
+      <TokenRow label="Access token" value={tokens.accessToken} testId="mcp-oauth-access-token" />
+      {tokens.refreshToken && <TokenRow label="Refresh token" value={tokens.refreshToken} testId="mcp-oauth-refresh-token" />}
+      <div className="flex flex-wrap gap-x-4 text-xs text-(--hl)">
+        {tokens.expiresAt !== undefined && <span>Expires {formatExpiry(tokens.expiresAt)}</span>}
+        {tokens.scope !== undefined && <span>Scope: {tokens.scope || '(none)'}</span>}
+      </div>
+      {jwt ? (
+        <details data-testid="mcp-oauth-jwt">
+          <summary className="cursor-pointer text-xs text-(--hl)">Decoded JWT (not verified)</summary>
+          <div className="mt-1 flex flex-col gap-1">
+            <JsonView value={{ header: jwt.header, payload: jwt.payload }} />
+            <ul className="text-xs text-(--hl)">
+              {JWT_TIME_CLAIMS.filter(claim => typeof jwt.payload[claim] === 'number').map(claim => (
+                <li key={claim}>
+                  {claim}: {new Date((jwt.payload[claim] as number) * 1000).toLocaleString()}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </details>
+      ) : (
+        <p className="text-xs text-(--hl)">Opaque token (not a JWT), so there is nothing to decode.</p>
+      )}
+    </div>
+  );
+};
+
 const StepView: FC<{ step: OAuthStep }> = ({ step }) => (
   <li className="flex flex-col gap-1.5 border-b border-solid border-(--hl-md) px-3 py-2" data-testid="mcp-oauth-step" data-step={step.id}>
     <div className="flex items-center gap-2 text-sm">
@@ -72,6 +152,7 @@ const StepView: FC<{ step: OAuthStep }> = ({ step }) => (
         ))}
       </ul>
     )}
+    {step.tokens && <TokenCard tokens={step.tokens} />}
     {step.exchanges.length > 0 && (
       <details className="pl-4">
         <summary className="cursor-pointer text-xs text-(--hl)">
@@ -162,6 +243,20 @@ export const OAuthDiscoveryPanel: FC<{ request: McpRequest; environmentId: strin
   const [flowSteps, setFlowSteps] = useState<OAuthStep[]>([]);
   const [authorizing, setAuthorizing] = useState(false);
   const [clientId, setClientId] = useState('');
+  const [tokenSteps, setTokenSteps] = useState<OAuthStep[]>([]);
+  const [gettingToken, setGettingToken] = useState(false);
+
+  const runToken = async (call: () => Promise<OAuthStep[]>) => {
+    setGettingToken(true);
+    setFailure(null);
+    try {
+      setTokenSteps(await call());
+    } catch (error) {
+      setFailure(error instanceof Error ? error.message : String(error));
+    } finally {
+      setGettingToken(false);
+    }
+  };
 
   const authorize = async () => {
     if (!result?.context) {
@@ -170,6 +265,7 @@ export const OAuthDiscoveryPanel: FC<{ request: McpRequest; environmentId: strin
     setAuthorizing(true);
     setFailure(null);
     setFlowSteps([]);
+    setTokenSteps([]);
     try {
       setFlowSteps(await window.main.mcpDebugger.oauthAuthorize({ requestId: request._id, context: result.context, clientId }));
     } catch (error) {
@@ -183,6 +279,7 @@ export const OAuthDiscoveryPanel: FC<{ request: McpRequest; environmentId: strin
     setRunning(true);
     setFailure(null);
     setFlowSteps([]);
+    setTokenSteps([]);
     setResult(null);
     try {
       const rendered = await tryToInterpolateRequestAndCollectSensitiveValues({
@@ -220,6 +317,12 @@ export const OAuthDiscoveryPanel: FC<{ request: McpRequest; environmentId: strin
 
   const canAuthorize = !!result?.context && !running;
   const discoverySummary = summarizeSteps(result?.steps ?? [], 3, { active: running ? 'Running…' : undefined, idle: 'Not started' });
+  const codeReady = flowSteps.some(step => step.id === 'callback' && step.status !== 'error');
+  const hasToken = tokenSteps.some(step => (step.id === 'token' || step.id === 'refresh') && step.status !== 'error');
+  const tokenSummary = summarizeSteps(tokenSteps, 2, {
+    active: gettingToken ? 'Working…' : undefined,
+    idle: codeReady ? 'Ready' : 'Waiting on Step 2',
+  });
   const authorizeSummary = summarizeSteps(flowSteps, 3, {
     active: authorizing ? 'Waiting for the browser…' : undefined,
     idle: canAuthorize ? 'Ready' : 'Waiting on Step 1',
@@ -295,8 +398,8 @@ export const OAuthDiscoveryPanel: FC<{ request: McpRequest; environmentId: strin
                         </Button>
                         <Tooltip offset={8} className={tooltipClass}>
                           Register this client (or use the client ID you enter), open the authorization page in your
-                          browser, and check the response that comes back (state, iss). It stops once a code arrives; no
-                          token is requested yet.
+                          browser, and check the response that comes back (state, iss). It stops once a code arrives; Step 3
+                          exchanges it.
                         </Tooltip>
                       </TooltipTrigger>
                     }
@@ -327,6 +430,52 @@ export const OAuthDiscoveryPanel: FC<{ request: McpRequest; environmentId: strin
                       </>
                     ) : (
                       <p className="px-3 py-2 text-xs text-(--hl)">Finish Step 1 successfully to continue.</p>
+                    )}
+                  </WizardStep>
+                  <WizardStep
+                    number={3}
+                    title="Get a token"
+                    summary={tokenSummary}
+                    action={
+                      <>
+                        {hasToken && (
+                          <Button
+                            className={smallButton}
+                            onPress={() => runToken(() => window.main.mcpDebugger.oauthRefresh({ requestId: request._id }))}
+                            isDisabled={gettingToken}
+                            data-testid="mcp-oauth-refresh"
+                          >
+                            Refresh token
+                          </Button>
+                        )}
+                        <TooltipTrigger delay={200}>
+                          <Button
+                            className={purpleButton}
+                            onPress={() => runToken(() => window.main.mcpDebugger.oauthExchange({ requestId: request._id }))}
+                            isDisabled={!codeReady || gettingToken}
+                            data-testid="mcp-oauth-get-token"
+                          >
+                            Get token
+                          </Button>
+                          <Tooltip offset={8} className={tooltipClass}>
+                            Exchange the authorization code from Step 2 for an access token (sending the PKCE verifier),
+                            then call the MCP server with it to prove it works. A code can be used once; run Step 2
+                            again for another.
+                          </Tooltip>
+                        </TooltipTrigger>
+                      </>
+                    }
+                  >
+                    {tokenSteps.length > 0 ? (
+                      <ol className="flex flex-col">
+                        {tokenSteps.map(step => (
+                          <StepView key={step.id} step={step} />
+                        ))}
+                      </ol>
+                    ) : (
+                      <p className="px-3 py-2 text-xs text-(--hl)">
+                        {codeReady ? 'Ready to exchange the authorization code.' : 'Finish Step 2 successfully to continue.'}
+                      </p>
                     )}
                   </WizardStep>
                   {failure && <p className="text-xs text-red-500">{failure}</p>}

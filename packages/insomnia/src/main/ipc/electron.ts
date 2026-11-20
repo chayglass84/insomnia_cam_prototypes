@@ -124,6 +124,8 @@ export type HandleChannels =
   | 'mcpDebugger.oauthDiscover'
   | 'mcpDebugger.oauthAuthorize'
   | 'mcpDebugger.oauthCancel'
+  | 'mcpDebugger.oauthExchange'
+  | 'mcpDebugger.oauthRefresh'
   | 'mcpDebugger.connect'
   | 'mcpDebugger.disconnect'
   | 'mcpDebugger.getState'

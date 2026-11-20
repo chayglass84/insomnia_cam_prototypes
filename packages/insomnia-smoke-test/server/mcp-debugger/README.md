@@ -4,7 +4,7 @@ Ported verbatim from Ardi (`kong-insomnia/ai-debugger`, `web/frontend/e2e/fixtur
 
 ```bash
 node packages/insomnia-smoke-test/server/mcp-debugger/mock-mcp-server.mjs            # :8787 (MOCK_MCP_PORT)
-node packages/insomnia-smoke-test/server/mcp-debugger/mock-authorization-server.mjs  # :9000 (MOCK_AUTHORIZATION_SERVER_PORT), used from S5
+node packages/insomnia-smoke-test/server/mcp-debugger/mock-authorization-server.mjs  # :9000 (MOCK_AUTHORIZATION_SERVER_PORT), used from S5; prefix MOCK_AUTH_CONSENT=1 for the Absolutely / No Way consent page
 ```
 
 Endpoints on :8787 (see `mock-mcp-server.mjs` for the full list): `/stateless` (2026-07-28), legacy

@@ -16,6 +16,21 @@ const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
 
 const inFlight = new Map<string, AbortController>();
 
+/** What the token exchange needs from a successful authorization response (S5c). One per request. */
+export interface PendingExchange {
+  code: string;
+  verifier: string;
+  clientId: string;
+  redirectUri: string;
+  context: OAuthContext;
+}
+const pendingExchanges = new Map<string, PendingExchange>();
+export const takePendingExchange = (requestId: string) => {
+  const pending = pendingExchanges.get(requestId);
+  pendingExchanges.delete(requestId); // an authorization code is single use
+  return pending;
+};
+
 const b64url = (buf: Buffer) => buf.toString('base64url');
 export const pkcePair = () => {
   const verifier = b64url(crypto.randomBytes(32));
@@ -61,7 +76,7 @@ export const checkAuthorizationResponse = (
     } else if (findings.some(f => f.level === 'error')) {
       findings.push({ level: 'warn', text: 'A code is present, but a client must not use it because the checks above failed.' });
     } else {
-      findings.push({ level: 'info', text: 'Authorization code received. It is not exchanged yet (token exchange is the next slice).' });
+      findings.push({ level: 'info', text: 'Authorization code received. Use Get token in Step 3 to exchange it.' });
     }
   }
   return findings;
@@ -217,6 +232,7 @@ export interface AuthorizeOptions {
 
 export const runAuthorization = async ({ requestId, context, clientId: clientIdInput, openUrl, timeoutMs = DEFAULT_TIMEOUT_MS }: AuthorizeOptions): Promise<OAuthStep[]> => {
   inFlight.get(requestId)?.abort();
+  pendingExchanges.delete(requestId);
   const controller = new AbortController();
   inFlight.set(requestId, controller);
   const as = context.authorizationServer;
@@ -275,6 +291,9 @@ export const runAuthorization = async ({ requestId, context, clientId: clientIdI
       issAdvertised: as.authorization_response_iss_parameter_supported === true,
     });
     const status = statusOf(findings);
+    if (status !== 'error' && callback.code) {
+      pendingExchanges.set(requestId, { code: callback.code, verifier, clientId: registration.clientId, redirectUri: listener.redirectUri, context });
+    }
     steps.push(step('callback', status, status === 'error' ? 'Rejected' : 'Code received', [{ level: 'info', text: `Callback: ${JSON.stringify({ ...callback, code: callback.code ? `${callback.code.slice(0, 6)}…` : undefined })}` }, ...findings]));
     return steps;
   } finally {
