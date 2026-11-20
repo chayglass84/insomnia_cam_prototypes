@@ -380,7 +380,7 @@ describe('subscriptions/listen', () => {
     };
     expect(delivered.params._meta['io.modelcontextprotocol/subscriptionId']).toBe(sub.subscriptionId);
 
-    trigger(requestId, { kind: 'resource', uri: 'file:///project/config.json' });
+    trigger(requestId, { kind: 'resource-updated', uri: 'file:///project/config.json' });
     await waitFor(() => notifications(requestId, 'notifications/resources/updated').length === 1);
     expect(notifications(requestId, 'notifications/resources/updated')[0].payload).toMatchObject({
       params: { uri: 'file:///project/config.json' },
@@ -412,7 +412,7 @@ describe('subscriptions/listen', () => {
       await waitFor(() => service.getTrace({ requestId }).some(e => e.correlationId === correlationId && e.terminalStatus));
       return JSON.stringify(service.getTrace({ requestId }).find(e => e.correlationId === correlationId && e.terminalStatus)!.payload);
     };
-    expect(await reply({ uri: 'file:///project/config.json' })).toContain('kind=resource');
+    expect(await reply({ uri: 'file:///project/config.json' })).toContain('kind=resource-updated');
     await waitFor(() => notifications(requestId, 'notifications/resources/updated').length === 1);
     expect(await reply({ uri: 'file:///made/up.txt' })).toContain('notified 0 listener(s)');
     expect(notifications(requestId, 'notifications/resources/updated')).toHaveLength(1);

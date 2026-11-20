@@ -121,13 +121,13 @@ const HONORED = ["toolsListChanged", "resourcesListChanged", "resourceSubscripti
 
 const triggerChangeTool = {
   name: "trigger-change",
-  description: "Push a change notification to open subscriptions/listen streams (kind: tools | resources | prompts | resource).",
+  description: "Push a change notification to open subscriptions/listen streams (kind: tools | resources-list | prompts | resource-updated).",
   inputSchema: {
     type: "object",
     properties: {
       kind: {
         type: "string",
-        enum: ["tools", "resources", "prompts", "resource"],
+        enum: ["tools", "resources-list", "prompts", "resource-updated"],
         description: "What changed. Leave empty to send a resource update when `uri` is set, otherwise a tools list change.",
       },
       uri: { type: "string", description: "For a resource update: the resource URI that changed" },
@@ -167,13 +167,13 @@ function triggerChange(kind, uri) {
     if (kind === "tools" && filter.toolsListChanged) {
       sseSend(res, { jsonrpc: "2.0", method: "notifications/tools/list_changed", params: { _meta: meta } });
       delivered += 1;
-    } else if (kind === "resources" && filter.resourcesListChanged) {
+    } else if (kind === "resources-list" && filter.resourcesListChanged) {
       sseSend(res, { jsonrpc: "2.0", method: "notifications/resources/list_changed", params: { _meta: meta } });
       delivered += 1;
     } else if (kind === "prompts" && filter.promptsListChanged) {
       sseSend(res, { jsonrpc: "2.0", method: "notifications/prompts/list_changed", params: { _meta: meta } });
       delivered += 1;
-    } else if (kind === "resource" && uri && filter.resourceSubscriptions?.includes(uri)) {
+    } else if (kind === "resource-updated" && uri && filter.resourceSubscriptions?.includes(uri)) {
       sseSend(res, { jsonrpc: "2.0", method: "notifications/resources/updated", params: { _meta: meta, uri } });
       delivered += 1;
     }
@@ -615,7 +615,7 @@ async function handleStateless(req, res) {
     if (name === "trigger-change") {
       const args = payload.params?.arguments ?? {};
       // No default kind in the schema: a `uri` on its own means "this resource changed".
-      const kind = args.kind || (args.uri ? "resource" : "tools");
+      const kind = args.kind || (args.uri ? "resource-updated" : "tools");
       const delivered = triggerChange(kind, args.uri);
       echoResult(res, payload.id, `kind=${kind}${args.uri ? ` uri=${args.uri}` : ""}: notified ${delivered} listener(s)`);
       return;
