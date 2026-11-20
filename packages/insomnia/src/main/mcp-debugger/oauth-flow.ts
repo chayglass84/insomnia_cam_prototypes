@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-import { exchange, type OAuthContext, type OAuthExchange, type OAuthFinding, type OAuthStep, STEP_TITLES } from './oauth-discovery';
+import { exchange, type OAuthContext, type OAuthExchange, type OAuthFinding, type OAuthStep, type OAuthTrace, STEP_TITLES } from './oauth-discovery';
 
 // Task 4348 S5b: client registration and the authorization redirect, as three more steps after discovery:
 //   registration (DCR, CIMD client_id URL, or a pre-registered client_id) -> authorize (PKCE, opens the browser)
@@ -150,11 +150,11 @@ const listenForCallback = async (): Promise<Listener> => {
 
 const isUrl = (value: string) => /^https?:\/\//i.test(value);
 
-const register = async (context: OAuthContext, redirectUri: string, clientIdInput: string | undefined) => {
+const register = async (context: OAuthContext, redirectUri: string, clientIdInput: string | undefined, trace?: OAuthTrace) => {
   const as = context.authorizationServer;
   if (clientIdInput && isUrl(clientIdInput)) {
     // CIMD: the client_id is a URL to a document the server fetches. Fetch it too so problems show up here.
-    const doc = await exchange('GET', clientIdInput, { accept: 'application/json' });
+    const doc = await exchange('GET', clientIdInput, { accept: 'application/json' }, undefined, { trace, label: 'Client metadata document (CIMD)' });
     const findings: OAuthFinding[] = [{ level: 'info', text: `client_id (CIMD URL): ${clientIdInput}` }];
     if (!as.client_id_metadata_document_supported) {
       findings.push({ level: 'warn', text: 'The server does not advertise client_id_metadata_document_supported, so it may not accept a URL client_id.' });
@@ -200,6 +200,7 @@ const register = async (context: OAuthContext, redirectUri: string, clientIdInpu
       response_types: ['code'],
       token_endpoint_auth_method: 'none',
     },
+    { trace, label: STEP_TITLES.registration },
   );
   const body = dcr.response?.body as { client_id?: string; error?: string; error_description?: string } | undefined;
   if (dcr.response && dcr.response.status < 300 && body?.client_id) {
@@ -228,9 +229,11 @@ export interface AuthorizeOptions {
   /** Opens the authorization URL in the user's browser. Injected so tests can stand in for the browser. */
   openUrl: (url: string) => void | Promise<void>;
   timeoutMs?: number;
+  /** Reports each call to the Trace (S5 follow-up). */
+  trace?: OAuthTrace;
 }
 
-export const runAuthorization = async ({ requestId, context, clientId: clientIdInput, openUrl, timeoutMs = DEFAULT_TIMEOUT_MS }: AuthorizeOptions): Promise<OAuthStep[]> => {
+export const runAuthorization = async ({ requestId, context, clientId: clientIdInput, openUrl, timeoutMs = DEFAULT_TIMEOUT_MS, trace }: AuthorizeOptions): Promise<OAuthStep[]> => {
   inFlight.get(requestId)?.abort();
   pendingExchanges.delete(requestId);
   const controller = new AbortController();
@@ -239,7 +242,7 @@ export const runAuthorization = async ({ requestId, context, clientId: clientIdI
   const steps: OAuthStep[] = [];
   const listener = await listenForCallback();
   try {
-    const registration = await register(context, listener.redirectUri, clientIdInput?.trim() || undefined);
+    const registration = await register(context, listener.redirectUri, clientIdInput?.trim() || undefined, trace);
     steps.push(registration.step);
     if (!registration.clientId || registration.step.status === 'error') {
       return steps;
@@ -275,6 +278,8 @@ export const runAuthorization = async ({ requestId, context, clientId: clientIdI
         : { level: 'warn', text: 'The protected resource metadata gave no resource, so no resource parameter was sent.' },
       context.scope ? { level: 'info', text: `scope=${context.scope}` } : { level: 'info', text: 'No scope requested.' },
     ];
+    // The browser leg is one Call: the request is the authorize URL we open, the reply is the redirect that comes back.
+    const browserCall = trace?.(STEP_TITLES.authorize, { method: 'GET', url: authorizeUrl.toString(), headers: {} });
     await openUrl(authorizeUrl.toString());
     steps.push(step('authorize', 'ok', 'Opened in your browser', authorizeFindings));
 
@@ -282,7 +287,9 @@ export const runAuthorization = async ({ requestId, context, clientId: clientIdI
     try {
       callback = await listener.wait(timeoutMs, controller.signal);
     } catch (error) {
-      steps.push(step('callback', 'error', error instanceof Error ? error.message : String(error), [{ level: 'error', text: error instanceof Error ? error.message : String(error) }]));
+      const message = error instanceof Error ? error.message : String(error);
+      browserCall?.fail(message === 'Cancelled' ? 'cancelled' : 'no-response', message);
+      steps.push(step('callback', 'error', message, [{ level: 'error', text: message }]));
       return steps;
     }
     const findings = checkAuthorizationResponse(callback, {
@@ -291,6 +298,7 @@ export const runAuthorization = async ({ requestId, context, clientId: clientIdI
       issAdvertised: as.authorization_response_iss_parameter_supported === true,
     });
     const status = statusOf(findings);
+    browserCall?.redirect(callback as Record<string, string | undefined>, status !== 'error');
     if (status !== 'error' && callback.code) {
       pendingExchanges.set(requestId, { code: callback.code, verifier, clientId: registration.clientId, redirectUri: listener.redirectUri, context });
     }

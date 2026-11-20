@@ -44,7 +44,7 @@ function isCredentialHeader(name: string): boolean {
 }
 
 /** Copy of `headers` with credential values redacted; never mutates the wire record. */
-function redactCredentialHeaders(headers: Record<string, string>): Record<string, string> {
+export function redactCredentialHeaders(headers: Record<string, string>): Record<string, string> {
   return Object.fromEntries(
     Object.entries(headers).map(([name, value]) => [
       name,

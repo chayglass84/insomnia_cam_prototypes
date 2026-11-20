@@ -1,4 +1,4 @@
-import { exchange, type OAuthContext, type OAuthExchange, type OAuthFinding, type OAuthStep, STEP_TITLES } from './oauth-discovery';
+import { exchange, type OAuthContext, type OAuthExchange, type OAuthFinding, type OAuthStep, type OAuthTrace, STEP_TITLES } from './oauth-discovery';
 import { parseWwwAuthenticate } from './oauth-discovery';
 import { takePendingExchange } from './oauth-flow';
 
@@ -91,7 +91,7 @@ export const readTokenResponse = (
 };
 
 /** Call the MCP server with the bearer token and say what came back, including step-up hints on a 403. */
-export const verifyToken = async (accessToken: string, serverUrl: string): Promise<OAuthStep> => {
+export const verifyToken = async (accessToken: string, serverUrl: string, trace?: OAuthTrace): Promise<OAuthStep> => {
   const ex = await exchange(
     'POST',
     serverUrl,
@@ -102,6 +102,7 @@ export const verifyToken = async (accessToken: string, serverUrl: string): Promi
       method: 'initialize',
       params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'Insomnia', version: '0-prototype' } },
     },
+    { trace, label: STEP_TITLES.verify },
   );
   const status = ex.response?.status;
   if (ex.error) {
@@ -124,7 +125,7 @@ export const verifyToken = async (accessToken: string, serverUrl: string): Promi
   return step('verify', 'error', `${status}: the server rejected the token`, findings, [ex]);
 };
 
-export const exchangeCode = async ({ requestId }: { requestId: string }): Promise<OAuthStep[]> => {
+export const exchangeCode = async ({ requestId, trace }: { requestId: string; trace?: OAuthTrace }): Promise<OAuthStep[]> => {
   const pending = takePendingExchange(requestId);
   if (!pending) {
     return [step('token', 'error', 'No authorization code', [{ level: 'error', text: 'Authorize in Step 2 first. A code can only be used once.' }])];
@@ -146,6 +147,7 @@ export const exchangeCode = async ({ requestId }: { requestId: string }): Promis
       code_verifier: pending.verifier,
       resource: context.resource,
     }),
+    { trace, label: STEP_TITLES.token },
   );
   const { tokenSet, findings } = readTokenResponse(ex, { requestedScope: context.scope });
   const tokenStep = step('token', findings.some(f => f.level === 'error') ? 'error' : findings.some(f => f.level === 'warn') ? 'warn' : 'ok', tokenSet ? 'Token issued' : 'Rejected', findings, [ex]);
@@ -154,10 +156,10 @@ export const exchangeCode = async ({ requestId }: { requestId: string }): Promis
   }
   tokens.set(requestId, { ...tokenSet, clientId: pending.clientId, context });
   tokenStep.tokens = tokenSet;
-  return [tokenStep, await verifyToken(tokenSet.accessToken, context.serverUrl)];
+  return [tokenStep, await verifyToken(tokenSet.accessToken, context.serverUrl, trace)];
 };
 
-export const refreshToken = async ({ requestId }: { requestId: string }): Promise<OAuthStep[]> => {
+export const refreshToken = async ({ requestId, trace }: { requestId: string; trace?: OAuthTrace }): Promise<OAuthStep[]> => {
   const current = tokens.get(requestId);
   if (!current) {
     return [step('refresh', 'error', 'No token', [{ level: 'error', text: 'Get a token first.' }])];
@@ -174,6 +176,7 @@ export const refreshToken = async ({ requestId }: { requestId: string }): Promis
     endpoint,
     { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
     form({ grant_type: 'refresh_token', refresh_token: current.refreshToken, client_id: current.clientId, resource: current.context.resource }),
+    { trace, label: STEP_TITLES.refresh },
   );
   const { tokenSet, findings } = readTokenResponse(ex, { refreshToken: current.refreshToken, requestedScope: current.scope });
   if (!tokenSet) {
@@ -187,5 +190,5 @@ export const refreshToken = async ({ requestId }: { requestId: string }): Promis
   tokens.set(requestId, { ...current, ...tokenSet });
   const refreshStep = step('refresh', findings.some(f => f.level === 'warn') ? 'warn' : 'ok', 'Token refreshed', findings, [ex]);
   refreshStep.tokens = tokenSet;
-  return [refreshStep, await verifyToken(tokenSet.accessToken, current.context.serverUrl)];
+  return [refreshStep, await verifyToken(tokenSet.accessToken, current.context.serverUrl, trace)];
 };

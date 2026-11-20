@@ -94,6 +94,7 @@ const isReplayable = (call: Call) => {
   const request = requestEventOf(call);
   const method = (request.payload as { method?: unknown } | undefined)?.method;
   return (
+    request.flow === undefined &&
     request.direction === 'client-to-server' &&
     request.awaitsReply === true &&
     typeof method === 'string' &&
@@ -252,6 +253,7 @@ const CallDetail: FC<{
     <div className="flex h-full flex-col gap-3 overflow-y-auto p-3 text-sm" data-testid="mcp-trace-detail">
       <div className="flex items-center justify-between gap-2">
         <strong className="flex min-w-0 items-center gap-2">
+          {request.flow === 'oauth' && <OAuthChip />}
           <CallLabel label={call.label} />
           {call.via && <VersionChip version={call.via} />}
         </strong>
@@ -264,7 +266,7 @@ const CallDetail: FC<{
               Cancel request
             </Button>
           )}
-          {serverUrl && request.direction === 'client-to-server' && request.awaitsReply && (
+          {serverUrl && !request.flow && request.direction === 'client-to-server' && request.awaitsReply && (
             <Button
               className="rounded-xs border border-solid border-(--hl-md) px-2 py-0.5 text-xs hover:bg-(--hl-sm)"
               onPress={copyCurl}
@@ -427,6 +429,28 @@ const VersionChip: FC<{ version: string }> = ({ version }) => (
       className="max-w-xs rounded-md border border-solid border-(--hl-sm) bg-(--color-bg) px-3 py-2 text-xs text-(--color-font) shadow-lg select-none"
     >
       Replayed over protocol {version}, a different version than this session. Compare it with the original.
+    </Tooltip>
+  </TooltipTrigger>
+);
+
+/** Marks a call or event that belongs to an OAuth sign-in rather than to the MCP connection itself. */
+const OAuthChip: FC = () => (
+  <TooltipTrigger delay={200}>
+    <Focusable>
+      <span
+        role="img"
+        aria-label="OAuth"
+        className="shrink-0 rounded-xs bg-(--hl-md) px-1.5 py-px text-[0.65rem] font-semibold text-(--color-font)"
+        data-testid="mcp-oauth-chip"
+      >
+        OAuth
+      </span>
+    </Focusable>
+    <Tooltip
+      offset={8}
+      className="max-w-xs rounded-md border border-solid border-(--hl-sm) bg-(--color-bg) px-3 py-2 text-xs text-(--color-font) shadow-lg select-none"
+    >
+      Part of an OAuth sign-in (Discover OAuth). Not an MCP message: it talks to the server's authorization endpoints.
     </Tooltip>
   </TooltipTrigger>
 );
@@ -697,6 +721,7 @@ export const McpTracePane: FC<{
                   <Time iso={call.startedAt} />
                   {replays[call.correlationId] && <ReplayBadge />}
                   {call.via && <VersionChip version={call.via} />}
+                  {call.events[0].flow === 'oauth' && <OAuthChip />}
                   <CallLabel label={call.label} />
                   <span className="ml-auto shrink-0 text-xs text-(--hl)">
                     {call.durationMs !== undefined ? `${call.durationMs} ms` : call.status === 'pending' ? 'pending…' : 'notification'}
@@ -720,6 +745,7 @@ export const McpTracePane: FC<{
                     <StatusDot status={status} neutral={isRequest ? 'Request sent' : 'Message received'} />
                     <Time iso={event.timestamp} />
                     <Arrow isRequest={isRequest} />
+                    {event.flow === 'oauth' && <OAuthChip />}
                     <CallLabel label={call?.label ?? event.label ?? event.messageType} />
                     {event.via && <VersionChip version={event.via} />}
                   </button>

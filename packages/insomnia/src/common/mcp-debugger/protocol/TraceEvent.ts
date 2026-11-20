@@ -132,6 +132,13 @@ export type TraceEvent = {
    * from the session's own. The call's correlationId is namespaced `xv-<version>-<id>` so it can't collide.
    */
   via?: string;
+
+  /**
+   * 4348 (S5): set on events minted by a sign-in flow rather than by the MCP connection itself (today only `"oauth"`:
+   * discovery, registration, the browser redirect, token and refresh calls). The Trace UI marks them with a chip and does
+   * not offer MCP-only actions (edit & replay, Copy cURL) on them.
+   */
+  flow?: "oauth";
 };
 
 /**

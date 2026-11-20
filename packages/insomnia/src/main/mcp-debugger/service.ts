@@ -3,10 +3,12 @@ import type { MCPInvocation } from '~/common/mcp-debugger/protocol/mcp/capabilit
 import { type MCPConnectConfig,MCPHTTPProtocol } from '~/common/mcp-debugger/protocol/mcp/MCPHTTPProtocol';
 import { buildTasksCancel, buildTasksGet, buildTasksUpdate } from '~/common/mcp-debugger/protocol/mcp/tasks/taskMethods';
 import { isTaskTerminal, parseTaskHandle, type TaskRecord } from '~/common/mcp-debugger/protocol/mcp/tasks/taskModel';
-import { traceEventsFor } from '~/common/mcp-debugger/protocol/mcp/traceEvents';
+import { redactCredentialHeaders, traceEventsFor } from '~/common/mcp-debugger/protocol/mcp/traceEvents';
 import type { Capability, Connection, IntrospectionWarning,Invocation } from '~/common/mcp-debugger/protocol/Protocol';
 import type { TraceEvent } from '~/common/mcp-debugger/protocol/TraceEvent';
 import { isVersionChoice } from '~/common/mcp-debugger/versions';
+
+import type { OAuthExchange, OAuthTrace } from './oauth-discovery';
 
 // Task 4348 S1: the main-process home of the ported Ardi MCPHTTPProtocol. One Session per MCP request id.
 // PROTOTYPE-MOCK: sessions and traces are in-memory only (lost on app restart); S2 persists runs for replay.
@@ -21,6 +23,7 @@ interface Session {
   status: McpDebuggerStatus;
   error?: string;
   protocolIssue?: string;
+  oauthRequired?: boolean;
   url?: string;
   capabilities: Capability[];
   warnings: IntrospectionWarning[];
@@ -64,6 +67,65 @@ const sinkFor = (s: Session) => (event: TraceEvent) => {
   }
 };
 
+// ---------- OAuth in the trace (S5) ----------
+// Every OAuth call (discovery probes, registration, the browser redirect, token, refresh, the verifying MCP call) is its
+// own Call in the trace, so each request and response is inspectable, tagged `flow: 'oauth'`. Credential headers are
+// redacted at capture like every other event; bodies are shown as-is (the wizard shows the tokens in full anyway).
+let oauthCallSeq = 0;
+const pathOf = (url: string) => {
+  try {
+    const u = new URL(url);
+    return u.pathname + (u.search ? '?…' : '');
+  } catch {
+    return url;
+  }
+};
+
+export const oauthTraceFor = (requestId: string): OAuthTrace => (label, request) => {
+  const s = sessionFor(requestId);
+  const sink = sinkFor(s);
+  const correlationId = `oauth-${++oauthCallSeq}`;
+  const rowLabel = `${label} · ${request.method} ${pathOf(request.url)}`;
+  const base = { sequence: 0, correlationId, protocol: 'mcp', flow: 'oauth' as const, label: rowLabel };
+  sink({
+    ...base,
+    id: `evt-${correlationId}-req`,
+    direction: 'client-to-server',
+    messageType: 'request',
+    timestamp: new Date().toISOString(),
+    payload: { method: request.method, url: request.url, ...(request.body === undefined ? {} : { body: request.body }) },
+    rendererKey: 'oauth:request',
+    awaitsReply: true,
+    ...(Object.keys(request.headers).length > 0 ? { requestHeaders: redactCredentialHeaders(request.headers) } : {}),
+  });
+  const reply = (event: Pick<TraceEvent, 'messageType' | 'payload' | 'terminalStatus'> & Partial<TraceEvent>) =>
+    sink({
+      ...base,
+      id: `evt-${correlationId}-reply`,
+      direction: 'server-to-client',
+      timestamp: new Date().toISOString(),
+      rendererKey: 'oauth:response',
+      ...event,
+    });
+  return {
+    end: (ex: OAuthExchange) => {
+      if (ex.error || !ex.response) {
+        reply({ messageType: 'error', payload: { error: ex.error ?? 'No response' }, terminalStatus: 'error' });
+        return;
+      }
+      reply({
+        messageType: 'response',
+        payload: { status: ex.response.status, ...(ex.response.body === undefined ? {} : { body: ex.response.body }) },
+        terminalStatus: ex.response.status < 400 ? 'success' : 'error',
+        responseHeaders: redactCredentialHeaders(ex.response.headers),
+      });
+    },
+    redirect: (params, ok) =>
+      reply({ messageType: 'redirect', payload: { redirected_to_loopback: params }, terminalStatus: ok ? 'success' : 'error' }),
+    fail: (status, message) => reply({ messageType: 'error', payload: { error: message }, terminalStatus: status }),
+  };
+};
+
 // HTTP statuses a server returns to a handshake it does not understand (e.g. `initialize` sent to a stateless server).
 const HANDSHAKE_MISMATCH_STATUSES = new Set([400, 404, 405, 406]);
 
@@ -86,6 +148,15 @@ const protocolIssueOf = (err: unknown, url: string, versionChoice?: string): str
   return pinned
     ? `The MCP server ${url} does not support protocol ${pinned}.`
     : `The MCP server ${url} does not support any protocol version Insomnia supports.`;
+};
+
+/** A 401 whose WWW-Authenticate offers Bearer: the sign that the server is OAuth-protected. */
+export const isOAuthChallenge = (err: unknown): boolean => {
+  if (!isProtocolException(err)) {
+    return false;
+  }
+  const e = err.error as { kind: string; status?: number; wwwAuthenticate?: string };
+  return e.kind === 'auth' && e.status === 401 && /\bbearer\b/i.test(e.wwwAuthenticate ?? '');
 };
 
 /** Server-initiated requests the UI answers by hand. */
@@ -118,6 +189,8 @@ export interface McpDebuggerState {
   replays: Record<string, string>;
   tasks: TaskView[];
   subscription?: SubscriptionView;
+  /** The last connect failed with a 401 Bearer challenge, so the server probably wants OAuth (UI offers discovery). */
+  oauthRequired?: boolean;
 }
 
 export const getState = ({ requestId }: { requestId: string }): McpDebuggerState => {
@@ -134,6 +207,7 @@ export const getState = ({ requestId }: { requestId: string }): McpDebuggerState
     lastSequence: s.seq,
     replays: s.replays,
     subscription: s.subscription,
+    oauthRequired: s.oauthRequired,
     tasks: [...s.tasks.values()].map(t => ({
       ...t,
       polling: s.taskTimers.has(t.taskId),
@@ -161,6 +235,7 @@ export const connect = async (options: McpDebuggerConnectOptions): Promise<McpDe
   s.status = 'connecting';
   s.error = undefined;
   s.protocolIssue = undefined;
+  s.oauthRequired = false;
   s.url = url;
   void closeAlts(requestId);
   clearTasks(s);
@@ -201,6 +276,7 @@ export const connect = async (options: McpDebuggerConnectOptions): Promise<McpDe
     s.status = 'error';
     s.error = isProtocolException(err) ? err.message : messageOf(err);
     s.protocolIssue = protocolIssueOf(err, url, options.protocolVersion);
+    s.oauthRequired = isOAuthChallenge(err);
     s.conn = undefined;
   }
   return getState({ requestId });

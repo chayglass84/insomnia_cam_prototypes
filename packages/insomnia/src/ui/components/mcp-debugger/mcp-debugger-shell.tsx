@@ -1,9 +1,11 @@
 import type { McpRequest } from 'insomnia-data';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { Button } from 'react-aria-components';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 
 import { capabilityKey } from '~/common/mcp-debugger/protocol/mcp/capabilities/methods';
 import type { Capability } from '~/common/mcp-debugger/protocol/Protocol';
+import { getAuthObjectOrNull } from '~/network/authentication';
 import {
   useWorkspaceLoaderData,
   WORKSPACE_CONTENT_WRAPPER,
@@ -15,6 +17,7 @@ import { useGitVCSVersion } from '~/ui/hooks/use-vcs-version';
 
 import { CapabilitySidebar, type SessionTab } from './capability-sidebar';
 import { McpDebuggerUrlBar } from './mcp-debugger-url-bar';
+import { OAuthWizardModal } from './oauth-discovery-panel';
 import { McpDebuggerRequestPane } from './request-pane';
 import { McpTracePane } from './trace-pane';
 import { useMcpDebugger } from './use-mcp-debugger';
@@ -30,6 +33,16 @@ export const McpDebuggerShell = ({ request }: { request: McpRequest }) => {
   const [selected, setSelected] = useState<Capability | null>(null);
   const [session, setSession] = useState<SessionTab | null>(null);
   const isConnected = state.status === 'connected';
+  const [oauthOpen, setOauthOpen] = useState(false);
+  const [oauthPromptDismissed, setOauthPromptDismissed] = useState(false);
+  // Offer discovery when the last Connect failed with an OAuth challenge and no auth is configured yet.
+  const authBlank = ['none', undefined].includes(getAuthObjectOrNull(request.authentication)?.type);
+  const showOauthPrompt = state.oauthRequired && authBlank && !oauthPromptDismissed && state.status === 'error';
+  useEffect(() => {
+    if (state.status === 'connecting') {
+      setOauthPromptDismissed(false);
+    }
+  }, [state.status]);
   const uniqueKey = `${activeEnvironment?._id}::${activeEnvironment?.modified}::${activeGlobalEnvironment?._id}::${activeGlobalEnvironment?.modified}::${request._id}::${gitVersion}::${vcsVersion}::${isConnected}`;
 
   return (
@@ -54,6 +67,30 @@ export const McpDebuggerShell = ({ request }: { request: McpRequest }) => {
           <span>{state.protocolIssue}</span>
         </div>
       )}
+      {showOauthPrompt && (
+        <div
+          className="flex items-center gap-2 border-b border-solid border-(--hl-md) bg-(--hl-xs) px-3 py-1.5 text-xs"
+          data-testid="mcp-oauth-prompt"
+        >
+          <i className="fa fa-lock" />
+          <span>This server asked for OAuth. Want Insomnia to discover how to sign in?</span>
+          <Button
+            className="ml-auto rounded-sm bg-(--color-surprise) px-(--padding-md) py-0.5 text-(--color-font-surprise) hover:brightness-75"
+            onPress={() => setOauthOpen(true)}
+            data-testid="mcp-oauth-prompt-discover"
+          >
+            Discover OAuth
+          </Button>
+          <Button
+            className="rounded-sm border border-solid border-(--hl-md) px-(--padding-md) py-0.5 hover:bg-(--hl-sm)"
+            onPress={() => setOauthPromptDismissed(true)}
+            data-testid="mcp-oauth-prompt-dismiss"
+          >
+            Not now
+          </Button>
+        </div>
+      )}
+      <OAuthWizardModal request={request} environmentId={activeEnvironment?._id || ''} isOpen={oauthOpen} onOpenChange={setOauthOpen} />
       <PanelGroup
         autoSaveId="insomnia-sidebar"
         id={WORKSPACE_CONTENT_WRAPPER}
@@ -91,7 +128,7 @@ export const McpDebuggerShell = ({ request }: { request: McpRequest }) => {
                   capabilities={state.capabilities}
                   isConnected={isConnected}
                   uniqueKey={uniqueKey}
-                  environmentId={activeEnvironment?._id || ''}
+                  onOpenOAuth={() => setOauthOpen(true)}
                 />
               </ErrorBoundary>
             </Panel>

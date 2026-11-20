@@ -5,6 +5,7 @@ import { Button, Dialog, Heading, Input, Modal, ModalOverlay, TextField, Tooltip
 import { decodeJwt, JWT_TIME_CLAIMS } from '~/common/mcp-debugger/jwt';
 import type { OAuthDiscoveryResult, OAuthExchange, OAuthStep, OAuthStepStatus, OAuthTokens } from '~/main/mcp-debugger/oauth-discovery';
 import { Icon } from '~/ui/components/icon';
+import { useRequestPatcher } from '~/ui/hooks/use-request';
 import { tryToInterpolateRequestAndCollectSensitiveValues } from '~/ui/utils/try-interpolate';
 
 import { JsonView } from './json-view';
@@ -235,8 +236,28 @@ const WizardStep: FC<{ number: number; title: string; summary: StepSummary; acti
   </section>
 );
 
-export const OAuthDiscoveryPanel: FC<{ request: McpRequest; environmentId: string }> = ({ request, environmentId }) => {
-  const [isOpen, setIsOpen] = useState(false);
+/** The button shown in the Auth tab. The wizard itself is `OAuthWizardModal`, mounted by the shell so it survives tab changes. */
+export const OAuthDiscoverButton: FC<{ onOpen: () => void; isDisabled?: boolean }> = ({ onOpen, isDisabled }) => (
+  <div className="flex shrink-0 items-center gap-2 border-b border-solid border-(--hl-md) px-3 py-2" data-testid="mcp-oauth-discovery">
+    <TooltipTrigger delay={200}>
+      <Button className={purpleButton} onPress={onOpen} isDisabled={isDisabled} data-testid="mcp-oauth-discover">
+        Discover OAuth
+      </Button>
+      <Tooltip offset={8} className={tooltipClass}>
+        Open the OAuth debugger: probe this server without credentials, then register a client and authorize in your
+        browser, with every request and response visible.
+      </Tooltip>
+    </TooltipTrigger>
+  </div>
+);
+
+export const OAuthWizardModal: FC<{
+  request: McpRequest;
+  environmentId: string;
+  isOpen: boolean;
+  onOpenChange: (isOpen: boolean) => void;
+}> = ({ request, environmentId, isOpen, onOpenChange: setOpen }) => {
+  const patchRequest = useRequestPatcher();
   const [result, setResult] = useState<OAuthDiscoveryResult | null>(null);
   const [running, setRunning] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
@@ -250,7 +271,13 @@ export const OAuthDiscoveryPanel: FC<{ request: McpRequest; environmentId: strin
     setGettingToken(true);
     setFailure(null);
     try {
-      setTokenSteps(await call());
+      const steps = await call();
+      setTokenSteps(steps);
+      // Reflect what we did in the Auth tab: a Bearer token, which is what Connect then sends.
+      const tokens = steps.find(step => step.tokens && step.status !== 'error')?.tokens;
+      if (tokens) {
+        patchRequest(request._id, { authentication: { type: 'bearer', token: tokens.accessToken, prefix: 'Bearer', disabled: false } });
+      }
     } catch (error) {
       setFailure(error instanceof Error ? error.message : String(error));
     } finally {
@@ -292,6 +319,7 @@ export const OAuthDiscoveryPanel: FC<{ request: McpRequest; environmentId: strin
       }
       setResult(
         await window.main.mcpDebugger.oauthDiscover({
+          requestId: request._id,
           url: rendered.rendered.url,
           headers: (rendered.rendered.headers as { name: string; value: string; disabled?: boolean }[]).filter(h => !h.disabled),
         }),
@@ -303,13 +331,16 @@ export const OAuthDiscoveryPanel: FC<{ request: McpRequest; environmentId: strin
     }
   };
 
-  const open = () => {
-    setIsOpen(true);
-    void discover();
-  };
+  // Every time the wizard opens it starts again with discovery.
+  useEffect(() => {
+    if (isOpen) {
+      void discover();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run on open only
+  }, [isOpen]);
 
   const onOpenChange = (next: boolean) => {
-    setIsOpen(next);
+    setOpen(next);
     if (!next && authorizing) {
       void window.main.mcpDebugger.oauthCancel({ requestId: request._id });
     }
@@ -329,16 +360,7 @@ export const OAuthDiscoveryPanel: FC<{ request: McpRequest; environmentId: strin
   });
 
   return (
-    <div className="flex shrink-0 items-center gap-2 border-b border-solid border-(--hl-md) px-3 py-2" data-testid="mcp-oauth-discovery">
-      <TooltipTrigger delay={200}>
-        <Button className={purpleButton} onPress={open} isDisabled={!request.url} data-testid="mcp-oauth-discover">
-          Discover OAuth
-        </Button>
-        <Tooltip offset={8} className={tooltipClass}>
-          Open the OAuth debugger: probe this server without credentials, then register a client and authorize in your
-          browser, with every request and response visible.
-        </Tooltip>
-      </TooltipTrigger>
+    <>
       <ModalOverlay
         isOpen={isOpen}
         onOpenChange={onOpenChange}
@@ -480,11 +502,19 @@ export const OAuthDiscoveryPanel: FC<{ request: McpRequest; environmentId: strin
                   </WizardStep>
                   {failure && <p className="text-xs text-red-500">{failure}</p>}
                 </div>
+                {hasToken && (
+                  <div className="flex shrink-0 items-center justify-end gap-3 border-t border-solid border-(--hl-md) pt-3">
+                    <span className="text-xs text-(--hl)">The Auth tab now holds this token as a Bearer token.</span>
+                    <Button className={purpleButton} onPress={close} data-testid="mcp-oauth-done">
+                      Done
+                    </Button>
+                  </div>
+                )}
               </>
             )}
           </Dialog>
         </Modal>
       </ModalOverlay>
-    </div>
+    </>
   );
 };

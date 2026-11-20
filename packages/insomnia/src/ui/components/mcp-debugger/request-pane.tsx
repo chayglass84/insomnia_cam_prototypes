@@ -14,9 +14,9 @@ import { RequestHeadersEditor } from '~/ui/components/editors/request-headers-ed
 import { InsomniaRjsfForm, type InsomniaRjsfFormHandle } from '~/ui/components/rjsf';
 
 import type { SessionTab } from './capability-sidebar';
+import { OAuthDiscoverButton } from './oauth-discovery-panel';
 import { PrototypeMock } from './prototype-mock';
 import { SegmentedToggle } from './segmented-toggle';
-import { OAuthDiscoveryPanel } from './oauth-discovery-panel';
 import { SessionPanel } from './session-panels';
 
 // Task 4348 S1 request pane: Params (schema form or raw JSON) / Auth / Headers for the selected capability.
@@ -37,8 +37,8 @@ export const McpDebuggerRequestPane: FC<{
   capabilities: Capability[];
   isConnected: boolean;
   uniqueKey: string;
-  environmentId: string;
-}> = ({ request, capability, session, tasks, subscription, trace, capabilities, isConnected, uniqueKey, environmentId }) => {
+  onOpenOAuth: () => void;
+}> = ({ request, capability, session, tasks, subscription, trace, capabilities, isConnected, uniqueKey, onOpenOAuth }) => {
   const [tab, setTab] = useState<'params' | 'auth' | 'headers'>('params');
   const [argsByCapability, setArgsByCapability] = useState<Record<string, Record<string, unknown>>>({});
   const [rawMode, setRawMode] = useState(false);
@@ -199,7 +199,7 @@ export const McpDebuggerRequestPane: FC<{
           authTypes={supportedAuthTypes}
           hideInherit
           addToHeaderOnly
-          belowToolbar={!authActive ? <OAuthDiscoveryPanel request={request} environmentId={environmentId} /> : undefined}
+          belowToolbar={!authActive || requestAuth?.type === 'bearer' ? <OAuthDiscoverButton onOpen={onOpenOAuth} isDisabled={!request.url} /> : undefined}
         />
       </TabPanel>
       <TabPanel id="headers" className="w-full flex-1 overflow-y-auto">

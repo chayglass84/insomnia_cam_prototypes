@@ -27,6 +27,18 @@ export interface OAuthTokens {
   scope?: string;
 }
 
+/**
+ * Reports each OAuth call to the Trace (one Call per exchange). `begin` is called as the request goes out, so a slow call
+ * shows as pending; the handle then settles it. The browser leg (authorize redirect and its callback) settles with
+ * `redirect` or `fail` since Insomnia never makes that HTTP request itself.
+ */
+export interface OAuthTraceHandle {
+  end: (exchange: OAuthExchange) => void;
+  redirect: (params: Record<string, string | undefined>, ok: boolean) => void;
+  fail: (status: 'error' | 'cancelled' | 'no-response', message: string) => void;
+}
+export type OAuthTrace = (label: string, request: OAuthExchange['request']) => OAuthTraceHandle;
+
 export interface OAuthStep {
   id: 'challenge' | 'protected-resource' | 'authorization-server' | 'registration' | 'authorize' | 'callback' | 'token' | 'verify' | 'refresh';
   title: string;
@@ -181,9 +193,20 @@ const parseBody = (contentType: string, text: string): unknown => {
   return text;
 };
 
-export const exchange = async (method: string, url: string, headers: Record<string, string>, body?: unknown): Promise<OAuthExchange> => {
+export const exchange = async (
+  method: string,
+  url: string,
+  headers: Record<string, string>,
+  body?: unknown,
+  tap?: { trace?: OAuthTrace; label: string },
+): Promise<OAuthExchange> => {
   const started = Date.now();
   const request = { method, url, headers, ...(body === undefined ? {} : { body }) };
+  const handle = tap?.trace?.(tap.label, request);
+  const finish = (result: OAuthExchange) => {
+    handle?.end(result);
+    return result;
+  };
   try {
     const res = await fetch(url, {
       method,
@@ -192,13 +215,13 @@ export const exchange = async (method: string, url: string, headers: Record<stri
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     const text = await res.text();
-    return {
+    return finish({
       request,
       response: { status: res.status, headers: headersToObject(res.headers), body: parseBody(res.headers.get('content-type') ?? '', text) },
       durationMs: Date.now() - started,
-    };
+    });
   } catch (error) {
-    return { request, error: error instanceof Error ? error.message : String(error), durationMs: Date.now() - started };
+    return finish({ request, error: error instanceof Error ? error.message : String(error), durationMs: Date.now() - started });
   }
 };
 
@@ -206,10 +229,10 @@ const isJsonObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /** Try each candidate URL until one answers 200 with a JSON object; every attempt is kept as an exchange. */
-const fetchMetadata = async (candidates: string[]) => {
+const fetchMetadata = async (candidates: string[], tap: { trace?: OAuthTrace; label: string }) => {
   const exchanges: OAuthExchange[] = [];
   for (const url of candidates) {
-    const ex = await exchange('GET', url, { accept: 'application/json' });
+    const ex = await exchange('GET', url, { accept: 'application/json' }, undefined, tap);
     exchanges.push(ex);
     if (ex.response?.status === 200 && isJsonObject(ex.response.body)) {
       return { exchanges, metadata: ex.response.body, url };
@@ -218,7 +241,15 @@ const fetchMetadata = async (candidates: string[]) => {
   return { exchanges, metadata: undefined, url: undefined };
 };
 
-export const discoverOAuth = async ({ url, headers = [] }: { url: string; headers?: { name: string; value: string }[] }): Promise<OAuthDiscoveryResult> => {
+export const discoverOAuth = async ({
+  url,
+  headers = [],
+  trace,
+}: {
+  url: string;
+  headers?: { name: string; value: string }[];
+  trace?: OAuthTrace;
+}): Promise<OAuthDiscoveryResult> => {
   const steps: OAuthStep[] = [];
   const customHeaders = Object.fromEntries(headers.filter(h => h.name.toLowerCase() !== 'authorization').map(h => [h.name, h.value]));
 
@@ -233,6 +264,7 @@ export const discoverOAuth = async ({ url, headers = [] }: { url: string; header
       method: 'initialize',
       params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'Insomnia', version: '0-prototype' } },
     },
+    { trace, label: STEP_TITLES.challenge },
   );
   const challengeFindings: OAuthFinding[] = [];
   const status = challengeEx.response?.status;
@@ -287,7 +319,7 @@ export const discoverOAuth = async ({ url, headers = [] }: { url: string; header
   }
 
   // Step 2: protected resource metadata, from the challenge when given, else the well-known candidates.
-  const prm = await fetchMetadata(resourceMetadataUrl ? [resourceMetadataUrl] : protectedResourceCandidates(url));
+  const prm = await fetchMetadata(resourceMetadataUrl ? [resourceMetadataUrl] : protectedResourceCandidates(url), { trace, label: STEP_TITLES['protected-resource'] });
   const prmFindings: OAuthFinding[] = [];
   const authServers = Array.isArray(prm.metadata?.authorization_servers)
     ? (prm.metadata.authorization_servers as unknown[]).filter((s): s is string => typeof s === 'string')
@@ -324,7 +356,7 @@ export const discoverOAuth = async ({ url, headers = [] }: { url: string; header
 
   // Step 3: authorization server metadata for the first issuer.
   const issuer = authServers[0];
-  const asm = await fetchMetadata(authorizationServerCandidates(issuer));
+  const asm = await fetchMetadata(authorizationServerCandidates(issuer), { trace, label: STEP_TITLES['authorization-server'] });
   const asmFindings: OAuthFinding[] = [];
   if (!asm.metadata) {
     asmFindings.push({ level: 'error', text: `No authorization server metadata found for ${issuer}.` });

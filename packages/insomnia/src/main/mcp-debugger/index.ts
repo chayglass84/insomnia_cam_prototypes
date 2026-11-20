@@ -1,9 +1,9 @@
 import { shell } from 'electron';
 
 import { ipcMainHandle } from '../ipc/electron';
+import { discoverOAuth } from './oauth-discovery';
 import { cancelAuthorization, runAuthorization } from './oauth-flow';
 import { exchangeCode, refreshToken } from './oauth-token';
-import { discoverOAuth } from './oauth-discovery';
 import { probeMcpServer } from './probe';
 import * as service from './service';
 
@@ -11,11 +11,11 @@ import * as service from './service';
 // entry.preload.ts + the channel list in ipc/electron.ts (see AGENTS.md "Electron IPC").
 export interface McpDebuggerBridgeAPI {
   probe: typeof probeMcpServer;
-  oauthDiscover: typeof discoverOAuth;
-  oauthAuthorize: (options: Omit<Parameters<typeof runAuthorization>[0], 'openUrl'>) => ReturnType<typeof runAuthorization>;
+  oauthDiscover: (options: Omit<Parameters<typeof discoverOAuth>[0], 'trace'> & { requestId: string }) => ReturnType<typeof discoverOAuth>;
+  oauthAuthorize: (options: Omit<Parameters<typeof runAuthorization>[0], 'openUrl' | 'trace'>) => ReturnType<typeof runAuthorization>;
   oauthCancel: typeof cancelAuthorization;
-  oauthExchange: typeof exchangeCode;
-  oauthRefresh: typeof refreshToken;
+  oauthExchange: (options: { requestId: string }) => ReturnType<typeof exchangeCode>;
+  oauthRefresh: (options: { requestId: string }) => ReturnType<typeof refreshToken>;
   connect: typeof service.connect;
   disconnect: typeof service.disconnect;
   getState: (options: Parameters<typeof service.getState>[0]) => Promise<ReturnType<typeof service.getState>>;
@@ -34,13 +34,15 @@ export interface McpDebuggerBridgeAPI {
 
 export const registerMcpDebuggerHandlers = () => {
   ipcMainHandle('mcpDebugger.probe', (_, o: Parameters<typeof probeMcpServer>[0]) => probeMcpServer(o));
-  ipcMainHandle('mcpDebugger.oauthDiscover', (_, o: Parameters<typeof discoverOAuth>[0]) => discoverOAuth(o));
-  ipcMainHandle('mcpDebugger.oauthAuthorize', (_, o: Omit<Parameters<typeof runAuthorization>[0], 'openUrl'>) =>
-    runAuthorization({ ...o, openUrl: url => shell.openExternal(url) }),
+  ipcMainHandle('mcpDebugger.oauthDiscover', (_, o: Omit<Parameters<typeof discoverOAuth>[0], 'trace'> & { requestId: string }) =>
+    discoverOAuth({ ...o, trace: service.oauthTraceFor(o.requestId) }),
+  );
+  ipcMainHandle('mcpDebugger.oauthAuthorize', (_, o: Omit<Parameters<typeof runAuthorization>[0], 'openUrl' | 'trace'>) =>
+    runAuthorization({ ...o, openUrl: url => shell.openExternal(url), trace: service.oauthTraceFor(o.requestId) }),
   );
   ipcMainHandle('mcpDebugger.oauthCancel', (_, o: Parameters<typeof cancelAuthorization>[0]) => cancelAuthorization(o));
-  ipcMainHandle('mcpDebugger.oauthExchange', (_, o: Parameters<typeof exchangeCode>[0]) => exchangeCode(o));
-  ipcMainHandle('mcpDebugger.oauthRefresh', (_, o: Parameters<typeof refreshToken>[0]) => refreshToken(o));
+  ipcMainHandle('mcpDebugger.oauthExchange', (_, o: { requestId: string }) => exchangeCode({ ...o, trace: service.oauthTraceFor(o.requestId) }));
+  ipcMainHandle('mcpDebugger.oauthRefresh', (_, o: { requestId: string }) => refreshToken({ ...o, trace: service.oauthTraceFor(o.requestId) }));
   ipcMainHandle('mcpDebugger.connect', (_, o: Parameters<typeof service.connect>[0]) => service.connect(o));
   ipcMainHandle('mcpDebugger.disconnect', (_, o: Parameters<typeof service.disconnect>[0]) => service.disconnect(o));
   ipcMainHandle('mcpDebugger.getState', (_, o: Parameters<typeof service.getState>[0]) => service.getState(o));
