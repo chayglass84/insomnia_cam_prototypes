@@ -273,6 +273,7 @@ async function handleAuthorize(req, res) {
   const codeChallenge = url.searchParams.get("code_challenge");
   const codeChallengeMethod = url.searchParams.get("code_challenge_method");
   const resource = url.searchParams.get("resource");
+  const scopeParam = url.searchParams.get("scope");
 
   if (!clientId || !redirectUri || !state || !codeChallenge || codeChallengeMethod !== "S256") {
     res.writeHead(400, { "Content-Type": "text/plain" });
@@ -358,6 +359,7 @@ async function handleAuthorize(req, res) {
     codeChallenge,
     redirectUri,
     resource: resource ?? null,
+    scope: scopeParam ?? null,
   });
 
   const callbackUrl = new URL(redirectUri);
@@ -415,14 +417,15 @@ async function handleToken(req, res) {
     const expiresIn = flags.shortTtl ? SHORT_TTL_SECONDS : 3600;
     const expiresAt = Date.now() + expiresIn * 1000;
 
-    accessTokens.set(accessToken, { clientId, resource: stored.resource, expiresAt });
-    refreshTokens.set(refreshToken, { clientId, resource: stored.resource });
+    accessTokens.set(accessToken, { clientId, resource: stored.resource, expiresAt, scope: stored.scope });
+    refreshTokens.set(refreshToken, { clientId, resource: stored.resource, scope: stored.scope });
 
     writeJson(res, 200, {
       access_token: accessToken,
       token_type: "Bearer",
       expires_in: expiresIn,
       refresh_token: refreshToken,
+      ...(stored.scope ? { scope: stored.scope } : {}),
     });
     return;
   }
@@ -455,14 +458,15 @@ async function handleToken(req, res) {
     const expiresIn = flags.shortTtl ? SHORT_TTL_SECONDS : 3600;
     const expiresAt = Date.now() + expiresIn * 1000;
 
-    accessTokens.set(newAccessToken, { clientId, resource: stored.resource, expiresAt });
-    refreshTokens.set(newRefreshToken, { clientId, resource: stored.resource });
+    accessTokens.set(newAccessToken, { clientId, resource: stored.resource, expiresAt, scope: stored.scope });
+    refreshTokens.set(newRefreshToken, { clientId, resource: stored.resource, scope: stored.scope });
 
     writeJson(res, 200, {
       access_token: newAccessToken,
       token_type: "Bearer",
       expires_in: expiresIn,
       refresh_token: newRefreshToken,
+      ...(stored.scope ? { scope: stored.scope } : {}),
     });
     return;
   }
@@ -482,7 +486,7 @@ function handleIntrospect(req, res) {
     return writeJson(res, 200, { active: false });
   }
   const active = data.expiresAt > Date.now();
-  writeJson(res, 200, { active, client_id: data.clientId, resource: data.resource });
+  writeJson(res, 200, { active, client_id: data.clientId, resource: data.resource, scope: data.scope ?? undefined });
 }
 
 /**

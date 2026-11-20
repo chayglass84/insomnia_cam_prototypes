@@ -33,6 +33,11 @@ export const baseMcpRequestSettingsSchema = z.object({
   // 4348: 'auto' | an MCP protocol version (see insomnia/src/common/mcp-debugger/versions.ts). Optional, so no migration
   // is needed; absent means 'auto'. Kept a plain string because insomnia-data can't import from the app package.
   protocolVersion: z.string().optional(),
+  // 4348 (S5): OAuth clients the user saved from the OAuth wizard, so a registration is remembered and reusable. Optional
+  // (no migration); must also be in optionalKeys below. PROTOTYPE-MOCK: lives on the request, not keyed globally per issuer.
+  oauthClients: z
+    .array(z.object({ id: z.string(), name: z.string(), issuer: z.string(), clientId: z.string() }))
+    .optional(),
 });
 export const baseMcpRequestSchema = z.object({
   url: z.string().optional().default(''),
@@ -77,4 +82,4 @@ export function init(): BaseMcpRequest {
 }
 
 // 4348: protocolVersion must be listed here or initModel prunes it on every save (it is not in init()).
-export const optionalKeys: (keyof BaseMcpRequest)[] = ['disableUserAgentHeader', 'protocolVersion'];
+export const optionalKeys: (keyof BaseMcpRequest)[] = ['disableUserAgentHeader', 'protocolVersion', 'oauthClients'];

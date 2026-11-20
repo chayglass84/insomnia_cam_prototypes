@@ -23,6 +23,8 @@ export interface PendingExchange {
   clientId: string;
   redirectUri: string;
   context: OAuthContext;
+  /** The scope actually requested (a step-up asks for more than `context.scope`), to compare with what is granted. */
+  scope?: string;
 }
 const pendingExchanges = new Map<string, PendingExchange>();
 export const takePendingExchange = (requestId: string) => {
@@ -221,6 +223,10 @@ const register = async (context: OAuthContext, redirectUri: string, clientIdInpu
   };
 };
 
+/** Space-separated union of two scope strings, order kept, duplicates dropped. */
+export const unionScopes = (...scopes: (string | undefined)[]) =>
+  [...new Set(scopes.flatMap(scope => (scope ?? '').split(/\s+/)).filter(Boolean))].join(' ') || undefined;
+
 export interface AuthorizeOptions {
   requestId: string;
   context: OAuthContext;
@@ -229,11 +235,13 @@ export interface AuthorizeOptions {
   /** Opens the authorization URL in the user's browser. Injected so tests can stand in for the browser. */
   openUrl: (url: string) => void | Promise<void>;
   timeoutMs?: number;
+  /** Overrides the scope to request (step-up asks for the union of what it has and what the server wants). */
+  scope?: string;
   /** Reports each call to the Trace (S5 follow-up). */
   trace?: OAuthTrace;
 }
 
-export const runAuthorization = async ({ requestId, context, clientId: clientIdInput, openUrl, timeoutMs = DEFAULT_TIMEOUT_MS, trace }: AuthorizeOptions): Promise<OAuthStep[]> => {
+export const runAuthorization = async ({ requestId, context, clientId: clientIdInput, openUrl, timeoutMs = DEFAULT_TIMEOUT_MS, scope: scopeOverride, trace }: AuthorizeOptions): Promise<OAuthStep[]> => {
   inFlight.get(requestId)?.abort();
   pendingExchanges.delete(requestId);
   const controller = new AbortController();
@@ -243,6 +251,9 @@ export const runAuthorization = async ({ requestId, context, clientId: clientIdI
   const listener = await listenForCallback();
   try {
     const registration = await register(context, listener.redirectUri, clientIdInput?.trim() || undefined, trace);
+    if (registration.clientId && registration.step.status !== 'error') {
+      registration.step.clientId = registration.clientId;
+    }
     steps.push(registration.step);
     if (!registration.clientId || registration.step.status === 'error') {
       return steps;
@@ -263,7 +274,7 @@ export const runAuthorization = async ({ requestId, context, clientId: clientIdI
       code_challenge: challenge,
       code_challenge_method: 'S256',
       resource: context.resource,
-      scope: context.scope,
+      scope: scopeOverride ?? context.scope,
     };
     for (const [key, value] of Object.entries(params)) {
       if (value) {
@@ -276,7 +287,9 @@ export const runAuthorization = async ({ requestId, context, clientId: clientIdI
       context.resource
         ? { level: 'info', text: `resource=${context.resource} (RFC 8707) binds the token to this MCP server.` }
         : { level: 'warn', text: 'The protected resource metadata gave no resource, so no resource parameter was sent.' },
-      context.scope ? { level: 'info', text: `scope=${context.scope}` } : { level: 'info', text: 'No scope requested.' },
+      (scopeOverride ?? context.scope)
+        ? { level: 'info', text: `scope=${scopeOverride ?? context.scope}` }
+        : { level: 'info', text: 'No scope requested.' },
     ];
     // The browser leg is one Call: the request is the authorize URL we open, the reply is the redirect that comes back.
     const browserCall = trace?.(STEP_TITLES.authorize, { method: 'GET', url: authorizeUrl.toString(), headers: {} });
@@ -300,7 +313,7 @@ export const runAuthorization = async ({ requestId, context, clientId: clientIdI
     const status = statusOf(findings);
     browserCall?.redirect(callback as Record<string, string | undefined>, status !== 'error');
     if (status !== 'error' && callback.code) {
-      pendingExchanges.set(requestId, { code: callback.code, verifier, clientId: registration.clientId, redirectUri: listener.redirectUri, context });
+      pendingExchanges.set(requestId, { code: callback.code, verifier, clientId: registration.clientId, redirectUri: listener.redirectUri, context, scope: scopeOverride ?? context.scope });
     }
     steps.push(step('callback', status, status === 'error' ? 'Rejected' : 'Code received', [{ level: 'info', text: `Callback: ${JSON.stringify({ ...callback, code: callback.code ? `${callback.code.slice(0, 6)}…` : undefined })}` }, ...findings]));
     return steps;

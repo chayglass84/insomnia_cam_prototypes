@@ -48,6 +48,10 @@ export interface OAuthStep {
   exchanges: OAuthExchange[];
   findings: OAuthFinding[];
   tokens?: OAuthTokens;
+  /** Set by the verify step on a 403 insufficient_scope: the scope the server wants. The UI offers to authorize again with it. */
+  stepUp?: { scope: string };
+  /** Set by the registration step: the client_id in use, so the UI can offer to save it. */
+  clientId?: string;
 }
 
 /** What discovery learned, handed to the authorization flow (S5b) so it does not have to rediscover. */

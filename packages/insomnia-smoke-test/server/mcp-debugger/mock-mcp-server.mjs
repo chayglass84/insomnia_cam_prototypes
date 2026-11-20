@@ -314,18 +314,19 @@ function unauthorized(res) {
  * For speed, we accept any non-empty Authorization: Bearer header that the authorization
  * server would accept — we rely on the mock authorization server introspect to confirm.
  */
-function writeOauthUnauthorized(res) {
+function writeOauthUnauthorized(res, scope) {
   writeJson(
     res,
     401,
     { error: "unauthorized" },
     {
-      "WWW-Authenticate": `Bearer realm="mock-mcp-server", resource_metadata="${mockAuthorizationServerOrigin}/.well-known/oauth-protected-resource"`,
+      "WWW-Authenticate": `Bearer realm="mock-mcp-server", resource_metadata="${mockAuthorizationServerOrigin}/.well-known/oauth-protected-resource"${scope ? `, scope="${scope}"` : ""}`,
     },
   );
 }
 
-async function introspectToken(token) {
+/** Introspection result ({ active, scope, ... }) or null when the authorization server could not be reached. */
+async function introspectTokenInfo(token) {
   return new Promise((resolve) => {
     const url = `${mockAuthorizationServerOrigin}/introspect?token=${encodeURIComponent(token)}`;
     const req = http.get(url, (res) => {
@@ -333,15 +334,18 @@ async function introspectToken(token) {
       res.on("data", (c) => chunks.push(c));
       res.on("end", () => {
         try {
-          const body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-          resolve(body.active === true);
+          resolve(JSON.parse(Buffer.concat(chunks).toString("utf8")));
         } catch {
-          resolve(false);
+          resolve(null);
         }
       });
     });
-    req.on("error", () => resolve(false));
+    req.on("error", () => resolve(null));
   });
+}
+
+async function introspectToken(token) {
+  return (await introspectTokenInfo(token))?.active === true;
 }
 
 // ---------------------------------------------------------------------------
@@ -739,6 +743,34 @@ async function handler(req, res) {
       const valid = await introspectToken(match[1]);
       if (!valid) {
         writeOauthUnauthorized(res);
+        return;
+      }
+      await handleLegacy(req, res);
+      return;
+    }
+
+    // 4348 step-up: asks for scope "read" on the first 401, accepts any valid token on initialize-level traffic only when
+    // it carries "admin"; a token with just "read" gets 403 insufficient_scope naming "admin" (RFC 6750 s3.1).
+    if (req.url === "/oauth-protected-admin") {
+      const match = (req.headers.authorization ?? "").match(/^Bearer (.+)$/i);
+      if (!match) {
+        writeOauthUnauthorized(res, "read");
+        return;
+      }
+      const info = await introspectTokenInfo(match[1]);
+      if (info?.active !== true) {
+        writeOauthUnauthorized(res, "read");
+        return;
+      }
+      if (!String(info.scope ?? "").split(/\s+/).includes("admin")) {
+        writeJson(
+          res,
+          403,
+          { error: "insufficient_scope" },
+          {
+            "WWW-Authenticate": `Bearer error="insufficient_scope", scope="admin", resource_metadata="${mockAuthorizationServerOrigin}/.well-known/oauth-protected-resource"`,
+          },
+        );
         return;
       }
       await handleLegacy(req, res);

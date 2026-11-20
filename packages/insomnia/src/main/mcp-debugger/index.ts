@@ -2,17 +2,20 @@ import { shell } from 'electron';
 
 import { ipcMainHandle } from '../ipc/electron';
 import { discoverOAuth } from './oauth-discovery';
-import { cancelAuthorization, runAuthorization } from './oauth-flow';
-import { exchangeCode, refreshToken } from './oauth-token';
+import { cancelAuthorization, runAuthorization, unionScopes } from './oauth-flow';
+import { exchangeCode, refreshToken, storedScope } from './oauth-token';
 import { probeMcpServer } from './probe';
 import * as service from './service';
 
 // Task 4348 main-process entry. Each function is plain; expose new ones through McpDebuggerBridgeAPI +
 // entry.preload.ts + the channel list in ipc/electron.ts (see AGENTS.md "Electron IPC").
+/** `addScope` is the step-up request: ask again for the stored token's scope plus this one. */
+export type OAuthAuthorizeIpcOptions = Omit<Parameters<typeof runAuthorization>[0], 'openUrl' | 'trace' | 'scope'> & { addScope?: string };
+
 export interface McpDebuggerBridgeAPI {
   probe: typeof probeMcpServer;
   oauthDiscover: (options: Omit<Parameters<typeof discoverOAuth>[0], 'trace'> & { requestId: string }) => ReturnType<typeof discoverOAuth>;
-  oauthAuthorize: (options: Omit<Parameters<typeof runAuthorization>[0], 'openUrl' | 'trace'>) => ReturnType<typeof runAuthorization>;
+  oauthAuthorize: (options: OAuthAuthorizeIpcOptions) => ReturnType<typeof runAuthorization>;
   oauthCancel: typeof cancelAuthorization;
   oauthExchange: (options: { requestId: string }) => ReturnType<typeof exchangeCode>;
   oauthRefresh: (options: { requestId: string }) => ReturnType<typeof refreshToken>;
@@ -37,8 +40,13 @@ export const registerMcpDebuggerHandlers = () => {
   ipcMainHandle('mcpDebugger.oauthDiscover', (_, o: Omit<Parameters<typeof discoverOAuth>[0], 'trace'> & { requestId: string }) =>
     discoverOAuth({ ...o, trace: service.oauthTraceFor(o.requestId) }),
   );
-  ipcMainHandle('mcpDebugger.oauthAuthorize', (_, o: Omit<Parameters<typeof runAuthorization>[0], 'openUrl' | 'trace'>) =>
-    runAuthorization({ ...o, openUrl: url => shell.openExternal(url), trace: service.oauthTraceFor(o.requestId) }),
+  ipcMainHandle('mcpDebugger.oauthAuthorize', (_, { addScope, ...o }: OAuthAuthorizeIpcOptions) =>
+    runAuthorization({
+      ...o,
+      scope: addScope ? unionScopes(storedScope(o) ?? o.context.scope, addScope) : undefined,
+      openUrl: url => shell.openExternal(url),
+      trace: service.oauthTraceFor(o.requestId),
+    }),
   );
   ipcMainHandle('mcpDebugger.oauthCancel', (_, o: Parameters<typeof cancelAuthorization>[0]) => cancelAuthorization(o));
   ipcMainHandle('mcpDebugger.oauthExchange', (_, o: { requestId: string }) => exchangeCode({ ...o, trace: service.oauthTraceFor(o.requestId) }));

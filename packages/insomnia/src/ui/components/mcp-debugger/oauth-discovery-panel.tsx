@@ -3,7 +3,9 @@ import React, { type FC, useEffect, useState } from 'react';
 import { Button, Dialog, Heading, Input, Modal, ModalOverlay, TextField, Tooltip, TooltipTrigger } from 'react-aria-components';
 
 import { decodeJwt, JWT_TIME_CLAIMS } from '~/common/mcp-debugger/jwt';
+import { clientsForIssuer, forgetClient, isClientSaved, saveClient } from '~/common/mcp-debugger/oauth-clients';
 import type { OAuthDiscoveryResult, OAuthExchange, OAuthStep, OAuthStepStatus, OAuthTokens } from '~/main/mcp-debugger/oauth-discovery';
+import { Dropdown, DropdownItem, DropdownSection, ItemContent } from '~/ui/components/base/dropdown';
 import { Icon } from '~/ui/components/icon';
 import { useRequestPatcher } from '~/ui/hooks/use-request';
 import { tryToInterpolateRequestAndCollectSensitiveValues } from '~/ui/utils/try-interpolate';
@@ -135,7 +137,7 @@ const TokenCard: FC<{ tokens: OAuthTokens }> = ({ tokens }) => {
   );
 };
 
-const StepView: FC<{ step: OAuthStep }> = ({ step }) => (
+const StepView: FC<{ step: OAuthStep; onStepUp?: (scope: string) => void; stepUpDisabled?: boolean }> = ({ step, onStepUp, stepUpDisabled }) => (
   <li className="flex flex-col gap-1.5 border-b border-solid border-(--hl-md) px-3 py-2" data-testid="mcp-oauth-step" data-step={step.id}>
     <div className="flex items-center gap-2 text-sm">
       <span className={`h-2 w-2 shrink-0 rounded-full ${DOT[step.status]}`} />
@@ -154,6 +156,18 @@ const StepView: FC<{ step: OAuthStep }> = ({ step }) => (
       </ul>
     )}
     {step.tokens && <TokenCard tokens={step.tokens} />}
+    {step.stepUp && onStepUp && (
+      <div className="pl-4">
+        <Button
+          className="rounded-sm bg-(--color-surprise) px-(--padding-md) py-1 text-xs text-(--color-font-surprise) hover:brightness-75 disabled:opacity-50"
+          onPress={() => onStepUp(step.stepUp!.scope)}
+          isDisabled={stepUpDisabled}
+          data-testid="mcp-oauth-step-up"
+        >
+          Authorize again with “{step.stepUp.scope}”
+        </Button>
+      </div>
+    )}
     {step.exchanges.length > 0 && (
       <details className="pl-4">
         <summary className="cursor-pointer text-xs text-(--hl)">
@@ -263,7 +277,10 @@ export const OAuthWizardModal: FC<{
   const [failure, setFailure] = useState<string | null>(null);
   const [flowSteps, setFlowSteps] = useState<OAuthStep[]>([]);
   const [authorizing, setAuthorizing] = useState(false);
-  const [clientId, setClientId] = useState('');
+  // Which client Step 2 uses: 'auto' (register a new one), 'custom' (typed client ID or CIMD URL), or a saved client's id.
+  const [clientChoice, setClientChoice] = useState('auto');
+  const [customClientId, setCustomClientId] = useState('');
+  const [saveName, setSaveName] = useState('');
   const [tokenSteps, setTokenSteps] = useState<OAuthStep[]>([]);
   const [gettingToken, setGettingToken] = useState(false);
 
@@ -285,7 +302,13 @@ export const OAuthWizardModal: FC<{
     }
   };
 
-  const authorize = async () => {
+  const issuer = result?.context?.authorizationServer.issuer;
+  const savedClients = clientsForIssuer(request.oauthClients, issuer);
+  const selectedSaved = savedClients.find(client => client.id === clientChoice);
+  const chosenClientId = clientChoice === 'auto' ? '' : clientChoice === 'custom' ? customClientId : (selectedSaved?.clientId ?? '');
+
+  /** Step 2. `addScope` is a step-up: ask again for what we have plus that scope, then go straight on to the token. */
+  const authorize = async (addScope?: string) => {
     if (!result?.context) {
       return;
     }
@@ -293,12 +316,23 @@ export const OAuthWizardModal: FC<{
     setFailure(null);
     setFlowSteps([]);
     setTokenSteps([]);
+    let codeReady = false;
     try {
-      setFlowSteps(await window.main.mcpDebugger.oauthAuthorize({ requestId: request._id, context: result.context, clientId }));
+      const steps = await window.main.mcpDebugger.oauthAuthorize({
+        requestId: request._id,
+        context: result.context,
+        clientId: chosenClientId,
+        addScope,
+      });
+      setFlowSteps(steps);
+      codeReady = steps.some(step => step.id === 'callback' && step.status !== 'error');
     } catch (error) {
       setFailure(error instanceof Error ? error.message : String(error));
     } finally {
       setAuthorizing(false);
+    }
+    if (addScope && codeReady) {
+      await runToken(() => window.main.mcpDebugger.oauthExchange({ requestId: request._id }));
     }
   };
 
@@ -347,6 +381,8 @@ export const OAuthWizardModal: FC<{
   };
 
   const canAuthorize = !!result?.context && !running;
+  // The client_id the last Step 2 ended up using (a fresh registration, a typed one, or a saved one), so it can be saved.
+  const registeredClientId = flowSteps.find(step => step.id === 'registration')?.clientId;
   const discoverySummary = summarizeSteps(result?.steps ?? [], 3, { active: running ? 'Running…' : undefined, idle: 'Not started' });
   const codeReady = flowSteps.some(step => step.id === 'callback' && step.status !== 'error');
   const hasToken = tokenSteps.some(step => (step.id === 'token' || step.id === 'refresh') && step.status !== 'error');
@@ -412,7 +448,7 @@ export const OAuthWizardModal: FC<{
                       <TooltipTrigger delay={200}>
                         <Button
                           className={purpleButton}
-                          onPress={authorizing ? () => window.main.mcpDebugger.oauthCancel({ requestId: request._id }) : authorize}
+                          onPress={authorizing ? () => window.main.mcpDebugger.oauthCancel({ requestId: request._id }) : () => authorize()}
                           isDisabled={!authorizing && !canAuthorize}
                           data-testid="mcp-oauth-authorize"
                         >
@@ -428,14 +464,99 @@ export const OAuthWizardModal: FC<{
                   >
                     {canAuthorize || authorizing || flowSteps.length > 0 ? (
                       <>
-                        <div className="px-3 py-2">
-                          <TextField aria-label="Client ID" value={clientId} onChange={setClientId} isDisabled={authorizing}>
-                            <Input
-                              placeholder="Client ID or CIMD URL (blank = register automatically)"
-                              className="w-full rounded-xs border border-solid border-(--hl-md) bg-transparent px-2 py-1 text-xs"
-                              data-testid="mcp-oauth-client-id"
-                            />
-                          </TextField>
+                        <div className="flex flex-col gap-2 px-3 py-2">
+                          <div className="flex items-center gap-2 text-xs">
+                            <span className="text-(--hl)">Client</span>
+                            <Dropdown
+                              triggerButton={
+                                <Button
+                                  aria-label="OAuth client"
+                                  className={`flex items-center gap-1 rounded-xs border border-solid border-(--hl-md) px-2 py-0.5 ${authorizing ? 'opacity-50' : ''}`}
+                                  data-testid="mcp-oauth-client-picker"
+                                >
+                                  <span>
+                                    {clientChoice === 'auto'
+                                      ? 'Register a new client'
+                                      : clientChoice === 'custom'
+                                        ? 'Enter a client ID…'
+                                        : (selectedSaved?.name ?? 'Register a new client')}
+                                  </span>
+                                  <i className="fa fa-caret-down" />
+                                </Button>
+                              }
+                              placement="bottom start"
+                              isDisabled={authorizing}
+                            >
+                              <DropdownSection>
+                                <DropdownItem key="auto">
+                                  <ItemContent label="Register a new client" isSelected={clientChoice === 'auto'} onClick={() => setClientChoice('auto')} />
+                                </DropdownItem>
+                                <DropdownItem key="custom">
+                                  <ItemContent label="Enter a client ID or CIMD URL…" isSelected={clientChoice === 'custom'} onClick={() => setClientChoice('custom')} />
+                                </DropdownItem>
+                              </DropdownSection>
+                              <DropdownSection aria-label="Saved clients" title={savedClients.length > 0 ? 'Saved clients' : undefined}>
+                                {savedClients.map(client => (
+                                  <DropdownItem key={client.id}>
+                                    <ItemContent
+                                      label={`${client.name} · ${client.clientId}`}
+                                      isSelected={clientChoice === client.id}
+                                      onClick={() => setClientChoice(client.id)}
+                                    />
+                                  </DropdownItem>
+                                ))}
+                              </DropdownSection>
+                            </Dropdown>
+                            {selectedSaved && (
+                              <Button
+                                className={smallButton}
+                                onPress={() => {
+                                  patchRequest(request._id, { oauthClients: forgetClient(request.oauthClients, selectedSaved.id) });
+                                  setClientChoice('auto');
+                                }}
+                                isDisabled={authorizing}
+                                data-testid="mcp-oauth-forget-client"
+                              >
+                                Forget
+                              </Button>
+                            )}
+                          </div>
+                          {clientChoice === 'custom' && (
+                            <TextField aria-label="Client ID or CIMD URL" value={customClientId} onChange={setCustomClientId} isDisabled={authorizing}>
+                              <Input
+                                placeholder="A pre-registered client ID, or the https URL of a client metadata document (CIMD)"
+                                className="w-full rounded-xs border border-solid border-(--hl-md) bg-transparent px-2 py-1 text-xs"
+                                data-testid="mcp-oauth-client-id"
+                              />
+                            </TextField>
+                          )}
+                          {registeredClientId && !isClientSaved(request.oauthClients, issuer, registeredClientId) && (
+                            <div className="flex items-center gap-2 text-xs" data-testid="mcp-oauth-save-client">
+                              <span className="text-(--hl)">Remember {registeredClientId}?</span>
+                              <TextField aria-label="Client name" value={saveName} onChange={setSaveName} className="min-w-0 flex-1">
+                                <Input
+                                  placeholder="Name it (e.g. Read-only client)"
+                                  className="w-full rounded-xs border border-solid border-(--hl-md) bg-transparent px-2 py-0.5 text-xs"
+                                  data-testid="mcp-oauth-save-client-name"
+                                />
+                              </TextField>
+                              <Button
+                                className={smallButton}
+                                onPress={() => {
+                                  if (!issuer) {
+                                    return;
+                                  }
+                                  const saved = saveClient(request.oauthClients, { name: saveName, issuer, clientId: registeredClientId }, () => crypto.randomUUID());
+                                  patchRequest(request._id, { oauthClients: saved });
+                                  setClientChoice(saved.find(client => client.issuer === issuer && client.clientId === registeredClientId)?.id ?? 'auto');
+                                  setSaveName('');
+                                }}
+                                data-testid="mcp-oauth-save-client-button"
+                              >
+                                Save client
+                              </Button>
+                            </div>
+                          )}
                         </div>
                         {authorizing && (
                           <p className="px-3 pb-2 text-xs text-(--hl)" data-testid="mcp-oauth-waiting">
@@ -491,7 +612,12 @@ export const OAuthWizardModal: FC<{
                     {tokenSteps.length > 0 ? (
                       <ol className="flex flex-col">
                         {tokenSteps.map(step => (
-                          <StepView key={step.id} step={step} />
+                          <StepView
+                            key={step.id}
+                            step={step}
+                            onStepUp={scope => authorize(scope)}
+                            stepUpDisabled={authorizing || gettingToken}
+                          />
                         ))}
                       </ol>
                     ) : (

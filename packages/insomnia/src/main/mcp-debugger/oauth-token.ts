@@ -17,6 +17,9 @@ interface TokenSet {
 }
 const tokens = new Map<string, TokenSet>();
 
+/** The scope of the stored token, for asking for more of it (step-up). */
+export const storedScope = ({ requestId }: { requestId: string }) => tokens.get(requestId)?.scope;
+
 export const hasToken = ({ requestId }: { requestId: string }) => tokens.has(requestId);
 export const clearToken = ({ requestId }: { requestId: string }) => {
   tokens.delete(requestId);
@@ -115,11 +118,16 @@ export const verifyToken = async (accessToken: string, serverUrl: string, trace?
   const reason = challenge?.params.error;
   const findings: OAuthFinding[] = [];
   if (status === 403 && reason === 'insufficient_scope') {
+    const wanted = challenge?.params.scope;
     findings.push({
       level: 'warn',
-      text: `Step-up needed: the server wants scope "${challenge?.params.scope ?? '(not stated)'}". Authorize again requesting it.`,
+      text: `Step-up needed: the server wants scope "${wanted ?? '(not stated)'}". Authorize again requesting it (keeping what you already have).`,
     });
-    return step('verify', 'warn', '403 insufficient_scope', findings, [ex]);
+    const stepUpStep = step('verify', 'warn', '403 insufficient_scope', findings, [ex]);
+    if (wanted) {
+      stepUpStep.stepUp = { scope: wanted };
+    }
+    return stepUpStep;
   }
   findings.push({ level: 'error', text: `The server answered ${status}${reason ? ` (error=${reason}${challenge?.params.error_description ? `: ${challenge.params.error_description}` : ''})` : ''}.` });
   return step('verify', 'error', `${status}: the server rejected the token`, findings, [ex]);
@@ -149,7 +157,7 @@ export const exchangeCode = async ({ requestId, trace }: { requestId: string; tr
     }),
     { trace, label: STEP_TITLES.token },
   );
-  const { tokenSet, findings } = readTokenResponse(ex, { requestedScope: context.scope });
+  const { tokenSet, findings } = readTokenResponse(ex, { requestedScope: pending.scope });
   const tokenStep = step('token', findings.some(f => f.level === 'error') ? 'error' : findings.some(f => f.level === 'warn') ? 'warn' : 'ok', tokenSet ? 'Token issued' : 'Rejected', findings, [ex]);
   if (!tokenSet || tokenStep.status === 'error') {
     return [tokenStep];
