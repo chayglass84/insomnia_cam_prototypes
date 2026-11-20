@@ -91,6 +91,7 @@ export const McpDebuggerShell = ({ request }: { request: McpRequest }) => {
                   capabilities={state.capabilities}
                   isConnected={isConnected}
                   uniqueKey={uniqueKey}
+                  environmentId={activeEnvironment?._id || ''}
                 />
               </ErrorBoundary>
             </Panel>

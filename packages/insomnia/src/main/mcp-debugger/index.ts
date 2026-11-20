@@ -1,4 +1,5 @@
 import { ipcMainHandle } from '../ipc/electron';
+import { discoverOAuth } from './oauth-discovery';
 import { probeMcpServer } from './probe';
 import * as service from './service';
 
@@ -6,6 +7,7 @@ import * as service from './service';
 // entry.preload.ts + the channel list in ipc/electron.ts (see AGENTS.md "Electron IPC").
 export interface McpDebuggerBridgeAPI {
   probe: typeof probeMcpServer;
+  oauthDiscover: typeof discoverOAuth;
   connect: typeof service.connect;
   disconnect: typeof service.disconnect;
   getState: (options: Parameters<typeof service.getState>[0]) => Promise<ReturnType<typeof service.getState>>;
@@ -24,6 +26,7 @@ export interface McpDebuggerBridgeAPI {
 
 export const registerMcpDebuggerHandlers = () => {
   ipcMainHandle('mcpDebugger.probe', (_, o: Parameters<typeof probeMcpServer>[0]) => probeMcpServer(o));
+  ipcMainHandle('mcpDebugger.oauthDiscover', (_, o: Parameters<typeof discoverOAuth>[0]) => discoverOAuth(o));
   ipcMainHandle('mcpDebugger.connect', (_, o: Parameters<typeof service.connect>[0]) => service.connect(o));
   ipcMainHandle('mcpDebugger.disconnect', (_, o: Parameters<typeof service.disconnect>[0]) => service.disconnect(o));
   ipcMainHandle('mcpDebugger.getState', (_, o: Parameters<typeof service.getState>[0]) => service.getState(o));

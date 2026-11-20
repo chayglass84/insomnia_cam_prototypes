@@ -118,6 +118,7 @@ const mcp: McpBridgeAPI = {
 
 const mcpDebugger: McpDebuggerBridgeAPI = {
   probe: options => invokeWithNormalizedError('mcpDebugger.probe', options),
+  oauthDiscover: options => invokeWithNormalizedError('mcpDebugger.oauthDiscover', options),
   connect: options => invokeWithNormalizedError('mcpDebugger.connect', options),
   disconnect: options => invokeWithNormalizedError('mcpDebugger.disconnect', options),
   getState: options => invokeWithNormalizedError('mcpDebugger.getState', options),

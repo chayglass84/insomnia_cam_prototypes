@@ -27,7 +27,9 @@ export const AuthWrapper: FC<{
   hideInherit?: boolean;
   showMcpAuthFlow?: boolean;
   addToHeaderOnly?: boolean;
-}> = ({ authentication, disabled = false, authTypes, hideOthers, hideInherit, showMcpAuthFlow, addToHeaderOnly }) => {
+  /** Rendered directly under the auth type dropdown (4348 MCP OAuth discovery). */
+  belowToolbar?: ReactNode;
+}> = ({ authentication, disabled = false, authTypes, hideOthers, hideInherit, showMcpAuthFlow, addToHeaderOnly, belowToolbar }) => {
   const type = getAuthObjectOrNull(authentication)?.type || '';
   let authBody: ReactNode = null;
 
@@ -79,6 +81,7 @@ export const AuthWrapper: FC<{
       <Toolbar className="flex h-(--line-height-sm) w-full shrink-0 items-center border-b border-solid border-(--hl-md) px-2">
         <AuthDropdown authTypes={authTypes} hideOthers={hideOthers} hideInherit={hideInherit} disabled={disabled} />
       </Toolbar>
+      {belowToolbar}
       <div className="flex-1 overflow-y-auto">{authBody}</div>
     </>
   );

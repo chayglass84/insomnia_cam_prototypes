@@ -121,6 +121,7 @@ export type HandleChannels =
   | 'llm.updateBackendConfig'
   | 'mcp.client.cancelRequest'
   | 'mcpDebugger.probe'
+  | 'mcpDebugger.oauthDiscover'
   | 'mcpDebugger.connect'
   | 'mcpDebugger.disconnect'
   | 'mcpDebugger.getState'
