@@ -95,13 +95,12 @@ describe('discoverOAuth against a local server', () => {
   });
   afterAll(() => server.close());
 
-  it('walks challenge, PRM, AS metadata and verdict', async () => {
+  it('walks challenge, PRM and AS metadata with its verdict', async () => {
     const result = await discoverOAuth({ url: `${origin}/mcp` });
     expect(result.steps.map(s => [s.id, s.status])).toEqual([
       ['challenge', 'ok'],
       ['protected-resource', 'ok'],
-      ['authorization-server', 'ok'],
-      ['verdict', 'warn'],
+      ['authorization-server', 'warn'],
     ]);
     // path-aware probing: AS metadata was a single hit at the bare origin form
     expect(result.steps[2].exchanges[0].request.url).toBe(`${origin}/.well-known/oauth-authorization-server`);
@@ -113,12 +112,13 @@ describe('discoverOAuth against a local server', () => {
     expect(result.steps.slice(1).every(s => s.status === 'skipped')).toBe(true);
   });
 
-  it('reports a missing authorization server document and skips the verdict', async () => {
+  it('reports a missing authorization server document', async () => {
     omitAsMetadata = true;
     const result = await discoverOAuth({ url: `${origin}/mcp` });
     omitAsMetadata = false;
     expect(result.steps[2].status).toBe('error');
-    expect(result.steps[3].status).toBe('skipped');
+    expect(result.steps).toHaveLength(3);
+    expect(result.steps[2].summary).toBe('Not found');
     expect(result.steps[2].exchanges).toHaveLength(2);
   });
 });

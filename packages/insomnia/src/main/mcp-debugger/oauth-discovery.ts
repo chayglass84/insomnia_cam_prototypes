@@ -1,6 +1,6 @@
 // Task 4348 S5a: read-only MCP OAuth discovery. Walks the spec's discovery chain one step at a time and records every
 // exchange so the UI can show raw requests/responses: unauthenticated MCP request (401 + WWW-Authenticate) -> protected
-// resource metadata (RFC 9728) -> authorization server metadata (RFC 8414, OIDC fallback) -> a capability verdict.
+// resource metadata (RFC 9728) -> authorization server metadata (RFC 8414, OIDC fallback) plus a verdict on what a client can do with it.
 // No tokens are issued here (S5b/S5c). Not in Ardi, so this is new work against the MCP authorization spec.
 // PROTOTYPE-MOCK: plain fetch with no proxy, TLS options or custom headers; one authorization server (the first listed).
 
@@ -19,7 +19,7 @@ export interface OAuthExchange {
 }
 
 export interface OAuthStep {
-  id: 'challenge' | 'protected-resource' | 'authorization-server' | 'verdict';
+  id: 'challenge' | 'protected-resource' | 'authorization-server';
   title: string;
   status: OAuthStepStatus;
   summary: string;
@@ -254,7 +254,7 @@ export const discoverOAuth = async ({ url, headers = [] }: { url: string; header
     findings: challengeFindings,
   });
   const stop = (from: OAuthStep['id'], reason: string) => {
-    const order: OAuthStep['id'][] = ['protected-resource', 'authorization-server', 'verdict'];
+    const order: OAuthStep['id'][] = ['protected-resource', 'authorization-server'];
     for (const id of order.slice(order.indexOf(from))) {
       steps.push({ id, title: STEP_TITLES[id], status: 'skipped', summary: reason, exchanges: [], findings: [] });
     }
@@ -314,29 +314,21 @@ export const discoverOAuth = async ({ url, headers = [] }: { url: string; header
   } else {
     asmFindings.push({ level: 'info', text: `issuer: ${issuer}` });
   }
-  const asmOk = !!asm.metadata;
+  // The capability verdict is part of this step: what a client needs from the document (PKCE, registration, iss).
+  const verdict = asm.metadata ? buildVerdict(asm.metadata as AuthServerMetadata) : [];
+  const findings = [...asmFindings, ...verdict];
+  const hasError = findings.some(f => f.level === 'error');
   steps.push({
     id: 'authorization-server',
     title: STEP_TITLES['authorization-server'],
-    status: !asmOk ? 'error' : asmFindings.some(f => f.level === 'error') ? 'warn' : 'ok',
-    summary: asmOk ? (asm.url ?? '') : 'Not found',
+    status: hasError ? 'error' : findings.some(f => f.level === 'warn') ? 'warn' : 'ok',
+    summary: !asm.metadata
+      ? 'Not found'
+      : hasError
+        ? `Found, but a client could not proceed (${asm.url})`
+        : `Found, a client can proceed (${asm.url})`,
     exchanges: asm.exchanges,
-    findings: asmFindings,
-  });
-  if (!asm.metadata) {
-    stop('verdict', 'No authorization server metadata');
-    return { serverUrl: url, steps };
-  }
-
-  // Step 4: verdict.
-  const verdict = buildVerdict(asm.metadata as AuthServerMetadata);
-  steps.push({
-    id: 'verdict',
-    title: STEP_TITLES.verdict,
-    status: verdict.some(f => f.level === 'error') ? 'error' : verdict.some(f => f.level === 'warn') ? 'warn' : 'ok',
-    summary: verdict.some(f => f.level === 'error') ? 'A client could not proceed' : 'A client can proceed',
-    exchanges: [],
-    findings: verdict,
+    findings,
   });
   return { serverUrl: url, steps };
 };
@@ -345,5 +337,4 @@ const STEP_TITLES: Record<OAuthStep['id'], string> = {
   challenge: 'Unauthenticated request',
   'protected-resource': 'Protected resource metadata',
   'authorization-server': 'Authorization server metadata',
-  verdict: 'What a client can do',
 };
