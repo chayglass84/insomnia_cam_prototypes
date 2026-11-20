@@ -19,7 +19,7 @@ export interface OAuthExchange {
 }
 
 export interface OAuthStep {
-  id: 'challenge' | 'protected-resource' | 'authorization-server';
+  id: 'challenge' | 'protected-resource' | 'authorization-server' | 'registration' | 'authorize' | 'callback';
   title: string;
   status: OAuthStepStatus;
   summary: string;
@@ -28,9 +28,21 @@ export interface OAuthStep {
   findings: OAuthFinding[];
 }
 
+/** What discovery learned, handed to the authorization flow (S5b) so it does not have to rediscover. */
+export interface OAuthContext {
+  serverUrl: string;
+  /** `resource` from the protected resource metadata, sent as the RFC 8707 `resource` parameter. */
+  resource?: string;
+  /** Scope from the 401 challenge, else the PRM's scopes_supported joined. */
+  scope?: string;
+  authorizationServer: AuthServerMetadata;
+}
+
 export interface OAuthDiscoveryResult {
   serverUrl: string;
   steps: OAuthStep[];
+  /** Present only when discovery reached a usable authorization server document. */
+  context?: OAuthContext;
 }
 
 export interface WwwAuthenticateChallenge {
@@ -82,7 +94,7 @@ export const authorizationServerCandidates = (issuer: string): string[] => {
   return [`${url.origin}/.well-known/oauth-authorization-server`, `${url.origin}/.well-known/openid-configuration`];
 };
 
-interface AuthServerMetadata {
+export interface AuthServerMetadata {
   issuer?: string;
   authorization_endpoint?: string;
   token_endpoint?: string;
@@ -159,7 +171,7 @@ const parseBody = (contentType: string, text: string): unknown => {
   return text;
 };
 
-const exchange = async (method: string, url: string, headers: Record<string, string>, body?: unknown): Promise<OAuthExchange> => {
+export const exchange = async (method: string, url: string, headers: Record<string, string>, body?: unknown): Promise<OAuthExchange> => {
   const started = Date.now();
   const request = { method, url, headers, ...(body === undefined ? {} : { body }) };
   try {
@@ -330,11 +342,27 @@ export const discoverOAuth = async ({ url, headers = [] }: { url: string; header
     exchanges: asm.exchanges,
     findings,
   });
-  return { serverUrl: url, steps };
+  if (!asm.metadata || hasError) {
+    return { serverUrl: url, steps };
+  }
+  const prmScopes = Array.isArray(prm.metadata?.scopes_supported) ? (prm.metadata.scopes_supported as string[]).join(' ') : undefined;
+  return {
+    serverUrl: url,
+    steps,
+    context: {
+      serverUrl: url,
+      resource: typeof prm.metadata?.resource === 'string' ? prm.metadata.resource : undefined,
+      scope: bearer?.params.scope ?? prmScopes,
+      authorizationServer: asm.metadata as AuthServerMetadata,
+    },
+  };
 };
 
-const STEP_TITLES: Record<OAuthStep['id'], string> = {
+export const STEP_TITLES: Record<OAuthStep['id'], string> = {
   challenge: 'Unauthenticated request',
   'protected-resource': 'Protected resource metadata',
   'authorization-server': 'Authorization server metadata',
+  registration: 'Client registration',
+  authorize: 'Authorize in browser',
+  callback: 'Authorization response',
 };

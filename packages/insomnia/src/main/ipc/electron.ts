@@ -122,6 +122,8 @@ export type HandleChannels =
   | 'mcp.client.cancelRequest'
   | 'mcpDebugger.probe'
   | 'mcpDebugger.oauthDiscover'
+  | 'mcpDebugger.oauthAuthorize'
+  | 'mcpDebugger.oauthCancel'
   | 'mcpDebugger.connect'
   | 'mcpDebugger.disconnect'
   | 'mcpDebugger.getState'
