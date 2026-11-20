@@ -14,8 +14,19 @@ interface TokenSet {
   scope?: string;
   clientId: string;
   context: OAuthContext;
+  /** Every access token issued for this request, oldest first, so a connection holding an older one is recognised. */
+  history: string[];
 }
 const tokens = new Map<string, TokenSet>();
+
+/** True when this access token was issued by the wizard for this request (so Insomnia may refresh it on the user's behalf). */
+export const ownsAccessToken = (requestId: string, token: string) => !!tokens.get(requestId)?.history.includes(token);
+export const currentAccessToken = (requestId: string) => tokens.get(requestId)?.accessToken;
+export const canRefresh = (requestId: string) => !!tokens.get(requestId)?.refreshToken;
+export const isExpired = (requestId: string, skewMs = 0) => {
+  const expiresAt = tokens.get(requestId)?.expiresAt;
+  return expiresAt !== undefined && expiresAt - skewMs <= Date.now();
+};
 
 /** The scope of the stored token, for asking for more of it (step-up). */
 export const storedScope = ({ requestId }: { requestId: string }) => tokens.get(requestId)?.scope;
@@ -162,7 +173,7 @@ export const exchangeCode = async ({ requestId, trace }: { requestId: string; tr
   if (!tokenSet || tokenStep.status === 'error') {
     return [tokenStep];
   }
-  tokens.set(requestId, { ...tokenSet, clientId: pending.clientId, context });
+  tokens.set(requestId, { ...tokenSet, clientId: pending.clientId, context, history: [tokenSet.accessToken] });
   tokenStep.tokens = tokenSet;
   return [tokenStep, await verifyToken(tokenSet.accessToken, context.serverUrl, trace)];
 };
@@ -195,7 +206,7 @@ export const refreshToken = async ({ requestId, trace }: { requestId: string; tr
     }
     return [step('refresh', 'error', invalid ? 'Refresh token rejected' : 'Rejected', findings, [ex])];
   }
-  tokens.set(requestId, { ...current, ...tokenSet });
+  tokens.set(requestId, { ...current, ...tokenSet, history: [...current.history, tokenSet.accessToken] });
   const refreshStep = step('refresh', findings.some(f => f.level === 'warn') ? 'warn' : 'ok', 'Token refreshed', findings, [ex]);
   refreshStep.tokens = tokenSet;
   return [refreshStep, await verifyToken(tokenSet.accessToken, current.context.serverUrl, trace)];

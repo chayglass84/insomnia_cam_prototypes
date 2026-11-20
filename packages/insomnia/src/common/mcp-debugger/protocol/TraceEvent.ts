@@ -139,6 +139,12 @@ export type TraceEvent = {
    * not offer MCP-only actions (edit & replay, Copy cURL) on them.
    */
   flow?: "oauth";
+
+  /**
+   * 4348: the HTTP status of the response this inbound event arrived on, when the transport knows it. The Trace shows it next
+   * to the response time. Absent for events without an HTTP response (notifications, stdio, legacy HTTP+SSE replies).
+   */
+  httpStatus?: number;
 };
 
 /**

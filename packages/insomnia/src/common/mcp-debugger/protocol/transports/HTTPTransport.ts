@@ -144,6 +144,7 @@ export class HTTPTransport implements Transport {
     // matched reply never lands.
     void this.drainResponseBody(res, replyIdOf(payload), {
       responseHeaders: headersToRecord(res.headers),
+      status: res.status,
     });
   }
 

@@ -38,8 +38,13 @@ export const McpDebuggerRequestPane: FC<{
   isConnected: boolean;
   uniqueKey: string;
   onOpenOAuth: () => void;
-}> = ({ request, capability, session, tasks, subscription, trace, capabilities, isConnected, uniqueKey, onOpenOAuth }) => {
+  /** Changes whenever the user clicks an item in the left pane; the pane returns to the Params tab. */
+  selectionNonce: number;
+}> = ({ request, capability, session, tasks, subscription, trace, capabilities, isConnected, uniqueKey, onOpenOAuth, selectionNonce }) => {
   const [tab, setTab] = useState<'params' | 'auth' | 'headers'>('params');
+  useEffect(() => {
+    setTab('params');
+  }, [selectionNonce]);
   const [argsByCapability, setArgsByCapability] = useState<Record<string, Record<string, unknown>>>({});
   const [rawMode, setRawMode] = useState(false);
   const [rawText, setRawText] = useState('{}');

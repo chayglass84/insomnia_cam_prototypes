@@ -284,7 +284,7 @@ export class MCPHTTPProtocol implements Protocol<MCPConnectConfig> {
               hadSessionId: conn.sessionId !== undefined,
             });
       }
-      const { envelope, responseHeaders } = settled;
+      const { envelope, responseHeaders, status } = settled;
       this.traceInvokeResult(
         conn,
         correlationId,
@@ -292,6 +292,7 @@ export class MCPHTTPProtocol implements Protocol<MCPConnectConfig> {
         envelope,
         onTrace,
         responseHeaders,
+        status,
       );
       if (envelope.error) {
         throw protocolError({
@@ -497,6 +498,7 @@ export class MCPHTTPProtocol implements Protocol<MCPConnectConfig> {
     envelope: JsonRpcEnvelope,
     onTrace: TraceSink | undefined,
     responseHeaders?: Record<string, string>,
+    httpStatus?: number,
   ): void {
     const result = envelope.result;
     // 2026-07-28 RC: an input_required result means the server needs more data before it can
@@ -537,6 +539,7 @@ export class MCPHTTPProtocol implements Protocol<MCPConnectConfig> {
             data: envelope.error.data,
           },
           responseHeaders,
+          httpStatus,
         ),
       );
       return;
@@ -545,9 +548,9 @@ export class MCPHTTPProtocol implements Protocol<MCPConnectConfig> {
     if (toolError) {
       // A domain-level failure carried inside a successful JSON-RPC result.
       // Surface as an error row but keep the content for the UI to render.
-      onTrace?.(this.trace.error(correlationId, toolError, responseHeaders));
+      onTrace?.(this.trace.error(correlationId, toolError, responseHeaders, httpStatus));
     } else {
-      onTrace?.(this.trace.response(correlationId, result, responseHeaders));
+      onTrace?.(this.trace.response(correlationId, result, responseHeaders, httpStatus));
     }
   }
 
@@ -654,16 +657,16 @@ export class MCPHTTPProtocol implements Protocol<MCPConnectConfig> {
       } finally {
         timeout.clear();
       }
-      const { envelope, responseHeaders } = settled;
+      const { envelope, responseHeaders, status } = settled;
 
       if (envelope.error) {
         const message = envelope.error.message ?? `${method} failed`;
         onTrace?.(
-          this.trace.error(correlationId, { message, code: envelope.error.code }, responseHeaders),
+          this.trace.error(correlationId, { message, code: envelope.error.code }, responseHeaders, status),
         );
         throw protocolError({ kind: "protocol-remote", message, code: envelope.error.code });
       }
-      onTrace?.(this.trace.response(correlationId, envelope.result, responseHeaders));
+      onTrace?.(this.trace.response(correlationId, envelope.result, responseHeaders, status));
       return envelope.result;
     };
   }

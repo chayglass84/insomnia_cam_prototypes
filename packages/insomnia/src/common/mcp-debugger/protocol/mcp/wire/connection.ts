@@ -168,6 +168,8 @@ export function newConnection(
 export type SettledReply = {
   envelope: JsonRpcEnvelope;
   responseHeaders?: Record<string, string>;
+  /** HTTP status of the response the reply arrived on (absent for transports without one). */
+  status?: number;
 };
 
 /**
@@ -195,7 +197,7 @@ export async function sendRequest(
     conn.pending.register(id, {
       resolve: (v, meta) => {
         detach();
-        resolve({ envelope: v, responseHeaders: meta?.responseHeaders });
+        resolve({ envelope: v, responseHeaders: meta?.responseHeaders, status: meta?.status });
       },
       reject: (e) => {
         detach();

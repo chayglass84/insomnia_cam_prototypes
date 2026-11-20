@@ -2,12 +2,12 @@ import type { TraceEvent } from "../TraceEvent";
 import { isCancellableMethod } from "./capabilities/methods";
 
 /** Payload for an `error` trace event. */
-type TraceErrorPayload = {
+interface TraceErrorPayload {
   message: string;
   kind?: string;
   code?: number;
   data?: unknown;
-};
+}
 
 /**
  * Header names whose value is a credential on the wire: the headers the auth
@@ -113,6 +113,7 @@ export function traceEventsFor(protocol: string) {
       correlationId: string,
       payload: unknown,
       responseHeaders?: Record<string, string>,
+      httpStatus?: number,
     ): TraceEvent {
       return {
         id: `evt-${correlationId}-response`,
@@ -130,12 +131,14 @@ export function traceEventsFor(protocol: string) {
         ...(responseHeaders && Object.keys(responseHeaders).length > 0
           ? { responseHeaders: redactCredentialHeaders(responseHeaders) }
           : {}),
+        ...(httpStatus !== undefined ? { httpStatus } : {}),
       };
     },
     error(
       correlationId: string,
       payload: TraceErrorPayload,
       responseHeaders?: Record<string, string>,
+      httpStatus?: number,
     ): TraceEvent {
       return {
         id: `evt-${correlationId}-error`,
@@ -151,6 +154,7 @@ export function traceEventsFor(protocol: string) {
         ...(responseHeaders && Object.keys(responseHeaders).length > 0
           ? { responseHeaders: redactCredentialHeaders(responseHeaders) }
           : {}),
+        ...(httpStatus !== undefined ? { httpStatus } : {}),
       };
     },
     clientError(correlationId: string, payload: TraceErrorPayload): TraceEvent {

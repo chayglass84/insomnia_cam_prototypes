@@ -1,5 +1,5 @@
 import type { McpRequest } from 'insomnia-data';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Button } from 'react-aria-components';
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 
@@ -13,6 +13,7 @@ import {
 import { ErrorBoundary } from '~/ui/components/error-boundary';
 import { OrganizationTabList } from '~/ui/components/tabs/tab-list';
 import WorkspacePaneHeader from '~/ui/components/workspace/workspace-pane-header';
+import { useRequestPatcher } from '~/ui/hooks/use-request';
 import { useGitVCSVersion } from '~/ui/hooks/use-vcs-version';
 
 import { CapabilitySidebar, type SessionTab } from './capability-sidebar';
@@ -34,6 +35,8 @@ export const McpDebuggerShell = ({ request }: { request: McpRequest }) => {
   const [session, setSession] = useState<SessionTab | null>(null);
   const isConnected = state.status === 'connected';
   const [oauthOpen, setOauthOpen] = useState(false);
+  // Bumped on every click in the left pane (even on the already-selected item) so the request pane goes back to Params.
+  const [selectionNonce, setSelectionNonce] = useState(0);
   const [oauthPromptDismissed, setOauthPromptDismissed] = useState(false);
   // Offer discovery when the last Connect failed with an OAuth challenge and no auth is configured yet.
   const authBlank = ['none', undefined].includes(getAuthObjectOrNull(request.authentication)?.type);
@@ -43,6 +46,18 @@ export const McpDebuggerShell = ({ request }: { request: McpRequest }) => {
       setOauthPromptDismissed(false);
     }
   }, [state.status]);
+
+  // Insomnia refreshed the OAuth token on this connection (expired, or a 401): write it to the Auth tab so what you see
+  // is what is being sent. A refresh that already happened before this view mounted counts as applied.
+  const patchRequest = useRequestPatcher();
+  const seenRefreshSeq = useRef(state.oauthRefresh?.seq ?? 0);
+  useEffect(() => {
+    const refreshed = state.oauthRefresh;
+    if (refreshed && refreshed.seq !== seenRefreshSeq.current) {
+      seenRefreshSeq.current = refreshed.seq;
+      patchRequest(request._id, { authentication: { type: 'bearer', token: refreshed.accessToken, prefix: 'Bearer', disabled: false } });
+    }
+  }, [state.oauthRefresh, patchRequest, request._id]);
   const uniqueKey = `${activeEnvironment?._id}::${activeEnvironment?.modified}::${activeGlobalEnvironment?._id}::${activeGlobalEnvironment?.modified}::${request._id}::${gitVersion}::${vcsVersion}::${isConnected}`;
 
   return (
@@ -106,6 +121,7 @@ export const McpDebuggerShell = ({ request }: { request: McpRequest }) => {
             onSelect={capability => {
               setSelected(capability);
               setSession(null);
+              setSelectionNonce(n => n + 1);
             }}
             selectedSession={session}
             subscriptionActive={state.subscription?.status === 'active' || state.subscription?.status === 'subscribing'}
@@ -129,6 +145,7 @@ export const McpDebuggerShell = ({ request }: { request: McpRequest }) => {
                   isConnected={isConnected}
                   uniqueKey={uniqueKey}
                   onOpenOAuth={() => setOauthOpen(true)}
+                  selectionNonce={selectionNonce}
                 />
               </ErrorBoundary>
             </Panel>

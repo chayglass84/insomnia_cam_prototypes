@@ -42,7 +42,7 @@ export type OpenOptions = {
  * transports with no per-message response metadata (stdio, WebSocket, legacy
  * SSE) omit it.
  */
-export type MessageMeta = { responseHeaders?: Record<string, string> };
+export type MessageMeta = { responseHeaders?: Record<string, string>; /** HTTP status of the response this message arrived on. */ status?: number };
 
 /** Called once per server→client message (a parsed JSON-RPC value). */
 export type MessageSink = (message: unknown, meta?: MessageMeta) => void;

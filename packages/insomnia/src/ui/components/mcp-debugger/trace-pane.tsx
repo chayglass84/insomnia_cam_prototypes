@@ -485,6 +485,27 @@ const STATUS_TOOLTIP: Record<TraceStatus, string> = {
 };
 
 /** The coloured status dot, with a tooltip saying what the colour means. `neutral` explains the grey dot. */
+/** The HTTP status a reply arrived with: stamped on the event by the transport, else carried in an error payload. */
+export const responseCodeOf = (event?: TraceEvent): number | undefined => {
+  if (!event) {
+    return undefined;
+  }
+  const fromPayload = (event.payload as { status?: unknown } | undefined)?.status;
+  return event.httpStatus ?? (typeof fromPayload === 'number' ? fromPayload : undefined);
+};
+
+/** Right-hand side of a Calls or Stream row: the response code (green below 400, red from 400) then the response time. */
+const ResultMeta: FC<{ code?: number; durationMs?: number; fallback?: string }> = ({ code, durationMs, fallback }) => (
+  <span className="ml-auto flex shrink-0 items-center gap-2 text-xs text-(--hl)" data-testid="mcp-row-result">
+    {code !== undefined && (
+      <span className={`font-mono ${code >= 400 ? 'text-red-500' : 'text-green-500'}`} data-testid="mcp-row-code">
+        {code}
+      </span>
+    )}
+    <span>{durationMs !== undefined ? `${durationMs} ms` : fallback}</span>
+  </span>
+);
+
 const StatusDot: FC<{ status?: TraceStatus; neutral?: string }> = ({ status, neutral = 'No final status for this message' }) => (
   <TooltipTrigger delay={200}>
     <Focusable>
@@ -723,15 +744,20 @@ export const McpTracePane: FC<{
                   {call.via && <VersionChip version={call.via} />}
                   {call.events[0].flow === 'oauth' && <OAuthChip />}
                   <CallLabel label={call.label} />
-                  <span className="ml-auto shrink-0 text-xs text-(--hl)">
-                    {call.durationMs !== undefined ? `${call.durationMs} ms` : call.status === 'pending' ? 'pending…' : 'notification'}
-                  </span>
+                  <ResultMeta
+                    code={responseCodeOf(terminalEventOf(call))}
+                    durationMs={call.durationMs}
+                    fallback={call.status === 'pending' ? 'pending…' : 'notification'}
+                  />
                 </button>
               ))}
             {mode === 'stream' &&
               stream.map(event => {
                 const call = callById.get(event.correlationId);
                 const isRequest = event.direction === 'client-to-server';
+                // A reply that settles a call shows how long the call took, with its response code, like the Calls row.
+                const replyDuration =
+                  call && !isRequest && event.terminalStatus !== undefined ? Date.parse(event.timestamp) - Date.parse(call.startedAt) : undefined;
                 // A request row is amber while its call is still waiting; replies show their own outcome.
                 const status: TraceStatus | undefined = event.terminalStatus ?? (event.awaitsReply && call?.status === 'pending' ? 'pending' : undefined);
                 return (
@@ -748,6 +774,7 @@ export const McpTracePane: FC<{
                     {event.flow === 'oauth' && <OAuthChip />}
                     <CallLabel label={call?.label ?? event.label ?? event.messageType} />
                     {event.via && <VersionChip version={event.via} />}
+                    {replyDuration !== undefined && <ResultMeta code={responseCodeOf(event)} durationMs={replyDuration} />}
                   </button>
                 );
               })}

@@ -9,6 +9,7 @@ import type { TraceEvent } from '~/common/mcp-debugger/protocol/TraceEvent';
 import { isVersionChoice } from '~/common/mcp-debugger/versions';
 
 import type { OAuthExchange, OAuthTrace } from './oauth-discovery';
+import { canRefresh, currentAccessToken, isExpired, ownsAccessToken, refreshToken } from './oauth-token';
 
 // Task 4348 S1: the main-process home of the ported Ardi MCPHTTPProtocol. One Session per MCP request id.
 // PROTOTYPE-MOCK: sessions and traces are in-memory only (lost on app restart); S2 persists runs for replay.
@@ -24,6 +25,8 @@ interface Session {
   error?: string;
   protocolIssue?: string;
   oauthRequired?: boolean;
+  /** Bumped each time Insomnia swaps in a refreshed OAuth token on this connection, so the UI can update the Auth tab. */
+  oauthRefresh?: { seq: number; accessToken: string };
   url?: string;
   capabilities: Capability[];
   warnings: IntrospectionWarning[];
@@ -118,6 +121,7 @@ export const oauthTraceFor = (requestId: string): OAuthTrace => (label, request)
         payload: { status: ex.response.status, ...(ex.response.body === undefined ? {} : { body: ex.response.body }) },
         terminalStatus: ex.response.status < 400 ? 'success' : 'error',
         responseHeaders: redactCredentialHeaders(ex.response.headers),
+        httpStatus: ex.response.status,
       });
     },
     redirect: (params, ok) =>
@@ -191,6 +195,8 @@ export interface McpDebuggerState {
   subscription?: SubscriptionView;
   /** The last connect failed with a 401 Bearer challenge, so the server probably wants OAuth (UI offers discovery). */
   oauthRequired?: boolean;
+  /** A token Insomnia refreshed on this connection (S5): bumps `seq` so the UI can write it to the Auth tab. */
+  oauthRefresh?: { seq: number; accessToken: string };
 }
 
 export const getState = ({ requestId }: { requestId: string }): McpDebuggerState => {
@@ -208,6 +214,7 @@ export const getState = ({ requestId }: { requestId: string }): McpDebuggerState
     replays: s.replays,
     subscription: s.subscription,
     oauthRequired: s.oauthRequired,
+    oauthRefresh: s.oauthRefresh,
     tasks: [...s.tasks.values()].map(t => ({
       ...t,
       polling: s.taskTimers.has(t.taskId),
@@ -222,6 +229,51 @@ export const clearTrace = ({ requestId }: { requestId: string }) => {
   const s = sessionFor(requestId);
   s.trace = [];
   s.replays = {};
+};
+
+// ---------- OAuth token upkeep (S5) ----------
+// When the connection's Authorization header carries a token the OAuth wizard issued, Insomnia keeps it alive: it
+// refreshes an expired token before Connect, and after a call fails with 401 it refreshes and retries once. Every step
+// shows in the trace (the refresh as OAuth calls, the retry as a replay of the failed call). An Authorization header
+// the user set by hand is never touched. Concurrent 401s share one refresh.
+const refreshLocks = new Map<string, Promise<boolean>>();
+
+const refreshHeaderToken = (requestId: string, s: Session): Promise<boolean> => {
+  const inflight = refreshLocks.get(requestId);
+  if (inflight) {
+    return inflight;
+  }
+  const attempt = (async () => {
+    const headers = s.headerRecord;
+    const key = headers && Object.keys(headers).find(name => name.toLowerCase() === 'authorization');
+    if (!headers || !key) {
+      return false;
+    }
+    const token = headers[key].replace(/^Bearer\s+/i, '');
+    if (!ownsAccessToken(requestId, token)) {
+      return false;
+    }
+    let next = currentAccessToken(requestId);
+    if (next === token) {
+      // The header holds the newest token and it was refused or has expired: really refresh.
+      if (!canRefresh(requestId)) {
+        return false;
+      }
+      const steps = await refreshToken({ requestId, trace: oauthTraceFor(requestId) });
+      if (steps[0]?.status === 'error') {
+        return false;
+      }
+      next = currentAccessToken(requestId);
+    }
+    if (!next) {
+      return false;
+    }
+    headers[key] = `Bearer ${next}`;
+    s.oauthRefresh = { seq: (s.oauthRefresh?.seq ?? 0) + 1, accessToken: next };
+    return true;
+  })().finally(() => refreshLocks.delete(requestId));
+  refreshLocks.set(requestId, attempt);
+  return attempt;
 };
 
 export const connect = async (options: McpDebuggerConnectOptions): Promise<McpDebuggerState> => {
@@ -246,6 +298,10 @@ export const connect = async (options: McpDebuggerConnectOptions): Promise<McpDe
   const sink = sinkFor(s);
   const headerRecord = Object.fromEntries(headers.filter(h => !h.disabled && h.name).map(h => [h.name, h.value]));
   s.headerRecord = headerRecord;
+  // A token the wizard issued that has already expired: refresh it first (visible as OAuth calls) so Connect just works.
+  if (s.headerRecord && isExpired(requestId, 1000)) {
+    await refreshHeaderToken(requestId, s);
+  }
   const config: MCPConnectConfig = {
     url,
     authMode: 'none', // auth is already folded into `headers` by the renderer
@@ -301,7 +357,7 @@ export const disconnect = async ({ requestId }: { requestId: string }): Promise<
 };
 
 /** Returns the new call's correlationId (captured from its request event, which is emitted synchronously). */
-const run = (requestId: string, invocation: MCPInvocation, replayOf?: string): { correlationId: string } => {
+const run = (requestId: string, invocation: MCPInvocation, replayOf?: string, isRetry = false): { correlationId: string } => {
   const s = sessionFor(requestId);
   if (!s.conn || s.status !== 'connected') {
     throw new Error('Not connected');
@@ -316,6 +372,21 @@ const run = (requestId: string, invocation: MCPInvocation, replayOf?: string): {
       }
     }
     base(event);
+    // A 401 on a call that carried a wizard-issued token: refresh it and retry once (not for hand-built exact headers).
+    const payload = event.payload as { kind?: string; status?: number } | undefined;
+    if (
+      !isRetry &&
+      !invocation.exact &&
+      event.correlationId === correlationId &&
+      event.direction === 'server-to-client' &&
+      event.terminalStatus === 'error' &&
+      payload?.kind === 'auth' &&
+      payload.status === 401
+    ) {
+      void refreshHeaderToken(requestId, s)
+        .then(refreshed => (refreshed ? run(requestId, invocation, correlationId, true) : undefined))
+        .catch(err => console.warn('[mcp-debugger] refresh and retry failed', err));
+    }
   };
   // Fire and forget: progress and the terminal result arrive through the trace. `invoke` traces its own errors.
   void s.protocol.invoke(s.conn, invocation, s.abort?.signal, sink).catch(err => console.warn('[mcp-debugger] invoke failed', err));
