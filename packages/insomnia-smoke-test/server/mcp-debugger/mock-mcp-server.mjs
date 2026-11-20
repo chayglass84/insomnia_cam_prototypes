@@ -173,7 +173,7 @@ function triggerChange(kind, uri) {
     } else if (kind === "prompts" && filter.promptsListChanged) {
       sseSend(res, { jsonrpc: "2.0", method: "notifications/prompts/list_changed", params: { _meta: meta } });
       delivered += 1;
-    } else if (kind === "resource" && uri && filter.resourceSubscriptions?.some((u) => uri === u || uri.startsWith(u))) {
+    } else if (kind === "resource" && uri && filter.resourceSubscriptions?.includes(uri)) {
       sseSend(res, { jsonrpc: "2.0", method: "notifications/resources/updated", params: { _meta: meta, uri } });
       delivered += 1;
     }

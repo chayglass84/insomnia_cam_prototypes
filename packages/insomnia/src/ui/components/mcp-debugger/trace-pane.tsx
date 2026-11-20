@@ -699,7 +699,7 @@ export const McpTracePane: FC<{
                   {call.via && <VersionChip version={call.via} />}
                   <CallLabel label={call.label} />
                   <span className="ml-auto shrink-0 text-xs text-(--hl)">
-                    {call.durationMs !== undefined ? `${call.durationMs} ms` : 'pending…'}
+                    {call.durationMs !== undefined ? `${call.durationMs} ms` : call.status === 'pending' ? 'pending…' : 'notification'}
                   </span>
                 </button>
               ))}
