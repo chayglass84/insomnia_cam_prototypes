@@ -288,12 +288,8 @@ function uiResourceContent(uri, resource) {
   return content;
 }
 
-function writeToolList(res, id) {
-  writeJson(res, 200, {
-    jsonrpc: "2.0",
-    id,
-    result: { tools: [echoTool, slowEchoTool, askInputTool, triggerChangeTool, ...taskTools, ...uiTools] },
-  });
+function writeToolList(res, id, tools = [echoTool, slowEchoTool, askInputTool, triggerChangeTool, ...taskTools, ...uiTools]) {
+  writeJson(res, 200, { jsonrpc: "2.0", id, result: { tools } });
 }
 
 // 4348 S7b: a tracing-aware server continues the caller's W3C trace (same trace id, a new span id) in the result's `_meta`.
@@ -401,7 +397,9 @@ function checkLegacySessionHeaders(req) {
   );
 }
 
-async function handleLegacy(req, res) {
+const ECHO_ONLY = { tools: [echoTool] };
+// `options.tools` narrows tools/list (4348: the OAuth and XAA endpoints serve just `echo`, so a working sign-in shows something simple).
+async function handleLegacy(req, res, options = {}) {
   if (req.method === "GET") {
     res.writeHead(405, { "Content-Type": "text/plain" });
     res.end("server push not supported");
@@ -450,7 +448,7 @@ async function handleLegacy(req, res) {
   }
 
   if (payload.method === "tools/list") {
-    writeToolList(res, payload.id);
+    writeToolList(res, payload.id, options.tools);
     return;
   }
 
@@ -764,7 +762,7 @@ async function handler(req, res) {
         writeOauthUnauthorized(res);
         return;
       }
-      await handleLegacy(req, res);
+      await handleLegacy(req, res, ECHO_ONLY);
       return;
     }
 
@@ -776,7 +774,7 @@ async function handler(req, res) {
         writeOauthUnauthorized(res, undefined, xaaAuthorizationServerOrigin);
         return;
       }
-      await handleLegacy(req, res);
+      await handleLegacy(req, res, ECHO_ONLY);
       return;
     }
 

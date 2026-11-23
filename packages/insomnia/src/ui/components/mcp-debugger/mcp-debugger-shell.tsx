@@ -20,6 +20,7 @@ import { CapabilitySidebar, type SessionTab } from './capability-sidebar';
 import { ConformanceModal } from './conformance-modal';
 import { McpDebuggerUrlBar } from './mcp-debugger-url-bar';
 import { OAuthWizardModal } from './oauth-discovery-panel';
+import { oauthPromptKind, oauthPromptText } from './oauth-prompt';
 import { McpDebuggerRequestPane } from './request-pane';
 import { McpTracePane } from './trace-pane';
 import { useMcpDebugger } from './use-mcp-debugger';
@@ -42,9 +43,14 @@ export const McpDebuggerShell = ({ request }: { request: McpRequest }) => {
   // Bumped on every click in the left pane (even on the already-selected item) so the request pane goes back to Params.
   const [selectionNonce, setSelectionNonce] = useState(0);
   const [oauthPromptDismissed, setOauthPromptDismissed] = useState(false);
-  // Offer discovery when the last Connect failed with an OAuth challenge and no auth is configured yet.
-  const authBlank = ['none', undefined].includes(getAuthObjectOrNull(request.authentication)?.type);
-  const showOauthPrompt = state.oauthRequired && authBlank && !oauthPromptDismissed && state.status === 'error';
+  // Offer discovery when the last Connect failed with an OAuth challenge: to set auth up, or (when auth is already set, e.g.
+  // by an earlier wizard run) to replace credentials the server rejected.
+  const oauthPrompt = oauthPromptKind({
+    oauthRequired: state.oauthRequired,
+    status: state.status,
+    dismissed: oauthPromptDismissed,
+    authType: getAuthObjectOrNull(request.authentication)?.type,
+  });
   useEffect(() => {
     if (state.status === 'connecting') {
       setOauthPromptDismissed(false);
@@ -87,20 +93,16 @@ export const McpDebuggerShell = ({ request }: { request: McpRequest }) => {
           <span>{state.protocolIssue}</span>
         </div>
       )}
-      {showOauthPrompt && (
+      {oauthPrompt && (
         <div
           className="flex items-center gap-2 border-b border-solid border-(--hl-md) bg-(--hl-xs) px-3 py-1.5 text-xs"
           data-testid="mcp-oauth-prompt"
+          data-kind={oauthPrompt}
         >
           <i className="fa fa-lock" />
-          {state.xaaSupported ? (
-            <span data-testid="mcp-oauth-prompt-xaa-note">
-              This server asked for OAuth, and its authorization server supports enterprise-managed authorization (XAA). Sign in
-              through your company identity provider, or discover standard OAuth?
-            </span>
-          ) : (
-            <span>This server asked for OAuth. Want Insomnia to discover how to sign in?</span>
-          )}
+          <span data-testid={state.xaaSupported ? 'mcp-oauth-prompt-xaa-note' : 'mcp-oauth-prompt-note'}>
+            {oauthPromptText(oauthPrompt, state.xaaSupported === true)}
+          </span>
           {state.xaaSupported && (
             <Button
               className="ml-auto rounded-sm bg-(--color-surprise) px-(--padding-md) py-0.5 text-(--color-font-surprise) hover:brightness-75"

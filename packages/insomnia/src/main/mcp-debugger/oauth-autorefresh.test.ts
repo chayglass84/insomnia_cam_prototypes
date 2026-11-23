@@ -69,6 +69,15 @@ const oauthLabels = (requestId: string) =>
     .map(e => e.label?.split(' · ')[0]);
 
 describe('OAuth token upkeep', () => {
+  it('serves just the echo tool once signed in (the OAuth-protected endpoint is a simple server)', async () => {
+    const requestId = 'ar-echo-only';
+    const token = await signIn(requestId, false);
+    const state = await service.connect({ requestId, url: `${MCP}/oauth-protected`, headers: [{ name: 'Authorization', value: `Bearer ${token}` }] });
+    expect(state.status).toBe('connected');
+    expect(state.capabilities.map(c => c.metadata.name)).toEqual(['echo']);
+    await service.disconnect({ requestId });
+  });
+
   it('after a 401 refreshes the wizard token and retries the call once, visibly', async () => {
     const requestId = 'ar-1';
     const token = await signIn(requestId, true);

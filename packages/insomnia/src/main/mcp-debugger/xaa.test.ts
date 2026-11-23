@@ -101,6 +101,17 @@ describe('XAA flow against the mocks', () => {
       .map(e => e.label?.split(' · ')[0]);
     expect(labels).toEqual(expect.arrayContaining(['Identity provider metadata', 'Sign in at the identity provider', 'Identity provider token', 'Token exchange for an ID-JAG', 'JWT bearer grant at the MCP authorization server']));
 
+    // With that token, the XAA endpoint connects and serves just the echo tool.
+    const connected = await service.connect({
+      requestId,
+      url: `${MCP}/xaa-protected`,
+      headers: [{ name: 'Authorization', value: `Bearer ${currentAccessToken(requestId)}` }],
+      protocolVersion: 'auto',
+    });
+    expect(connected.status).toBe('connected');
+    expect(connected.capabilities.map(c => c.metadata.name)).toEqual(['echo']);
+    await service.disconnect({ requestId });
+
     // An ID-JAG can be redeemed once.
     expect((await xaaRedeem({ requestId, context, asClient }))[0]).toMatchObject({ status: 'error', summary: 'No ID-JAG' });
   });
