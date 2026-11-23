@@ -17,6 +17,7 @@ import { useRequestPatcher } from '~/ui/hooks/use-request';
 import { useGitVCSVersion } from '~/ui/hooks/use-vcs-version';
 
 import { CapabilitySidebar, type SessionTab } from './capability-sidebar';
+import { ConformanceModal } from './conformance-modal';
 import { McpDebuggerUrlBar } from './mcp-debugger-url-bar';
 import { OAuthWizardModal } from './oauth-discovery-panel';
 import { McpDebuggerRequestPane } from './request-pane';
@@ -35,6 +36,7 @@ export const McpDebuggerShell = ({ request }: { request: McpRequest }) => {
   const [session, setSession] = useState<SessionTab | null>(null);
   const isConnected = state.status === 'connected';
   const [oauthOpen, setOauthOpen] = useState(false);
+  const [conformanceOpen, setConformanceOpen] = useState(false);
   // Bumped on every click in the left pane (even on the already-selected item) so the request pane goes back to Params.
   const [selectionNonce, setSelectionNonce] = useState(0);
   const [oauthPromptDismissed, setOauthPromptDismissed] = useState(false);
@@ -70,6 +72,7 @@ export const McpDebuggerShell = ({ request }: { request: McpRequest }) => {
           environmentId={activeEnvironment?._id || ''}
           state={state}
           uniqueKey={uniqueKey}
+          onOpenConformance={() => setConformanceOpen(true)}
         />
       </header>
       {/* Every connect failure lands in the trace; only a protocol mismatch also gets this banner. */}
@@ -105,6 +108,7 @@ export const McpDebuggerShell = ({ request }: { request: McpRequest }) => {
           </Button>
         </div>
       )}
+      <ConformanceModal request={request} environmentId={activeEnvironment?._id || ''} isOpen={conformanceOpen} onOpenChange={setConformanceOpen} />
       <OAuthWizardModal request={request} environmentId={activeEnvironment?._id || ''} isOpen={oauthOpen} onOpenChange={setOauthOpen} />
       <PanelGroup
         autoSaveId="insomnia-sidebar"

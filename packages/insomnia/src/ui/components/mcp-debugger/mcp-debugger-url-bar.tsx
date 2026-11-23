@@ -1,4 +1,4 @@
-import type { AuthTypeOAuth2, McpRequest } from 'insomnia-data';
+import type { McpRequest } from 'insomnia-data';
 import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { Button } from 'react-aria-components';
 import { useLatest } from 'react-use';
@@ -9,18 +9,14 @@ import {
   type McpVersionChoice,
   SUPPORTED_VERSIONS,
 } from '~/common/mcp-debugger/versions';
-import { getConfidentialBasicAuthHeaderValue } from '~/common/network/sensitive-value-collector';
-import { getDataFromKVPair } from '~/common/utils/environment-utils';
 import type { McpDebuggerState } from '~/main/mcp-debugger/service';
-import { _buildBearerHeader } from '~/network/authentication';
-import { getBasicAuthHeader } from '~/network/basic-auth/get-header';
-import { getBearerAuthHeader } from '~/network/bearer-auth/get-header';
 import { OneLineEditor, type OneLineEditorHandle } from '~/ui/components/.client/codemirror/one-line-editor';
 import { Dropdown, DropdownItem, DropdownSection, ItemContent } from '~/ui/components/base/dropdown';
 import { useRequestPatcher } from '~/ui/hooks/use-request';
-import { tryToInterpolateRequestAndCollectSensitiveValues } from '~/ui/utils/try-interpolate';
 
 import { createKeybindingsHandler, useDocBodyKeyboardShortcuts } from '../keydown-binder';
+import { buildMcpConnectParams } from './build-connect-params';
+import { ConformanceButton } from './conformance-modal';
 
 // Task 4348 S1 URL bar for HTTP MCP requests: URL + protocol version picker + Connect/Disconnect, wired to
 // window.main.mcpDebugger instead of the old SDK client. Template rendering and auth-header building are copied from
@@ -33,11 +29,13 @@ export const McpDebuggerUrlBar = ({
   environmentId,
   state,
   uniqueKey,
+  onOpenConformance,
 }: {
   request: McpRequest;
   environmentId: string;
   state: McpDebuggerState;
   uniqueKey: string;
+  onOpenConformance: () => void;
 }) => {
   const patchRequest = useRequestPatcher();
   const editorRef = useRef<OneLineEditorHandle>(null);
@@ -56,48 +54,7 @@ export const McpDebuggerUrlBar = ({
     editorRef.current?.focusEnd();
   }, []);
 
-  const buildConnectParams = useCallback(async () => {
-    const result = await tryToInterpolateRequestAndCollectSensitiveValues({
-      request,
-      environmentId,
-      payload: {
-        url: request.url,
-        headers: request.headers,
-        authentication: request.authentication,
-        env: getDataFromKVPair(request.env).data,
-      },
-    });
-    if (!result) {
-      return null;
-    }
-    const { rendered, sensitiveValues } = result;
-    const { authentication, headers } = rendered;
-    if (!authentication.disabled) {
-      try {
-        if (authentication.type === 'basic') {
-          const { username, password, useISO88591 } = authentication;
-          headers.push(getBasicAuthHeader(username, password, useISO88591 ? 'latin1' : 'utf8'));
-          const confidential = getConfidentialBasicAuthHeaderValue(sensitiveValues, authentication);
-          if (confidential) {
-            sensitiveValues.push(confidential);
-          }
-        } else if (authentication.type === 'bearer' && authentication.token) {
-          headers.push(getBearerAuthHeader(authentication.token, authentication.prefix));
-        } else if (authentication.type === 'apikey') {
-          headers.push({ name: authentication.key, value: authentication.value });
-        } else if (authentication.type === 'oauth2') {
-          const token = await window.main.getOAuth2Token(request._id, authentication as AuthTypeOAuth2);
-          const header = token ? _buildBearerHeader(token.accessToken, authentication.tokenPrefix) : null;
-          if (header) {
-            headers.push(header);
-          }
-        }
-      } catch (error) {
-        console.error('[mcp-debugger] failed to build auth header', error);
-      }
-    }
-    return { url: rendered.url, headers };
-  }, [environmentId, request]);
+  const buildConnectParams = useCallback(() => buildMcpConnectParams({ request, environmentId }), [environmentId, request]);
 
   const connectWith = useCallback(
     async (versionChoice: McpVersionChoice) => {
@@ -156,7 +113,7 @@ export const McpDebuggerUrlBar = ({
 
   return (
     <>
-      <div className="flex items-center gap-1 pl-2">
+      <div className="flex items-center gap-2 border-r border-solid border-(--hl-md) pr-2 pl-2">
         <span className="text-xs text-(--hl)">MCP Spec</span>
         <Dropdown
           triggerButton={
@@ -183,6 +140,7 @@ export const McpDebuggerUrlBar = ({
             ))}
           </DropdownSection>
         </Dropdown>
+        <ConformanceButton onOpen={onOpenConformance} isDisabled={!request.url || isConnecting} />
       </div>
       <form
         className="flex min-w-0 flex-1"

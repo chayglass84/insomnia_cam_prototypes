@@ -134,6 +134,7 @@ const mcpDebugger: McpDebuggerBridgeAPI = {
   respondPeerRequest: options => invokeWithNormalizedError('mcpDebugger.respondPeerRequest', options),
   setRoots: options => invokeWithNormalizedError('mcpDebugger.setRoots', options),
   replayOnVersion: options => invokeWithNormalizedError('mcpDebugger.replayOnVersion', options),
+  runConformance: options => invokeWithNormalizedError('mcpDebugger.runConformance', options),
   findLocalConfigs: () => invokeWithNormalizedError('mcpDebugger.findLocalConfigs'),
   replayOAuthCall: options => invokeWithNormalizedError('mcpDebugger.replayOAuthCall', options),
   taskAction: options => invokeWithNormalizedError('mcpDebugger.taskAction', options),
