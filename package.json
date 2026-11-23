@@ -40,6 +40,7 @@
     "watch:app": "npm run build:electron-entrypoints -w insomnia && npm run start:dev-server -w insomnia",
     "app-build": "npm run build -w insomnia",
     "app-package": "npm run package -w insomnia",
+    "mocks:mcp": "npm run mocks:mcp-debugger -w insomnia-smoke-test --",
     "test:smoke:dev": "npm run test:dev -w insomnia-smoke-test -- --project=Smoke",
     "test:smoke:build": "npm run test:build -w insomnia-smoke-test -- --project=Smoke",
     "test:smoke:package": "npm run test:package -w insomnia-smoke-test -- --project=Smoke",
