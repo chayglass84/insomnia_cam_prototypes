@@ -16,6 +16,7 @@ import { buildCurl } from './curl-command';
 import { JsonView } from './json-view';
 import { diffJson, type DiffLine, hasChanges } from './line-diff';
 import { InputRequiredResponder } from './mrtr-form';
+import { fromEditable, type OAuthWireRequest, singleUseNote, toEditable } from './oauth-replay';
 import { SegmentedToggle } from './segmented-toggle';
 import { ElicitationResponder, SamplingResponder, type ServerRequestOutcome } from './server-request-forms';
 import { TaskCard } from './task-card';
@@ -100,6 +101,24 @@ const isReplayable = (call: Call) => {
     typeof method === 'string' &&
     method !== 'initialize' &&
     method !== 'server/discover'
+  );
+};
+
+/**
+ * S5d: an OAuth call made over plain HTTP can be edited and sent again, connected or not (OAuth happens before Connect).
+ * The browser leg (the authorize URL Insomnia opened) is not replayable: sending it would only re-open the consent page.
+ */
+const isOAuthReplayable = (call: Call) => {
+  const request = requestEventOf(call);
+  const { method, url } = (request.payload ?? {}) as { method?: unknown; url?: unknown };
+  return (
+    request.flow === 'oauth' &&
+    request.direction === 'client-to-server' &&
+    typeof method === 'string' &&
+    typeof url === 'string' &&
+    call.status !== 'pending' &&
+    !call.label.startsWith('Authorize in browser') &&
+    !call.events.some(e => e.messageType === 'redirect')
   );
 };
 
@@ -202,6 +221,56 @@ const ReplayEditor: FC<{
   );
 };
 
+/** Editor for an OAuth call: method, url, headers and body (a form body is shown as one key per parameter). */
+const OAuthReplayEditor: FC<{
+  request: TraceEvent;
+  onSend: (request: OAuthWireRequest) => void;
+  onClose: () => void;
+}> = ({ request, onSend, onClose }) => {
+  const [text, setText] = useState(() => JSON.stringify(toEditable(request.payload, request.requestHeaders), null, 2));
+  const [error, setError] = useState<string | null>(null);
+
+  const send = () => {
+    const result = fromEditable(text);
+    if ('error' in result) {
+      setError(result.error);
+      return;
+    }
+    setError(null);
+    onSend(result.request);
+  };
+
+  return (
+    <section className="flex flex-col gap-2 rounded-xs border border-solid border-(--hl-md) p-2" data-testid="mcp-oauth-replay-editor">
+      <h4 className="text-xs font-bold text-(--hl) uppercase">Edit &amp; replay</h4>
+      <p className="text-xs text-(--hl)">
+        Sent exactly as written to the URL below, so you can drop a parameter, change a value or point it somewhere else.
+        A form body is shown one key per parameter and re-encoded on send. An Authorization header shown as{' '}
+        <code>&lt;redacted&gt;</code> is filled in with the current token; delete it to send without one.
+      </p>
+      <textarea
+        aria-label="Edit OAuth request"
+        className="h-56 w-full rounded-xs border border-solid border-(--hl-md) bg-transparent p-2 font-mono text-xs"
+        value={text}
+        onChange={e => setText(e.target.value)}
+      />
+      {error && <p className="text-xs text-red-500">{error}</p>}
+      <div className="flex gap-2">
+        <Button
+          className="rounded-sm bg-(--color-surprise) px-(--padding-md) py-1 text-xs text-(--color-font-surprise)"
+          onPress={send}
+          data-testid="mcp-oauth-replay-send"
+        >
+          Send
+        </Button>
+        <Button className="rounded-xs border border-solid border-(--hl-md) px-2 py-1 text-xs hover:bg-(--hl-sm)" onPress={onClose}>
+          Cancel
+        </Button>
+      </div>
+    </section>
+  );
+};
+
 const CallDetail: FC<{
   call: Call;
   original?: Call;
@@ -215,18 +284,22 @@ const CallDetail: FC<{
   tasks: TaskView[];
   requestId: string;
   onReplayVersion: (call: Call, version: string) => Promise<string | undefined>;
+  onReplayOAuth: (call: Call, request: OAuthWireRequest) => Promise<string | undefined>;
   onSelect: (correlationId: string) => void;
-}> = ({ call, original, isConnected, serverUrl, onCancel, onReplay, onRespond, currentVersion, tasks, requestId, onReplayVersion, onSubmitInput, onSelect }) => {
+}> = ({ call, original, isConnected, serverUrl, onCancel, onReplay, onRespond, currentVersion, tasks, requestId, onReplayVersion, onReplayOAuth, onSubmitInput, onSelect }) => {
   const request = requestEventOf(call);
   const replies = call.events.filter(e => e !== request);
   const [editing, setEditing] = useState(false);
   const [copied, setCopied] = useState<string[] | null>(null);
   const [versionError, setVersionError] = useState<string | null>(null);
+  const [oauthError, setOAuthError] = useState<string | null>(null);
+  const oauthReplayable = isOAuthReplayable(call);
 
   useEffect(() => {
     setEditing(false);
     setCopied(null);
     setVersionError(null);
+    setOAuthError(null);
   }, [call.correlationId]);
 
   const copyCurl = async () => {
@@ -243,7 +316,12 @@ const CallDetail: FC<{
     }
   };
 
-  const requestDiff = original ? diffJson(wireRequestOf(requestEventOf(original)), wireRequestOf(request)) : null;
+  const oauthWire = (event: TraceEvent) => toEditable(event.payload, event.requestHeaders);
+  const requestDiff = original
+    ? request.flow === 'oauth'
+      ? diffJson(oauthWire(requestEventOf(original)), oauthWire(request))
+      : diffJson(wireRequestOf(requestEventOf(original)), wireRequestOf(request))
+    : null;
   const originalTerminal = original ? terminalEventOf(original) : undefined;
   const terminal = terminalEventOf(call);
   const responseDiff =
@@ -302,10 +380,10 @@ const CallDetail: FC<{
               </DropdownSection>
             </Dropdown>
           )}
-          {isReplayable(call) && (
+          {(isReplayable(call) || oauthReplayable) && (
             <Button
               className="rounded-xs border border-solid border-(--hl-md) px-2 py-0.5 text-xs hover:bg-(--hl-sm) disabled:opacity-50"
-              isDisabled={!isConnected}
+              isDisabled={!isConnected && !oauthReplayable}
               onPress={() => setEditing(true)}
               data-testid="mcp-edit-replay"
             >
@@ -358,7 +436,28 @@ const CallDetail: FC<{
         </p>
       )}
       {!isConnected && isReplayable(call) && <p className="text-xs text-(--hl)">Connect to replay this request.</p>}
-      {editing && (
+      {oauthReplayable && singleUseNote(request.payload) && (
+        <p className="text-xs text-amber-500" data-testid="mcp-oauth-single-use-note">
+          {singleUseNote(request.payload)}
+        </p>
+      )}
+      {oauthError && (
+        <p className="text-xs text-amber-500" data-testid="mcp-oauth-replay-error">
+          {oauthError}
+        </p>
+      )}
+      {editing && oauthReplayable && (
+        <OAuthReplayEditor
+          request={request}
+          onClose={() => setEditing(false)}
+          onSend={async edited => {
+            setEditing(false);
+            setOAuthError(null);
+            setOAuthError((await onReplayOAuth(call, edited)) ?? null);
+          }}
+        />
+      )}
+      {editing && !oauthReplayable && (
         <ReplayEditor
           request={request}
           onClose={() => setEditing(false)}
@@ -651,6 +750,29 @@ export const McpTracePane: FC<{
     });
   };
 
+  /** S5d: send an edited OAuth call; the reply shows up as a new OAuth Call linked to the original. */
+  const replayOAuth = async (call: Call, edited: OAuthWireRequest): Promise<string | undefined> => {
+    // Row labels are "<step title> · METHOD path"; the main process re-appends the method and path.
+    const label = call.label.includes(' · ') ? call.label.slice(0, call.label.lastIndexOf(' · ')) : call.label;
+    try {
+      const { correlationId, error } = await window.main.mcpDebugger.replayOAuthCall({
+        requestId,
+        replayOf: call.correlationId,
+        label,
+        method: edited.method,
+        url: edited.url,
+        headers: edited.headers,
+        body: edited.body,
+      });
+      if (correlationId) {
+        setSelectedId(correlationId);
+      }
+      return error;
+    } catch (err) {
+      return err instanceof Error ? err.message : String(err);
+    }
+  };
+
   /** Replay a call's method and params over another protocol version; resolves to an error message, if any. */
   const replayOnVersion = async (call: Call, version: string): Promise<string | undefined> => {
     const wire = wireRequestOf(requestEventOf(call));
@@ -794,6 +916,7 @@ export const McpTracePane: FC<{
                 tasks={tasks}
                 requestId={requestId}
                 onReplayVersion={replayOnVersion}
+                onReplayOAuth={replayOAuth}
                 onSelect={setSelectedId}
               />
             )}

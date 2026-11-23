@@ -3,12 +3,12 @@ import type { MCPInvocation } from '~/common/mcp-debugger/protocol/mcp/capabilit
 import { type MCPConnectConfig,MCPHTTPProtocol } from '~/common/mcp-debugger/protocol/mcp/MCPHTTPProtocol';
 import { buildTasksCancel, buildTasksGet, buildTasksUpdate } from '~/common/mcp-debugger/protocol/mcp/tasks/taskMethods';
 import { isTaskTerminal, parseTaskHandle, type TaskRecord } from '~/common/mcp-debugger/protocol/mcp/tasks/taskModel';
-import { redactCredentialHeaders, traceEventsFor } from '~/common/mcp-debugger/protocol/mcp/traceEvents';
+import { redactCredentialHeaders, REDACTED, traceEventsFor } from '~/common/mcp-debugger/protocol/mcp/traceEvents';
 import type { Capability, Connection, IntrospectionWarning,Invocation } from '~/common/mcp-debugger/protocol/Protocol';
 import type { TraceEvent } from '~/common/mcp-debugger/protocol/TraceEvent';
 import { isVersionChoice } from '~/common/mcp-debugger/versions';
 
-import type { OAuthExchange, OAuthTrace } from './oauth-discovery';
+import { exchange, type OAuthExchange, type OAuthTrace } from './oauth-discovery';
 import { canRefresh, currentAccessToken, isExpired, ownsAccessToken, refreshToken } from './oauth-token';
 
 // Task 4348 S1: the main-process home of the ported Ardi MCPHTTPProtocol. One Session per MCP request id.
@@ -84,10 +84,13 @@ const pathOf = (url: string) => {
   }
 };
 
-export const oauthTraceFor = (requestId: string): OAuthTrace => (label, request) => {
+export const oauthTraceFor = (requestId: string, replayOf?: string): OAuthTrace => (label, request) => {
   const s = sessionFor(requestId);
   const sink = sinkFor(s);
   const correlationId = `oauth-${++oauthCallSeq}`;
+  if (replayOf) {
+    s.replays[correlationId] = replayOf;
+  }
   const rowLabel = `${label} · ${request.method} ${pathOf(request.url)}`;
   const base = { sequence: 0, correlationId, protocol: 'mcp', flow: 'oauth' as const, label: rowLabel };
   sink({
@@ -128,6 +131,54 @@ export const oauthTraceFor = (requestId: string): OAuthTrace => (label, request)
       reply({ messageType: 'redirect', payload: { redirected_to_loopback: params }, terminalStatus: ok ? 'success' : 'error' }),
     fail: (status, message) => reply({ messageType: 'error', payload: { error: message }, terminalStatus: status }),
   };
+};
+
+/**
+ * S5d: send an edited copy of an OAuth call (any method, url, headers, body) and show the reply as a new OAuth Call linked
+ * to the original, so the existing request/response diff compares them. It goes through `exchange()` with the trace tap, so
+ * it is captured exactly like the wizard's own calls. Credential headers the trace redacted (`<redacted>`) are filled in
+ * from the token the wizard holds (Authorization) or dropped, so replaying the verify call works without leaking the token.
+ */
+export const replayOAuthCall = async ({
+  requestId,
+  replayOf,
+  label,
+  method,
+  url,
+  headers,
+  body,
+}: {
+  requestId: string;
+  replayOf: string;
+  label: string;
+  method: string;
+  url: string;
+  headers: Record<string, string>;
+  body?: unknown;
+}): Promise<{ correlationId?: string; error?: string }> => {
+  if (!/^https?:\/\//i.test(url)) {
+    return { error: 'The URL must start with http:// or https://' };
+  }
+  const sent: Record<string, string> = {};
+  for (const [name, value] of Object.entries(headers)) {
+    if (value !== REDACTED) {
+      sent[name] = value;
+    } else if (name.toLowerCase() === 'authorization') {
+      const token = currentAccessToken(requestId);
+      if (token) {
+        sent[name] = `Bearer ${token}`;
+      }
+    }
+  }
+  const trace = oauthTraceFor(requestId, replayOf);
+  let correlationId: string | undefined;
+  const tap: OAuthTrace = (l, r) => {
+    const handle = trace(l, r);
+    correlationId = `oauth-${oauthCallSeq}`;
+    return handle;
+  };
+  await exchange(method, url, sent, body, { trace: tap, label });
+  return { correlationId };
 };
 
 // HTTP statuses a server returns to a handshake it does not understand (e.g. `initialize` sent to a stateless server).

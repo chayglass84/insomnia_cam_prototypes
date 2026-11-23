@@ -137,6 +137,7 @@ export type HandleChannels =
   | 'mcpDebugger.respondPeerRequest'
   | 'mcpDebugger.setRoots'
   | 'mcpDebugger.replayOnVersion'
+  | 'mcpDebugger.replayOAuthCall'
   | 'mcpDebugger.taskAction'
   | 'mcpDebugger.subscribe'
   | 'mcpDebugger.unsubscribe'
