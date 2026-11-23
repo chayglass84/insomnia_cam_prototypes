@@ -29,6 +29,7 @@ import { parseApiSpec, type ParsedApiSpec } from './api-specs';
 import { JSON_ORDER_PREFIX, JSON_ORDER_SEPARATOR } from './constants';
 import { database as db } from './database';
 import { tryImportV5Data } from './insomnia-v5';
+import { mcpJsonToImportEntries } from './mcp-json-import';
 import { generateId } from './misc';
 import { pathWithParamsAsPathParameters } from './path-with-params';
 
@@ -201,7 +202,18 @@ export const MODELS_BY_EXPORT_TYPE: Record<AllExportTypes, AllTypes> = {
 
 export { mcpUrlToInsomniaV5Yaml } from './insomnia-v5';
 
-export async function scanResources(importEntries: ImportEntry[]): Promise<ScanResult[]> {
+export async function scanResources(rawEntries: ImportEntry[]): Promise<ScanResult[]> {
+  // 4348 S6: an mcp.json (Claude, Cursor, VS Code ... shapes) expands into one MCP client per server.
+  const mcpJsonErrors: ScanResult[] = [];
+  const importEntries = rawEntries.flatMap((entry): ImportEntry[] => {
+    try {
+      return mcpJsonToImportEntries(entry.contentStr) ?? [entry];
+    } catch (err) {
+      // Looked like an mcp.json but held nothing importable: say so against the file.
+      mcpJsonErrors.push({ oriFileName: entry.oriFileName || '', errors: [err instanceof Error ? err.message : String(err)] });
+      return [];
+    }
+  });
   const sessionCache: ResourceCacheType[] = [];
   resourceCacheList = sessionCache;
   const results = await Promise.allSettled(
@@ -304,13 +316,16 @@ export async function scanResources(importEntries: ImportEntry[]): Promise<ScanR
       };
     }),
   );
-  return results.map(retObj =>
-    retObj.status === 'fulfilled'
-      ? retObj.value
-      : {
-          errors: [retObj.reason.toString()],
-        },
-  );
+  return [
+    ...mcpJsonErrors,
+    ...results.map(retObj =>
+      retObj.status === 'fulfilled'
+        ? retObj.value
+        : {
+            errors: [retObj.reason.toString()],
+          },
+    ),
+  ];
 }
 
 type ZodTreeifiedError = ReturnType<typeof z.treeifyError<any>>;

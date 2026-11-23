@@ -24,8 +24,8 @@ import type { electronStorageBridgeAPI } from './main/ipc/electron-storage';
 import type { gRPCBridgeAPI } from './main/ipc/grpc';
 import type { secretStorageBridgeAPI } from './main/ipc/secret-storage';
 import type { AIFeatureNames } from './main/llm-config-service';
-import type { CurlBridgeAPI } from './main/network/curl';
 import type { McpDebuggerBridgeAPI } from './main/mcp-debugger';
+import type { CurlBridgeAPI } from './main/network/curl';
 import type { McpBridgeAPI } from './main/network/mcp';
 import type { SocketIOBridgeAPI } from './main/network/socket-io';
 import type { WebSocketBridgeAPI } from './main/network/websocket';
@@ -134,6 +134,7 @@ const mcpDebugger: McpDebuggerBridgeAPI = {
   respondPeerRequest: options => invokeWithNormalizedError('mcpDebugger.respondPeerRequest', options),
   setRoots: options => invokeWithNormalizedError('mcpDebugger.setRoots', options),
   replayOnVersion: options => invokeWithNormalizedError('mcpDebugger.replayOnVersion', options),
+  findLocalConfigs: () => invokeWithNormalizedError('mcpDebugger.findLocalConfigs'),
   replayOAuthCall: options => invokeWithNormalizedError('mcpDebugger.replayOAuthCall', options),
   taskAction: options => invokeWithNormalizedError('mcpDebugger.taskAction', options),
   subscribe: options => invokeWithNormalizedError('mcpDebugger.subscribe', options),

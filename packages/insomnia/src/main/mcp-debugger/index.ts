@@ -1,6 +1,7 @@
 import { shell } from 'electron';
 
 import { ipcMainHandle } from '../ipc/electron';
+import { findLocalMcpConfigs, type LocalMcpConfig } from './local-configs';
 import { discoverOAuth } from './oauth-discovery';
 import { cancelAuthorization, runAuthorization, unionScopes } from './oauth-flow';
 import { exchangeCode, refreshToken, storedScope } from './oauth-token';
@@ -31,6 +32,8 @@ export interface McpDebuggerBridgeAPI {
   setRoots: (options: Parameters<typeof service.setRoots>[0]) => Promise<void>;
   replayOnVersion: typeof service.replayOnVersion;
   replayOAuthCall: typeof service.replayOAuthCall;
+  /** Looks only at the known config paths of other tools on this machine; takes no arguments on purpose. */
+  findLocalConfigs: () => Promise<LocalMcpConfig[]>;
   taskAction: (options: Parameters<typeof service.taskAction>[0]) => Promise<void>;
   subscribe: (options: Parameters<typeof service.subscribe>[0]) => Promise<void>;
   unsubscribe: (options: Parameters<typeof service.unsubscribe>[0]) => Promise<void>;
@@ -69,6 +72,7 @@ export const registerMcpDebuggerHandlers = () => {
     service.replayOnVersion(o),
   );
   ipcMainHandle('mcpDebugger.replayOAuthCall', (_, o: Parameters<typeof service.replayOAuthCall>[0]) => service.replayOAuthCall(o));
+  ipcMainHandle('mcpDebugger.findLocalConfigs', () => findLocalMcpConfigs());
   ipcMainHandle('mcpDebugger.subscribe', (_, o: Parameters<typeof service.subscribe>[0]) => service.subscribe(o));
   ipcMainHandle('mcpDebugger.unsubscribe', (_, o: Parameters<typeof service.unsubscribe>[0]) => service.unsubscribe(o));
   ipcMainHandle('mcpDebugger.taskAction', (_, o: Parameters<typeof service.taskAction>[0]) => service.taskAction(o));

@@ -8,6 +8,7 @@ import {
   mcpUrlToInsomniaV5Yaml,
   scanResources,
 } from '~/common/import';
+import { type McpServerImport, mcpServerToInsomniaV5Yaml } from '~/common/mcp-json-import';
 import { invariant } from '~/common/utils/invariant';
 import type { ImportEntry } from '~/main/importers/entities';
 import { AnalyticsEvent, trackImportEvent } from '~/ui/analytics';
@@ -18,6 +19,8 @@ export const scanImportResources = async (data: {
   uri?: string;
   curl?: string;
   mcp?: string;
+  /** JSON array of McpServerImport the user picked with "Scan this machine" in the MCP source (4348 S6c). */
+  mcpLocal?: string;
   filePaths?: string | string[];
   postmanArchiveFile?: string | null;
 }): Promise<ScanResult[]> => {
@@ -45,14 +48,22 @@ export const scanImportResources = async (data: {
       contentStr: curl,
     });
   } else if (source === 'mcp') {
-    const { mcp } = data;
-    invariant(typeof mcp === 'string' && mcp.length, 'MCP server URL is required');
-    const importYaml = mcpUrlToInsomniaV5Yaml(mcp);
-    invariant(importYaml, 'Failed to convert MCP URL to Insomnia v5 YAML');
-    contentList.push({
-      contentStr: importYaml,
-      oriFileName: 'mcp',
-    });
+    // 4348 S6c: servers picked with "Scan this machine" win over the URL field.
+    const picked = data.mcpLocal ? (JSON.parse(data.mcpLocal) as McpServerImport[]) : [];
+    if (Array.isArray(picked) && picked.length > 0) {
+      for (const server of picked) {
+        contentList.push({ contentStr: mcpServerToInsomniaV5Yaml(server), oriFileName: server.name });
+      }
+    } else {
+      const { mcp } = data;
+      invariant(typeof mcp === 'string' && mcp.length, 'Enter an MCP server URL, or use Scan this machine and pick servers');
+      const importYaml = mcpUrlToInsomniaV5Yaml(mcp);
+      invariant(importYaml, 'Failed to convert MCP URL to Insomnia v5 YAML');
+      contentList.push({
+        contentStr: importYaml,
+        oriFileName: 'mcp',
+      });
+    }
   } else if (source === 'file') {
     let filePaths: string[];
     try {
@@ -152,6 +163,7 @@ interface ImportScanInputData {
   uri?: string;
   curl?: string;
   mcp?: string;
+  mcpLocal?: string;
   filePaths?: string | string[];
   postmanArchiveFile?: string | null;
 }

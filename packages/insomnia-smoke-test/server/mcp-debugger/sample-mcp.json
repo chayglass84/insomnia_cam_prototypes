@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "Mock MCP (2026-07-28)": { "url": "http://127.0.0.1:8787/", "headers": { "X-Demo": "${env:DEMO_HEADER}" } },
+    "Mock legacy (SSE)": { "type": "sse", "url": "http://127.0.0.1:8788/sse" },
+    "Filesystem (stdio)": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"], "env": { "DEBUG": "1" } },
+    "Broken": { "note": "has neither url nor command" }
+  }
+}

@@ -588,6 +588,7 @@ const ScanResourcesForm = ({
                   placeholder="https://mcp.example.com/mcp"
                 />
               </label>
+              <LocalMcpConfigField />
             </div>
           )}
         </form>
@@ -634,6 +635,111 @@ const ScanResourcesForm = ({
         </Button>
       </div>
     </Fragment>
+  );
+};
+
+/**
+ * 4348 S6c: looks for MCP configs other tools keep on this machine (only after the user clicks Scan this machine) and lets them pick
+ * servers to import. The picked servers travel in a hidden `mcpLocal` field so the normal Scan button imports them.
+ */
+const LocalMcpConfigField = () => {
+  const [configs, setConfigs] = useState<Awaited<ReturnType<typeof window.main.mcpDebugger.findLocalConfigs>> | null>(null);
+  const [finding, setFinding] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // "<file>::<index>" keys, so the same server name in two files stays distinct.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  const keyOf = (file: string, index: number) => `${file}::${index}`;
+  const picked = useMemo(
+    () => (configs ?? []).flatMap(config => config.servers.filter((_, i) => selected.has(keyOf(config.file, i)))),
+    [configs, selected],
+  );
+
+  const find = async () => {
+    setFinding(true);
+    setError(null);
+    try {
+      const found = await window.main.mcpDebugger.findLocalConfigs();
+      setConfigs(found);
+      // Servers without credentials start selected; ones that carry credentials wait for an explicit choice.
+      setSelected(new Set(found.flatMap(c => c.servers.flatMap((s, i) => (s.hasCredentials ? [] : [keyOf(c.file, i)])))));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setFinding(false);
+    }
+  };
+
+  const toggle = (key: string, on: boolean) =>
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (on) {
+        next.add(key);
+      } else {
+        next.delete(key);
+      }
+      return next;
+    });
+
+  return (
+    <div className="mt-3 flex flex-col gap-2" data-testid="import-local-mcp">
+      <input type="hidden" name="mcpLocal" value={JSON.stringify(picked)} />
+      <div className="flex items-center gap-2">
+        <button type="button" className="btn btn--outlined btn--super-compact" onClick={find} data-testid="import-local-mcp-find">
+          <i className="fa fa-search" /> {configs ? 'Scan this machine again' : 'Scan this machine'}
+          {finding && <Icon icon="spinner" className="ml-1 animate-spin" />}
+        </button>
+        <span className="text-xs text-(--hl)">
+          Or look for servers already set up in Claude Code, Claude Desktop, Cursor, Windsurf, VS Code, Gemini CLI and
+          Codex. Nothing is imported until you pick servers and Scan; picked servers are used instead of the URL.
+        </span>
+      </div>
+      {error && <div className="text-(--color-danger)">{error}</div>}
+      {configs && configs.length === 0 && <div className="text-sm text-(--hl)">No MCP configuration files were found.</div>}
+      {configs && configs.length > 0 && (
+        <div className="max-h-[28vh] overflow-y-auto rounded-xs border border-solid border-(--hl-md) p-2">
+          {configs.map(config => (
+            <div key={config.file} className="mb-2">
+              <div className="text-xs font-bold uppercase text-(--hl)">
+                {config.tool} <span className="font-normal normal-case">{config.file}</span>
+              </div>
+              {config.error && <div className="text-xs text-(--color-danger)">{config.error}</div>}
+              {config.servers.map((server, index) => (
+                <Checkbox
+                  key={keyOf(config.file, index)}
+                  className="py-0.5"
+                  isSelected={selected.has(keyOf(config.file, index))}
+                  onChange={on => toggle(keyOf(config.file, index), on)}
+                >
+                  <span className="truncate">{server.name}</span>
+                  <span className="truncate font-mono text-xs text-(--hl)">
+                    {server.transportType === 'stdio' ? 'stdio' : 'http'} · {server.url}
+                  </span>
+                  {server.origin && <span className="text-xs text-(--hl)">({server.origin})</span>}
+                  {server.hasCredentials && (
+                    <span className="rounded-xs bg-amber-500/20 px-1 text-xs text-amber-500" title="Contains a token, key or secret">
+                      credentials
+                    </span>
+                  )}
+                </Checkbox>
+              ))}
+              {config.skipped.map(reason => (
+                <div key={reason} className="text-xs text-(--hl)">
+                  Skipped: {reason}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+      {picked.some(server => server.hasCredentials) && (
+        <div className="rounded-xs border border-solid border-amber-500/50 bg-amber-500/10 p-2 text-xs" data-testid="import-local-mcp-credentials-warning">
+          <i className="fa fa-triangle-exclamation text-amber-500" /> Some selected servers contain secret values (tokens, keys or
+          passwords). They are copied as-is, only into your local Insomnia. Before you commit, sync or share this
+          workspace, consider redacting them or moving them to a vault or secret environment variable.
+        </div>
+      )}
+    </div>
   );
 };
 
