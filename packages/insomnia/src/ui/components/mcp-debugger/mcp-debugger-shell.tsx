@@ -131,8 +131,8 @@ export const McpDebuggerShell = ({ request }: { request: McpRequest }) => {
         </Panel>
         <PanelResizeHandle className="h-full w-px bg-(--hl-md)" />
         <Panel className="flex flex-col">
-          <PanelGroup autoSaveId="mcp-debugger-panels" id="mcp-debugger-panels" direction="vertical">
-            <Panel id="mcp-debugger-request" order={1} minSize={15} className="pane-one theme--pane">
+          <PanelGroup autoSaveId="mcp-debugger-panels-horizontal" id="mcp-debugger-panels" direction="horizontal">
+            <Panel id="mcp-debugger-request" order={1} minSize={20} className="pane-one theme--pane">
               <ErrorBoundary showAlert>
                 <McpDebuggerRequestPane
                   request={request}
@@ -149,8 +149,8 @@ export const McpDebuggerShell = ({ request }: { request: McpRequest }) => {
                 />
               </ErrorBoundary>
             </Panel>
-            <PanelResizeHandle className="h-px w-full bg-(--hl-md)" />
-            <Panel id="mcp-debugger-trace" order={2} minSize={15} className="pane-two theme--pane">
+            <PanelResizeHandle className="h-full w-px bg-(--hl-md)" />
+            <Panel id="mcp-debugger-trace" order={2} minSize={20} className="pane-two theme--pane">
               <ErrorBoundary showAlert>
                 <McpTracePane
                   requestId={request._id}

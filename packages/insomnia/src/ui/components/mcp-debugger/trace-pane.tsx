@@ -1,5 +1,6 @@
 import React, { type FC, useEffect, useMemo, useState } from 'react';
 import { Button, Focusable, Tooltip, TooltipTrigger } from 'react-aria-components';
+import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { useLocalStorage } from 'react-use';
 
 import {
@@ -849,8 +850,9 @@ export const McpTracePane: FC<{
       {calls.length === 0 ? (
         <p className="p-4 text-sm text-(--hl)">Connect to a server to see protocol traffic here.</p>
       ) : (
-        <div className="flex min-h-0 flex-1">
-          <div className="w-1/2 min-w-48 overflow-y-auto border-r border-solid border-(--hl-md)" data-testid="mcp-trace-list">
+        <PanelGroup autoSaveId="mcp-debugger-trace-split" id="mcp-debugger-trace-split" direction="vertical" className="min-h-0 flex-1">
+          <Panel id="mcp-trace-list" order={1} defaultSize={40} minSize={15}>
+          <div className="h-full overflow-y-auto" data-testid="mcp-trace-list">
             {mode === 'calls' &&
               calls.map(call => (
                 <button
@@ -901,7 +903,10 @@ export const McpTracePane: FC<{
                 );
               })}
           </div>
-          <div className="h-full min-h-0 min-w-0 flex-1 overflow-hidden">
+          </Panel>
+          <PanelResizeHandle className="h-px w-full bg-(--hl-md)" />
+          <Panel id="mcp-trace-detail" order={2} minSize={15}>
+          <div className="h-full min-h-0 min-w-0 overflow-hidden">
             {mode === 'calls' && selected && (
               <CallDetail
                 call={selected}
@@ -931,7 +936,8 @@ export const McpTracePane: FC<{
               />
             )}
           </div>
-        </div>
+          </Panel>
+        </PanelGroup>
       )}
     </div>
   );
