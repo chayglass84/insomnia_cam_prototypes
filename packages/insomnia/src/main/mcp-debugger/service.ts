@@ -469,6 +469,32 @@ export const invokeRaw = ({
   exactHeaders?: Record<string, string>;
 }) => run(requestId, exactHeaders ? { ...invocation, exact: { headers: exactHeaders } } : invocation, replayOf);
 
+/**
+ * S7a: send one call and RESOLVE its outcome (unlike `invokeRaw`, whose result only arrives in the trace). Built for MCP
+ * Apps: the app asks the host to call a tool or read a resource and needs the answer back. Traced like any other call.
+ */
+export const relay = async ({
+  requestId,
+  invocation,
+}: {
+  requestId: string;
+  invocation: Invocation;
+}): Promise<{ result?: unknown; error?: { code?: number; message: string; data?: unknown } }> => {
+  const s = sessionFor(requestId);
+  if (!s.conn || s.status !== 'connected') {
+    return { error: { message: 'Not connected' } };
+  }
+  try {
+    return { result: await s.protocol.relayCall!(s.conn, invocation, s.abort?.signal, sinkFor(s)) };
+  } catch (err) {
+    if (isProtocolException(err)) {
+      const e = err.error as { message?: string; code?: number; data?: unknown };
+      return { error: { message: e.message ?? messageOf(err), code: e.code, data: e.data } };
+    }
+    return { error: { message: messageOf(err) } };
+  }
+};
+
 export const cancel = ({ requestId, correlationId }: { requestId: string; correlationId: string }) => {
   const alt = parseAltCorrelation(correlationId);
   if (alt) {

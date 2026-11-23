@@ -140,6 +140,7 @@ export type HandleChannels =
   | 'mcpDebugger.replayOAuthCall'
   | 'mcpDebugger.findLocalConfigs'
   | 'mcpDebugger.runConformance'
+  | 'mcpDebugger.relay'
   | 'mcpDebugger.taskAction'
   | 'mcpDebugger.subscribe'
   | 'mcpDebugger.unsubscribe'

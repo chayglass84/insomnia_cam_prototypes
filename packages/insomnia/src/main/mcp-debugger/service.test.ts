@@ -430,3 +430,28 @@ describe('subscriptions/listen', () => {
     await service.disconnect({ requestId });
   });
 });
+
+describe('mcp-debugger relay (MCP Apps)', () => {
+  it('relays an app-style call and resolves its result', async () => {
+    const requestId = 'req_relay';
+    const state = await service.connect({ requestId, url: `${base}/stateless`, headers: [], protocolVersion: 'auto' });
+    const chart = state.capabilities.find(c => c.metadata.name === 'ui-chart');
+    expect(chart?.ui?.resourceUri).toBe('ui://mock/app');
+
+    const read = await service.relay({ requestId, invocation: { method: 'resources/read', params: { uri: 'ui://mock/app' } } });
+    expect(read.error).toBeUndefined();
+    expect(JSON.stringify(read.result)).toContain('text/html;profile=mcp-app');
+
+    const call = await service.relay({ requestId, invocation: { method: 'tools/call', params: { name: 'echo', arguments: { message: 'from the app' } } } });
+    expect(JSON.stringify(call.result)).toContain('from the app');
+    // Both calls are in the trace like any other.
+    expect(service.getTrace({ requestId }).some(e => e.label === 'resources/read · ui://mock/app')).toBe(true);
+
+    // A failed call comes back as `error` (a tool failing comes back as a normal result with isError). This mock answers an
+    // unknown method with HTTP 400.
+    const bad = await service.relay({ requestId, invocation: { method: 'insomnia/unknown-method', params: {} } });
+    expect(bad.error?.message).toMatch(/HTTP 400/);
+    await service.disconnect({ requestId });
+    expect((await service.relay({ requestId, invocation: { method: 'ping' } })).error?.message).toBe('Not connected');
+  });
+});

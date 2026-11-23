@@ -13,6 +13,7 @@ import { AuthWrapper } from '~/ui/components/editors/auth/auth-wrapper';
 import { RequestHeadersEditor } from '~/ui/components/editors/request-headers-editor';
 import { InsomniaRjsfForm, type InsomniaRjsfFormHandle } from '~/ui/components/rjsf';
 
+import { AppPanel } from './app-panel';
 import type { SessionTab } from './capability-sidebar';
 import { OAuthDiscoverButton } from './oauth-discovery-panel';
 import { PrototypeMock } from './prototype-mock';
@@ -41,7 +42,7 @@ export const McpDebuggerRequestPane: FC<{
   /** Changes whenever the user clicks an item in the left pane; the pane returns to the Params tab. */
   selectionNonce: number;
 }> = ({ request, capability, session, tasks, subscription, trace, capabilities, isConnected, uniqueKey, onOpenOAuth, selectionNonce }) => {
-  const [tab, setTab] = useState<'params' | 'auth' | 'headers'>('params');
+  const [tab, setTab] = useState<'params' | 'auth' | 'headers' | 'app'>('params');
   useEffect(() => {
     setTab('params');
   }, [selectionNonce]);
@@ -68,23 +69,40 @@ export const McpDebuggerRequestPane: FC<{
 
   const setArgs = (next: Record<string, unknown>) => setArgsByCapability(prev => ({ ...prev, [key]: next }));
 
+  /** The Params as an object, or null when the raw editor holds invalid JSON (the error then shows on the Params tab). */
+  const resolveArgs = (): Record<string, unknown> | null => {
+    if (!rawMode) {
+      return args;
+    }
+    try {
+      const parsed = JSON.parse(rawText || '{}');
+      setRawError(null);
+      return parsed;
+    } catch (err) {
+      setRawError(err instanceof Error ? err.message : 'Invalid JSON');
+      return null;
+    }
+  };
+
   const send = async () => {
     if (!capability) {
       return;
     }
     formRef.current?.validate(); // surface validation, but never block sending: this is a debugger
-    let toSend = args;
-    if (rawMode) {
-      try {
-        toSend = JSON.parse(rawText || '{}');
-        setRawError(null);
-      } catch (err) {
-        setRawError(err instanceof Error ? err.message : 'Invalid JSON');
-        return;
-      }
+    const toSend = resolveArgs();
+    if (!toSend) {
+      return;
     }
     await window.main.mcpDebugger.invokeCapability({ requestId: request._id, capability, args: toSend });
   };
+
+  // An app tab exists only for a tool that declares a ui:// resource (MCP Apps, S7a).
+  const appAvailable = isConnected && !session && capability?.type === 'tool' && Boolean(capability.ui?.resourceUri);
+  useEffect(() => {
+    if (tab === 'app' && !appAvailable) {
+      setTab('params');
+    }
+  }, [tab, appAvailable]);
 
   const lockedBanner = isConnected && (
     <p className="notice info no-margin-top m-(--padding-md)">
@@ -103,6 +121,11 @@ export const McpDebuggerRequestPane: FC<{
         <Tab id="params" className={tabClass}>
           Params
         </Tab>
+        {appAvailable && (
+          <Tab id="app" className={tabClass} data-testid="mcp-app-tab">
+            App
+          </Tab>
+        )}
         <Tab id="auth" className={tabClass}>
           Auth
           {authActive && <span className="h-2 w-2 rounded-full bg-green-500" />}
@@ -129,6 +152,25 @@ export const McpDebuggerRequestPane: FC<{
           <p className="notice info m-(--padding-md)">Select a tool, resource or prompt from the list.</p>
         ) : (
           <div className="flex flex-col gap-3 p-(--padding-md)">
+            {appAvailable && (
+              <div
+                className="flex items-center gap-2 rounded-sm border border-solid border-(--hl-md) bg-(--hl-xs) px-3 py-2 text-xs"
+                data-testid="mcp-app-banner"
+              >
+                <i className="fa fa-window-maximize text-(--hl)" />
+                <span>
+                  This tool comes with an app. It is best used from the App tab, where it runs with these Params and shows
+                  the result as the server intended.
+                </span>
+                <Button
+                  className="ml-auto shrink-0 rounded-sm bg-(--color-surprise) px-(--padding-md) py-0.5 text-(--color-font-surprise) hover:brightness-75"
+                  onPress={() => setTab('app')}
+                  data-testid="mcp-app-banner-open"
+                >
+                  Open App tab
+                </Button>
+              </div>
+            )}
             {/* The toggle is first and fixed-width so it stays put while the tool name/description change size. */}
             <div className="flex items-center gap-3">
               {hasParams && (
@@ -193,6 +235,11 @@ export const McpDebuggerRequestPane: FC<{
               reason="Editing and replaying any call from the trace arrives in slice S2. For now this builds a fresh call."
             />
           </div>
+        )}
+      </TabPanel>
+      <TabPanel id="app" className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        {appAvailable && capability && (
+          <AppPanel requestId={request._id} capability={capability} getArgs={resolveArgs} capabilities={capabilities} />
         )}
       </TabPanel>
       <TabPanel id="auth" className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">

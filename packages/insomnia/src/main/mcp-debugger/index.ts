@@ -33,6 +33,7 @@ export interface McpDebuggerBridgeAPI {
   setRoots: (options: Parameters<typeof service.setRoots>[0]) => Promise<void>;
   replayOnVersion: typeof service.replayOnVersion;
   replayOAuthCall: typeof service.replayOAuthCall;
+  relay: typeof service.relay;
   /** Looks only at the known config paths of other tools on this machine; takes no arguments on purpose. */
   findLocalConfigs: () => Promise<LocalMcpConfig[]>;
   runConformance: typeof runConformance;
@@ -75,6 +76,7 @@ export const registerMcpDebuggerHandlers = () => {
   );
   ipcMainHandle('mcpDebugger.replayOAuthCall', (_, o: Parameters<typeof service.replayOAuthCall>[0]) => service.replayOAuthCall(o));
   ipcMainHandle('mcpDebugger.runConformance', (_, o: Parameters<typeof runConformance>[0]) => runConformance(o));
+  ipcMainHandle('mcpDebugger.relay', (_, o: Parameters<typeof service.relay>[0]) => service.relay(o));
   ipcMainHandle('mcpDebugger.findLocalConfigs', () => findLocalMcpConfigs());
   ipcMainHandle('mcpDebugger.subscribe', (_, o: Parameters<typeof service.subscribe>[0]) => service.subscribe(o));
   ipcMainHandle('mcpDebugger.unsubscribe', (_, o: Parameters<typeof service.unsubscribe>[0]) => service.unsubscribe(o));

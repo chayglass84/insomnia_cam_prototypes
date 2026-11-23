@@ -106,6 +106,11 @@ export const CapabilitySidebar: FC<{
                 className={`flex w-full items-center gap-2 px-2 py-1.5 text-left text-sm hover:bg-(--hl-xs) ${selectedKey === key ? 'bg-(--hl-sm)' : ''}`}
               >
                 <span className={`${CHIP_BASE} ${CHIPS[c.type].className}`}>{CHIPS[c.type].label}</span>
+                {c.ui?.resourceUri && (
+                  <span className={`${CHIP_BASE} border-(--hl-md) text-(--hl)`} title="This tool has an app view (see its App tab)">
+                    App
+                  </span>
+                )}
                 <span className="truncate">{c.metadata.name}</span>
               </button>
             );
