@@ -48,9 +48,6 @@ const SESSION_TABS: Partial<Record<McpDebuggerTabId, { id: SessionTab; label: st
   subscriptions: { id: 'subscriptions', label: 'Subscriptions', chip: 'Ext' },
 };
 
-// Anything in the profile that is not built yet is shown as a visible mock row. Nothing is left as of S4.
-const MOCK_TABS: Partial<Record<McpDebuggerTabId, string>> = {};
-
 export const CapabilitySidebar: FC<{
   capabilities: Capability[];
   protocolVersion?: string;
@@ -74,7 +71,6 @@ export const CapabilitySidebar: FC<{
   // Tools, then resources, then prompts, in server order within each.
   const ordered = useMemo(() => GROUPS.flatMap(({ type }) => visible.filter(c => c.type === type)), [visible]);
   const profile = isSupportedVersion(protocolVersion) ? getProfile(protocolVersion) : null;
-  const mockTabs = profile ? profile.tabs.filter(t => MOCK_TABS[t]) : [];
   const sessionTabs = profile ? profile.tabs.flatMap(t => SESSION_TABS[t] ?? []) : [];
 
   return (
@@ -156,16 +152,6 @@ export const CapabilitySidebar: FC<{
                   </span>
                 )}
               </button>
-            ))}
-          </section>
-        )}
-        {isConnected && mockTabs.length > 0 && (
-          <section className="mt-3 border-t border-dashed border-amber-500/50 p-3" data-testid="mcp-mock-tabs">
-            <h4 className="mb-1 text-xs font-bold text-amber-500 uppercase">Not built yet · {protocolVersion}</h4>
-            {mockTabs.map(t => (
-              <p key={t} className="py-0.5 text-xs text-(--hl)">
-                {MOCK_TABS[t]}
-              </p>
             ))}
           </section>
         )}

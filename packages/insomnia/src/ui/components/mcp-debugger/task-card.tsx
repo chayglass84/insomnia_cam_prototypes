@@ -115,7 +115,7 @@ export const TasksPanel: FC<{ requestId: string; tasks: TaskView[] }> = ({ reque
       A tool call can return a task instead of a result. This client polls it automatically until it finishes (pause it
       any time), and the call that created it settles with the task&apos;s outcome.
     </p>
-    {tasks.length === 0 && <p className="text-sm text-(--hl)">No tasks yet. Call a task tool, such as quick-success-task.</p>}
+    {tasks.length === 0 && <p className="text-sm text-(--hl)">No tasks yet. Call a tool that returns a task and it will show up here.</p>}
     {[...tasks].reverse().map(task => (
       <TaskCard key={task.taskId} requestId={requestId} task={task} />
     ))}

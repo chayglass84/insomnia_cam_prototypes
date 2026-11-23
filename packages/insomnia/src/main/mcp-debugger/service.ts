@@ -12,7 +12,7 @@ import { exchange, type OAuthExchange, type OAuthTrace } from './oauth-discovery
 import { canRefresh, currentAccessToken, isExpired, ownsAccessToken, refreshToken } from './oauth-token';
 
 // Task 4348 S1: the main-process home of the ported Ardi MCPHTTPProtocol. One Session per MCP request id.
-// PROTOTYPE-MOCK: sessions and traces are in-memory only (lost on app restart); S2 persists runs for replay.
+// PROTOTYPE-MOCK: sessions and traces are in-memory only (lost on app restart); run history was judged low value and skipped.
 // PROTOTYPE-MOCK: the renderer polls getState/getTrace (see use-mcp-debugger.ts) instead of receiving pushed events.
 
 export type McpDebuggerStatus = 'disconnected' | 'connecting' | 'connected' | 'error';

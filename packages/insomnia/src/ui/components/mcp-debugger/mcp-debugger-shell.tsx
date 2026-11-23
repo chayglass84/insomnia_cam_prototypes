@@ -25,8 +25,8 @@ import { McpTracePane } from './trace-pane';
 import { useMcpDebugger } from './use-mcp-debugger';
 
 /**
- * Task 4348 S1: the replacement MCP client shell for HTTP requests (stdio still uses the legacy McpPane until a later
- * slice). One shell for every protocol version: what differs per version comes from ProtocolProfile, not from forks.
+ * Task 4348: the replacement MCP client shell for HTTP requests (stdio still uses the legacy McpPane; porting it is not
+ * part of this prototype). One shell for every protocol version: what differs per version comes from ProtocolProfile, not from forks.
  */
 export const McpDebuggerShell = ({ request }: { request: McpRequest }) => {
   const { activeEnvironment, activeGlobalEnvironment, vcsVersion } = useWorkspaceLoaderData()!;

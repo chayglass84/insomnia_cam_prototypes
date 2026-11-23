@@ -16,12 +16,11 @@ import { InsomniaRjsfForm, type InsomniaRjsfFormHandle } from '~/ui/components/r
 import { AppPanel } from './app-panel';
 import type { SessionTab } from './capability-sidebar';
 import { OAuthDiscoverButton } from './oauth-discovery-panel';
-import { PrototypeMock } from './prototype-mock';
 import { SegmentedToggle } from './segmented-toggle';
 import { SessionPanel } from './session-panels';
 
 // Task 4348 S1 request pane: Params (schema form or raw JSON) / Auth / Headers for the selected capability.
-// PROTOTYPE-MOCK: params live in component state per capability (not persisted to McpPayload); S2 persists runs.
+// PROTOTYPE-MOCK: params live in component state per capability (not persisted to McpPayload); there is no run history.
 
 const supportedAuthTypes: AuthTypes[] = ['basic', 'oauth2', 'bearer', 'apikey'];
 const SEND_LABEL = { tool: 'Call Tool', resource: 'Read Resource', prompt: 'Get Prompt' } as const;
@@ -236,10 +235,6 @@ export const McpDebuggerRequestPane: FC<{
                 {rawError && <p className="text-xs text-red-500">{rawError} (send is blocked until the JSON parses)</p>}
               </div>
             )}
-            <PrototypeMock
-              inline={false}
-              reason="Editing and replaying any call from the trace arrives in slice S2. For now this builds a fresh call."
-            />
           </div>
         )}
       </TabPanel>

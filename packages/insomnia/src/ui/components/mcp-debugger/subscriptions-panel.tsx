@@ -181,7 +181,7 @@ export const SubscriptionsPanel: FC<{
       )}
       <div className="flex flex-col gap-1" data-testid="mcp-sub-events">
         <h4 className="text-xs font-bold text-(--hl) uppercase">Notifications received ({events.length})</h4>
-        {events.length === 0 && <p className="text-xs text-(--hl)">Nothing yet. Call the trigger-change tool to see one.</p>}
+        {events.length === 0 && <p className="text-xs text-(--hl)">Nothing yet. Change notifications appear here as the server sends them.</p>}
         {events.map(event => {
           const p = event.payload as { method: string; params?: { uri?: string } };
           return (
