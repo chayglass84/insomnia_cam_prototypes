@@ -33,7 +33,7 @@ export const takePendingExchange = (requestId: string) => {
   return pending;
 };
 
-const b64url = (buf: Buffer) => buf.toString('base64url');
+export const b64url = (buf: Buffer) => buf.toString('base64url');
 export const pkcePair = () => {
   const verifier = b64url(crypto.randomBytes(32));
   return { verifier, challenge: b64url(crypto.createHash('sha256').update(verifier).digest()) };
@@ -96,14 +96,14 @@ const step = (id: OAuthStep['id'], status: OAuthStep['status'], summary: string,
   findings,
 });
 
-interface Listener {
+export interface Listener {
   redirectUri: string;
   wait: (timeoutMs: number, signal: AbortSignal) => Promise<CallbackParams>;
   close: () => void;
 }
 
 /** A one-shot loopback HTTP listener (RFC 8252) for the redirect back from the browser. */
-const listenForCallback = async (): Promise<Listener> => {
+export const listenForCallback = async (): Promise<Listener> => {
   let resolveCallback: (p: CallbackParams) => void = () => {};
   const received = new Promise<CallbackParams>(resolve => {
     resolveCallback = resolve;
@@ -322,6 +322,19 @@ export const runAuthorization = async ({ requestId, context, clientId: clientIdI
     if (inFlight.get(requestId) === controller) {
       inFlight.delete(requestId);
     }
+  }
+};
+
+/** S8: register an in-flight browser leg for this request (aborting a previous one) so Cancel works for it too. */
+export const beginInFlight = (requestId: string): AbortController => {
+  inFlight.get(requestId)?.abort();
+  const controller = new AbortController();
+  inFlight.set(requestId, controller);
+  return controller;
+};
+export const endInFlight = (requestId: string, controller: AbortController) => {
+  if (inFlight.get(requestId) === controller) {
+    inFlight.delete(requestId);
   }
 };
 

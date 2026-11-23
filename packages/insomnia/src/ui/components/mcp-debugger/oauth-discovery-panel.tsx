@@ -11,6 +11,7 @@ import { useRequestPatcher } from '~/ui/hooks/use-request';
 import { tryToInterpolateRequestAndCollectSensitiveValues } from '~/ui/utils/try-interpolate';
 
 import { JsonView } from './json-view';
+import { splitUrls } from './url-text';
 
 // Task 4348 S5: a lightweight OAuth wizard in a modal, opened from the Auth tab when no auth type is chosen.
 //   Step 1 Discover (S5a): 401 -> protected resource metadata -> authorization server metadata (+ what a client can do).
@@ -26,37 +27,6 @@ const DOT: Record<OAuthStepStatus, string> = {
   skipped: 'bg-gray-500',
 };
 const LEVEL_TEXT = { info: '', warn: 'text-amber-500', error: 'text-red-500' } as const;
-
-const ExchangeView: FC<{ exchange: OAuthExchange }> = ({ exchange }) => (
-  <div className="flex flex-col gap-1 rounded-xs border border-solid border-(--hl-md) p-2 text-xs" data-testid="mcp-oauth-exchange">
-    <div className="font-mono">
-      {exchange.request.method} {exchange.request.url}
-    </div>
-    {exchange.error ? (
-      <div className="text-red-500">{exchange.error}</div>
-    ) : (
-      <>
-        <div className="font-mono text-(--hl)">
-          {exchange.response?.status} · {exchange.durationMs} ms
-        </div>
-        <details>
-          <summary className="cursor-pointer text-(--hl)">Response headers</summary>
-          <JsonView value={exchange.response?.headers} />
-        </details>
-        {exchange.response?.body !== undefined && (
-          <details open={typeof exchange.response.body === 'object'}>
-            <summary className="cursor-pointer text-(--hl)">Response body</summary>
-            {typeof exchange.response.body === 'string' ? (
-              <pre className="whitespace-pre-wrap">{exchange.response.body}</pre>
-            ) : (
-              <JsonView value={exchange.response.body} />
-            )}
-          </details>
-        )}
-      </>
-    )}
-  </div>
-);
 
 const CopyButton: FC<{ text: string; label: string; testId?: string }> = ({ text, label, testId }) => {
   const [copied, setCopied] = useState(false);
@@ -85,6 +55,48 @@ const CopyButton: FC<{ text: string; label: string; testId?: string }> = ({ text
     </Button>
   );
 };
+
+/** A URL in its own box with a Copy button, so it is easy to read, select and paste. */
+const UrlBox: FC<{ url: string }> = ({ url }) => (
+  <div className="flex min-w-0 items-start gap-2" data-testid="mcp-oauth-url">
+    <code className="min-w-0 flex-1 rounded-xs bg-(--hl-xs) px-2 py-1 font-mono text-xs break-all select-all">{url}</code>
+    <CopyButton text={url} label="URL" />
+  </div>
+);
+
+const ExchangeView: FC<{ exchange: OAuthExchange }> = ({ exchange }) => (
+  <div className="flex min-w-0 flex-col gap-1 rounded-xs border border-solid border-(--hl-md) p-2 text-xs" data-testid="mcp-oauth-exchange">
+    <div className="flex min-w-0 items-start gap-2">
+      <span className="shrink-0 rounded-xs border border-solid border-(--hl-md) px-1.5 py-1 font-mono">{exchange.request.method}</span>
+      <div className="min-w-0 flex-1">
+        <UrlBox url={exchange.request.url} />
+      </div>
+    </div>
+    {exchange.error ? (
+      <div className="text-red-500 [overflow-wrap:anywhere]">{exchange.error}</div>
+    ) : (
+      <>
+        <div className="font-mono text-(--hl)">
+          {exchange.response?.status} · {exchange.durationMs} ms
+        </div>
+        <details>
+          <summary className="cursor-pointer text-(--hl)">Response headers</summary>
+          <JsonView value={exchange.response?.headers} />
+        </details>
+        {exchange.response?.body !== undefined && (
+          <details open={typeof exchange.response.body === 'object'}>
+            <summary className="cursor-pointer text-(--hl)">Response body</summary>
+            {typeof exchange.response.body === 'string' ? (
+              <pre className="[overflow-wrap:anywhere] whitespace-pre-wrap">{exchange.response.body}</pre>
+            ) : (
+              <JsonView value={exchange.response.body} />
+            )}
+          </details>
+        )}
+      </>
+    )}
+  </div>
+);
 
 const formatExpiry = (expiresAt: number) => {
   const seconds = Math.round((expiresAt - Date.now()) / 1000);
@@ -137,24 +149,73 @@ const TokenCard: FC<{ tokens: OAuthTokens }> = ({ tokens }) => {
   );
 };
 
-const StepView: FC<{ step: OAuthStep; onStepUp?: (scope: string) => void; stepUpDisabled?: boolean }> = ({ step, onStepUp, stepUpDisabled }) => (
-  <li className="flex flex-col gap-1.5 border-b border-solid border-(--hl-md) px-3 py-2" data-testid="mcp-oauth-step" data-step={step.id}>
+/** A JWT a step produced or received (ID token, ID-JAG), copyable and decoded (never verified). */
+const JwtCard: FC<{ label: string; token: string }> = ({ label, token }) => {
+  const jwt = decodeJwt(token);
+  return (
+    <div className="mx-3 mb-1 flex flex-col gap-2 rounded-xs border border-solid border-(--hl-md) p-2" data-testid="mcp-oauth-jwt-card" data-label={label}>
+      <TokenRow label={label} value={token} testId={`mcp-oauth-jwt-${label.toLowerCase().replaceAll(/\W+/g, '-')}`} />
+      {jwt ? (
+        <details open>
+          <summary className="cursor-pointer text-xs text-(--hl)">Decoded (not verified)</summary>
+          <div className="mt-1 flex flex-col gap-1">
+            <JsonView value={{ header: jwt.header, payload: jwt.payload }} />
+            <ul className="text-xs text-(--hl)">
+              {JWT_TIME_CLAIMS.filter(claim => typeof jwt.payload[claim] === 'number').map(claim => (
+                <li key={claim}>
+                  {claim}: {new Date((jwt.payload[claim] as number) * 1000).toLocaleString()}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </details>
+      ) : (
+        <p className="text-xs text-(--hl)">Not a JWT, so there is nothing to decode.</p>
+      )}
+    </div>
+  );
+};
+
+export const StepView: FC<{ step: OAuthStep; onStepUp?: (scope: string) => void; stepUpDisabled?: boolean }> = ({ step, onStepUp, stepUpDisabled }) => {
+  const summary = splitUrls(step.summary);
+  return (
+  <li className="flex min-w-0 flex-col gap-1.5 border-b border-solid border-(--hl-md) px-3 py-2" data-testid="mcp-oauth-step" data-step={step.id}>
     <div className="flex items-center gap-2 text-sm">
       <span className={`h-2 w-2 shrink-0 rounded-full ${DOT[step.status]}`} />
       <span className="font-semibold">{step.title}</span>
       <span className="ml-auto truncate text-xs text-(--hl)" data-testid="mcp-oauth-step-summary">
-        {step.summary}
+        {summary.text}
       </span>
     </div>
+    {summary.urls.length > 0 && (
+      <div className="flex flex-col gap-1 pl-4">
+        {summary.urls.map(url => (
+          <UrlBox key={url} url={url} />
+        ))}
+      </div>
+    )}
     {step.findings.length > 0 && (
       <ul className="ml-4 flex list-disc flex-col gap-1 pl-4 text-xs marker:text-(--hl)">
-        {step.findings.map(finding => (
-          <li key={`${finding.level}:${finding.text}`} className={LEVEL_TEXT[finding.level]}>
-            {finding.text}
-          </li>
-        ))}
+        {step.findings.map(finding => {
+          const parts = splitUrls(finding.text);
+          return (
+            <li key={`${finding.level}:${finding.text}`} className={`[overflow-wrap:anywhere] ${LEVEL_TEXT[finding.level]}`}>
+              {parts.text}
+              {parts.urls.length > 0 && (
+                <div className="mt-1 flex flex-col gap-1">
+                  {parts.urls.map(url => (
+                    <UrlBox key={url} url={url} />
+                  ))}
+                </div>
+              )}
+            </li>
+          );
+        })}
       </ul>
     )}
+    {step.jwts?.map(jwt => (
+      <JwtCard key={`${jwt.label}:${jwt.token.slice(-12)}`} label={jwt.label} token={jwt.token} />
+    ))}
     {step.tokens && <TokenCard tokens={step.tokens} />}
     {step.stepUp && onStepUp && (
       <div className="pl-4">
@@ -181,13 +242,14 @@ const StepView: FC<{ step: OAuthStep; onStepUp?: (scope: string) => void; stepUp
       </details>
     )}
   </li>
-);
+  );
+};
 
-const tooltipClass =
+export const tooltipClass =
   'max-w-xs rounded-md border border-solid border-(--hl-sm) bg-(--color-bg) px-3 py-2 text-xs text-(--color-font) shadow-lg select-none';
-const purpleButton =
+export const purpleButton =
   'shrink-0 rounded-sm bg-(--color-surprise) px-(--padding-md) py-1 text-sm text-(--color-font-surprise) hover:brightness-75 disabled:opacity-50';
-const smallButton = 'rounded-xs border border-solid border-(--hl-md) px-2 py-0.5 text-xs hover:bg-(--hl-sm)';
+export const smallButton = 'rounded-xs border border-solid border-(--hl-md) px-2 py-0.5 text-xs hover:bg-(--hl-sm)';
 
 interface StepSummary {
   label: string;
@@ -229,14 +291,14 @@ export const summarizeSteps = (
     : { label: `In progress, ${counts}`, tone: 'active' };
 };
 
-const WizardStep: FC<{ number: number; title: string; summary: StepSummary; action?: React.ReactNode; children: React.ReactNode }> = ({
+export const WizardStep: FC<{ number: number; title: string; summary: StepSummary; action?: React.ReactNode; children: React.ReactNode }> = ({
   number,
   title,
   summary,
   action,
   children,
 }) => (
-  <section className="flex flex-col rounded-md border border-solid border-(--hl-md)" data-testid={`mcp-oauth-wizard-step-${number}`}>
+  <section className="flex min-w-0 flex-col rounded-md border border-solid border-(--hl-md)" data-testid={`mcp-oauth-wizard-step-${number}`}>
     <header className="flex items-center gap-2 border-b border-solid border-(--hl-md) bg-(--hl-xs) px-3 py-2">
       <span className="text-sm font-bold">
         Step {number} · {title}
@@ -251,7 +313,7 @@ const WizardStep: FC<{ number: number; title: string; summary: StepSummary; acti
 );
 
 /** The button shown in the Auth tab. The wizard itself is `OAuthWizardModal`, mounted by the shell so it survives tab changes. */
-export const OAuthDiscoverButton: FC<{ onOpen: () => void; isDisabled?: boolean }> = ({ onOpen, isDisabled }) => (
+export const OAuthDiscoverButton: FC<{ onOpen: () => void; onOpenXaa?: () => void; isDisabled?: boolean }> = ({ onOpen, onOpenXaa, isDisabled }) => (
   <div className="flex shrink-0 items-center gap-2 border-b border-solid border-(--hl-md) px-3 py-2" data-testid="mcp-oauth-discovery">
     <TooltipTrigger delay={200}>
       <Button className={purpleButton} onPress={onOpen} isDisabled={isDisabled} data-testid="mcp-oauth-discover">
@@ -262,6 +324,18 @@ export const OAuthDiscoverButton: FC<{ onOpen: () => void; isDisabled?: boolean 
         browser, with every request and response visible.
       </Tooltip>
     </TooltipTrigger>
+    {onOpenXaa && (
+      <TooltipTrigger delay={200}>
+        <Button className={purpleButton} onPress={onOpenXaa} isDisabled={isDisabled} data-testid="mcp-xaa-discover">
+          Discover XAA
+        </Button>
+        <Tooltip offset={8} className={tooltipClass}>
+          Open the enterprise-managed authorization (XAA) debugger: sign in at your company identity provider, trade that
+          sign-in for an ID-JAG, and redeem it at this server's authorization server, with every step visible. No
+          per-server consent page.
+        </Tooltip>
+      </TooltipTrigger>
+    )}
   </div>
 );
 
@@ -419,7 +493,7 @@ export const OAuthWizardModal: FC<{
                     <Icon icon="x" />
                   </Button>
                 </div>
-                <div className="flex flex-1 flex-col gap-3 overflow-y-auto" data-testid="mcp-oauth-wizard">
+                <div className="flex min-w-0 flex-1 flex-col gap-3 overflow-x-hidden overflow-y-auto" data-testid="mcp-oauth-wizard">
                   <WizardStep
                     number={1}
                     title="Discover"

@@ -56,7 +56,7 @@ export const JsonView: FC<{ value: unknown }> = ({ value }) => {
   };
 
   return (
-    <div className="relative">
+    <div className="relative min-w-0 max-w-full">
       <pre className="overflow-auto rounded-xs bg-(--hl-xs) p-2 pr-8 text-xs">
         {parts.map((part, i) => (
           // eslint-disable-next-line react/no-array-index-key -- tokens have no identity

@@ -31,6 +31,11 @@ export const isExpired = (requestId: string, skewMs = 0) => {
 /** The scope of the stored token, for asking for more of it (step-up). */
 export const storedScope = ({ requestId }: { requestId: string }) => tokens.get(requestId)?.scope;
 
+/** S8: store a token obtained outside the authorization-code flow (the XAA JWT bearer grant), so Connect and Insomnia's token upkeep treat it like any wizard token. */
+export const storeToken = (requestId: string, set: Pick<TokenSet, 'accessToken' | 'refreshToken' | 'expiresAt' | 'scope'>, clientId: string, context: OAuthContext) => {
+  tokens.set(requestId, { ...set, clientId, context, history: [set.accessToken] });
+};
+
 export const hasToken = ({ requestId }: { requestId: string }) => tokens.has(requestId);
 export const clearToken = ({ requestId }: { requestId: string }) => {
   tokens.delete(requestId);

@@ -110,7 +110,7 @@ const CheckRow: FC<{ check: ConformanceCheck }> = ({ check }) => {
             <span className="shrink-0 rounded-xs border border-solid border-(--hl-md) px-1 font-mono text-[10px] text-(--hl)">{check.version}</span>
           )}
         </div>
-        <p className="text-xs text-(--hl)">{check.detail}</p>
+        <p className="text-xs [overflow-wrap:anywhere] text-(--hl)">{check.detail}</p>
         {check.probe && (
           <details className="mt-1">
             <summary className="cursor-pointer text-xs text-(--hl)">Request and response</summary>
@@ -200,7 +200,7 @@ export const ConformanceModal: FC<{
                   </Button>
                 </div>
               </div>
-              <div className="flex flex-1 flex-col gap-4 overflow-y-auto" data-testid="mcp-conformance-report">
+              <div className="flex min-w-0 flex-1 flex-col gap-4 overflow-x-hidden overflow-y-auto" data-testid="mcp-conformance-report">
                 <p className="truncate font-mono text-xs text-(--hl)">{report?.url ?? request.url}</p>
                 {error && <p className="text-sm text-red-500">{error}</p>}
                 {running && !report && <p className="text-sm text-(--hl)">Probing the server…</p>}
@@ -221,7 +221,7 @@ export const ConformanceModal: FC<{
                         <div key={v.version} className="flex items-baseline gap-3 px-2 py-1.5 text-sm" data-testid={`mcp-conformance-version-${v.version}`} data-outcome={v.outcome}>
                           <span className="w-24 shrink-0 font-mono">{v.version}</span>
                           <span className={`w-44 shrink-0 ${OUTCOME[v.outcome].className}`}>{OUTCOME[v.outcome].label}</span>
-                          <span className="min-w-0 text-xs text-(--hl)">{v.note}</span>
+                          <span className="min-w-0 text-xs [overflow-wrap:anywhere] text-(--hl)">{v.note}</span>
                         </div>
                       ))}
                     </div>

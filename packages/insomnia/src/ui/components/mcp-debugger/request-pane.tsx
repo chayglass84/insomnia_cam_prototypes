@@ -38,9 +38,10 @@ export const McpDebuggerRequestPane: FC<{
   isConnected: boolean;
   uniqueKey: string;
   onOpenOAuth: () => void;
+  onOpenXaa: () => void;
   /** Changes whenever the user clicks an item in the left pane; the pane returns to the Params tab. */
   selectionNonce: number;
-}> = ({ request, capability, session, tasks, subscription, trace, capabilities, isConnected, uniqueKey, onOpenOAuth, selectionNonce }) => {
+}> = ({ request, capability, session, tasks, subscription, trace, capabilities, isConnected, uniqueKey, onOpenOAuth, onOpenXaa, selectionNonce }) => {
   const [tab, setTab] = useState<'params' | 'auth' | 'headers' | 'app'>('params');
   useEffect(() => {
     setTab('params');
@@ -252,7 +253,7 @@ export const McpDebuggerRequestPane: FC<{
           authTypes={supportedAuthTypes}
           hideInherit
           addToHeaderOnly
-          belowToolbar={!authActive || requestAuth?.type === 'bearer' ? <OAuthDiscoverButton onOpen={onOpenOAuth} isDisabled={!request.url} /> : undefined}
+          belowToolbar={!authActive || requestAuth?.type === 'bearer' ? <OAuthDiscoverButton onOpen={onOpenOAuth} onOpenXaa={onOpenXaa} isDisabled={!request.url} /> : undefined}
         />
       </TabPanel>
       <TabPanel id="headers" className="w-full flex-1 overflow-y-auto">

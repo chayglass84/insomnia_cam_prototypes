@@ -8,7 +8,7 @@ import type { Capability, Connection, IntrospectionWarning,Invocation } from '~/
 import type { TraceEvent } from '~/common/mcp-debugger/protocol/TraceEvent';
 import { isVersionChoice } from '~/common/mcp-debugger/versions';
 
-import { exchange, type OAuthExchange, type OAuthTrace } from './oauth-discovery';
+import { type AuthServerMetadata, discoverOAuth, exchange, type OAuthExchange, type OAuthTrace, supportsIdJag } from './oauth-discovery';
 import { canRefresh, currentAccessToken, isExpired, ownsAccessToken, refreshToken } from './oauth-token';
 
 // Task 4348 S1: the main-process home of the ported Ardi MCPHTTPProtocol. One Session per MCP request id.
@@ -25,6 +25,8 @@ interface Session {
   error?: string;
   protocolIssue?: string;
   oauthRequired?: boolean;
+  /** S8: after an OAuth challenge, whether the server's authorization server accepts ID-JAGs (undefined until the check finishes). */
+  xaaSupported?: boolean;
   /** Bumped each time Insomnia swaps in a refreshed OAuth token on this connection, so the UI can update the Auth tab. */
   oauthRefresh?: { seq: number; accessToken: string };
   url?: string;
@@ -246,6 +248,8 @@ export interface McpDebuggerState {
   subscription?: SubscriptionView;
   /** The last connect failed with a 401 Bearer challenge, so the server probably wants OAuth (UI offers discovery). */
   oauthRequired?: boolean;
+  /** S8: the OAuth challenge's authorization server accepts ID-JAGs, so the UI can offer XAA (undefined until known). */
+  xaaSupported?: boolean;
   /** A token Insomnia refreshed on this connection (S5): bumps `seq` so the UI can write it to the Auth tab. */
   oauthRefresh?: { seq: number; accessToken: string };
 }
@@ -265,6 +269,7 @@ export const getState = ({ requestId }: { requestId: string }): McpDebuggerState
     replays: s.replays,
     subscription: s.subscription,
     oauthRequired: s.oauthRequired,
+    xaaSupported: s.xaaSupported,
     oauthRefresh: s.oauthRefresh,
     tasks: [...s.tasks.values()].map(t => ({
       ...t,
@@ -339,6 +344,7 @@ export const connect = async (options: McpDebuggerConnectOptions): Promise<McpDe
   s.error = undefined;
   s.protocolIssue = undefined;
   s.oauthRequired = false;
+  s.xaaSupported = undefined;
   s.url = url;
   void closeAlts(requestId);
   clearTasks(s);
@@ -385,6 +391,16 @@ export const connect = async (options: McpDebuggerConnectOptions): Promise<McpDe
     s.protocolIssue = protocolIssueOf(err, url, options.protocolVersion);
     s.oauthRequired = isOAuthChallenge(err);
     s.conn = undefined;
+    if (s.oauthRequired) {
+      // Best effort and in the background (the UI polls): does this server's authorization server accept ID-JAGs?
+      void discoverOAuth({ url, headers: options.headers.filter(h => !h.disabled) })
+        .then(found => {
+          s.xaaSupported = supportsIdJag(found.context?.authorizationServer as AuthServerMetadata | undefined);
+        })
+        .catch(() => {
+          s.xaaSupported = false;
+        });
+    }
   }
   return getState({ requestId });
 };

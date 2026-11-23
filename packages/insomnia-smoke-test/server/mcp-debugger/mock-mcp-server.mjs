@@ -14,6 +14,8 @@ const validBearerToken = "good-token";
 // Mock authorization server origin, used in WWW-Authenticate for OAuth-protected endpoints.
 const mockAuthorizationServerOrigin =
   process.env.MOCK_AUTHORIZATION_SERVER_ORIGIN ?? "http://127.0.0.1:9000";
+// 4348 S8: the XAA-capable authorization server (mock-authorization-server.mjs with MOCK_AS_XAA=1) behind /xaa-protected.
+const xaaAuthorizationServerOrigin = process.env.MOCK_XAA_AUTHORIZATION_SERVER_ORIGIN ?? "http://127.0.0.1:9001";
 
 function readJson(req) {
   return new Promise((resolve, reject) => {
@@ -331,21 +333,21 @@ function unauthorized(res) {
  * For speed, we accept any non-empty Authorization: Bearer header that the authorization
  * server would accept — we rely on the mock authorization server introspect to confirm.
  */
-function writeOauthUnauthorized(res, scope) {
+function writeOauthUnauthorized(res, scope, asOrigin = mockAuthorizationServerOrigin) {
   writeJson(
     res,
     401,
     { error: "unauthorized" },
     {
-      "WWW-Authenticate": `Bearer realm="mock-mcp-server", resource_metadata="${mockAuthorizationServerOrigin}/.well-known/oauth-protected-resource"${scope ? `, scope="${scope}"` : ""}`,
+      "WWW-Authenticate": `Bearer realm="mock-mcp-server", resource_metadata="${asOrigin}/.well-known/oauth-protected-resource"${scope ? `, scope="${scope}"` : ""}`,
     },
   );
 }
 
 /** Introspection result ({ active, scope, ... }) or null when the authorization server could not be reached. */
-async function introspectTokenInfo(token) {
+async function introspectTokenInfo(token, asOrigin = mockAuthorizationServerOrigin) {
   return new Promise((resolve) => {
-    const url = `${mockAuthorizationServerOrigin}/introspect?token=${encodeURIComponent(token)}`;
+    const url = `${asOrigin}/introspect?token=${encodeURIComponent(token)}`;
     const req = http.get(url, (res) => {
       const chunks = [];
       res.on("data", (c) => chunks.push(c));
@@ -760,6 +762,18 @@ async function handler(req, res) {
       const valid = await introspectToken(match[1]);
       if (!valid) {
         writeOauthUnauthorized(res);
+        return;
+      }
+      await handleLegacy(req, res);
+      return;
+    }
+
+    // 4348 S8: the same OAuth-protected MCP endpoint, but its authorization server (MOCK_AS_XAA=1, :9001) also accepts
+    // ID-JAGs, so Discover XAA is offered. /oauth-protected stays a plain OAuth server (:9000) for the not-offered case.
+    if (req.url === "/xaa-protected") {
+      const match = (req.headers.authorization ?? "").match(/^Bearer (.+)$/i);
+      if (!match || (await introspectTokenInfo(match[1], xaaAuthorizationServerOrigin))?.active !== true) {
+        writeOauthUnauthorized(res, undefined, xaaAuthorizationServerOrigin);
         return;
       }
       await handleLegacy(req, res);

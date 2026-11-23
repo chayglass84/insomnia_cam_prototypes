@@ -23,6 +23,7 @@ import { OAuthWizardModal } from './oauth-discovery-panel';
 import { McpDebuggerRequestPane } from './request-pane';
 import { McpTracePane } from './trace-pane';
 import { useMcpDebugger } from './use-mcp-debugger';
+import { XaaWizardModal } from './xaa-wizard-modal';
 
 /**
  * Task 4348: the replacement MCP client shell for HTTP requests (stdio still uses the legacy McpPane; porting it is not
@@ -37,6 +38,7 @@ export const McpDebuggerShell = ({ request }: { request: McpRequest }) => {
   const isConnected = state.status === 'connected';
   const [oauthOpen, setOauthOpen] = useState(false);
   const [conformanceOpen, setConformanceOpen] = useState(false);
+  const [xaaOpen, setXaaOpen] = useState(false);
   // Bumped on every click in the left pane (even on the already-selected item) so the request pane goes back to Params.
   const [selectionNonce, setSelectionNonce] = useState(0);
   const [oauthPromptDismissed, setOauthPromptDismissed] = useState(false);
@@ -91,9 +93,25 @@ export const McpDebuggerShell = ({ request }: { request: McpRequest }) => {
           data-testid="mcp-oauth-prompt"
         >
           <i className="fa fa-lock" />
-          <span>This server asked for OAuth. Want Insomnia to discover how to sign in?</span>
+          {state.xaaSupported ? (
+            <span data-testid="mcp-oauth-prompt-xaa-note">
+              This server asked for OAuth, and its authorization server supports enterprise-managed authorization (XAA). Sign in
+              through your company identity provider, or discover standard OAuth?
+            </span>
+          ) : (
+            <span>This server asked for OAuth. Want Insomnia to discover how to sign in?</span>
+          )}
+          {state.xaaSupported && (
+            <Button
+              className="ml-auto rounded-sm bg-(--color-surprise) px-(--padding-md) py-0.5 text-(--color-font-surprise) hover:brightness-75"
+              onPress={() => setXaaOpen(true)}
+              data-testid="mcp-oauth-prompt-xaa"
+            >
+              Discover XAA
+            </Button>
+          )}
           <Button
-            className="ml-auto rounded-sm bg-(--color-surprise) px-(--padding-md) py-0.5 text-(--color-font-surprise) hover:brightness-75"
+            className={`${state.xaaSupported ? '' : 'ml-auto '}rounded-sm ${state.xaaSupported ? 'border border-solid border-(--hl-md) hover:bg-(--hl-sm)' : 'bg-(--color-surprise) text-(--color-font-surprise) hover:brightness-75'} px-(--padding-md) py-0.5`}
             onPress={() => setOauthOpen(true)}
             data-testid="mcp-oauth-prompt-discover"
           >
@@ -109,6 +127,7 @@ export const McpDebuggerShell = ({ request }: { request: McpRequest }) => {
         </div>
       )}
       <ConformanceModal request={request} environmentId={activeEnvironment?._id || ''} isOpen={conformanceOpen} onOpenChange={setConformanceOpen} />
+      <XaaWizardModal request={request} environmentId={activeEnvironment?._id || ''} isOpen={xaaOpen} onOpenChange={setXaaOpen} />
       <OAuthWizardModal request={request} environmentId={activeEnvironment?._id || ''} isOpen={oauthOpen} onOpenChange={setOauthOpen} />
       <PanelGroup
         autoSaveId="insomnia-sidebar"
@@ -149,6 +168,7 @@ export const McpDebuggerShell = ({ request }: { request: McpRequest }) => {
                   isConnected={isConnected}
                   uniqueKey={uniqueKey}
                   onOpenOAuth={() => setOauthOpen(true)}
+                  onOpenXaa={() => setXaaOpen(true)}
                   selectionNonce={selectionNonce}
                 />
               </ErrorBoundary>

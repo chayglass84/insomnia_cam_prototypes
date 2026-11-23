@@ -8,6 +8,7 @@ import { cancelAuthorization, runAuthorization, unionScopes } from './oauth-flow
 import { exchangeCode, refreshToken, storedScope } from './oauth-token';
 import { probeMcpServer } from './probe';
 import * as service from './service';
+import { xaaExchange, xaaRedeem, xaaSignIn } from './xaa';
 
 // Task 4348 main-process entry. Each function is plain; expose new ones through McpDebuggerBridgeAPI +
 // entry.preload.ts + the channel list in ipc/electron.ts (see AGENTS.md "Electron IPC").
@@ -19,6 +20,9 @@ export interface McpDebuggerBridgeAPI {
   oauthDiscover: (options: Omit<Parameters<typeof discoverOAuth>[0], 'trace'> & { requestId: string }) => ReturnType<typeof discoverOAuth>;
   oauthAuthorize: (options: OAuthAuthorizeIpcOptions) => ReturnType<typeof runAuthorization>;
   oauthCancel: typeof cancelAuthorization;
+  xaaSignIn: (options: Omit<Parameters<typeof xaaSignIn>[0], 'openUrl' | 'trace'>) => ReturnType<typeof xaaSignIn>;
+  xaaExchange: (options: Omit<Parameters<typeof xaaExchange>[0], 'trace'>) => ReturnType<typeof xaaExchange>;
+  xaaRedeem: (options: Omit<Parameters<typeof xaaRedeem>[0], 'trace'>) => ReturnType<typeof xaaRedeem>;
   oauthExchange: (options: { requestId: string }) => ReturnType<typeof exchangeCode>;
   oauthRefresh: (options: { requestId: string }) => ReturnType<typeof refreshToken>;
   connect: typeof service.connect;
@@ -54,6 +58,15 @@ export const registerMcpDebuggerHandlers = () => {
       openUrl: url => shell.openExternal(url),
       trace: service.oauthTraceFor(o.requestId),
     }),
+  );
+  ipcMainHandle('mcpDebugger.xaaSignIn', (_, o: Omit<Parameters<typeof xaaSignIn>[0], 'openUrl' | 'trace'>) =>
+    xaaSignIn({ ...o, openUrl: url => shell.openExternal(url), trace: service.oauthTraceFor(o.requestId) }),
+  );
+  ipcMainHandle('mcpDebugger.xaaExchange', (_, o: Omit<Parameters<typeof xaaExchange>[0], 'trace'>) =>
+    xaaExchange({ ...o, trace: service.oauthTraceFor(o.requestId) }),
+  );
+  ipcMainHandle('mcpDebugger.xaaRedeem', (_, o: Omit<Parameters<typeof xaaRedeem>[0], 'trace'>) =>
+    xaaRedeem({ ...o, trace: service.oauthTraceFor(o.requestId) }),
   );
   ipcMainHandle('mcpDebugger.oauthCancel', (_, o: Parameters<typeof cancelAuthorization>[0]) => cancelAuthorization(o));
   ipcMainHandle('mcpDebugger.oauthExchange', (_, o: { requestId: string }) => exchangeCode({ ...o, trace: service.oauthTraceFor(o.requestId) }));

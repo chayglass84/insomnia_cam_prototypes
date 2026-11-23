@@ -40,7 +40,22 @@ export interface OAuthTraceHandle {
 export type OAuthTrace = (label: string, request: OAuthExchange['request']) => OAuthTraceHandle;
 
 export interface OAuthStep {
-  id: 'challenge' | 'protected-resource' | 'authorization-server' | 'registration' | 'authorize' | 'callback' | 'token' | 'verify' | 'refresh';
+  id:
+    | 'challenge'
+    | 'protected-resource'
+    | 'authorization-server'
+    | 'registration'
+    | 'authorize'
+    | 'callback'
+    | 'token'
+    | 'verify'
+    | 'refresh'
+    // 4348 S8 (XAA / enterprise-managed authorization)
+    | 'idp-metadata'
+    | 'idp-signin'
+    | 'idp-token'
+    | 'id-jag'
+    | 'jwt-bearer';
   title: string;
   status: OAuthStepStatus;
   summary: string;
@@ -52,6 +67,8 @@ export interface OAuthStep {
   stepUp?: { scope: string };
   /** Set by the registration step: the client_id in use, so the UI can offer to save it. */
   clientId?: string;
+  /** JWTs this step produced or received, so the UI can show them decoded (S8). */
+  jwts?: { label: string; token: string }[];
 }
 
 /** What discovery learned, handed to the authorization flow (S5b) so it does not have to rediscover. */
@@ -131,7 +148,15 @@ export interface AuthServerMetadata {
   token_endpoint_auth_methods_supported?: string[];
   grant_types_supported?: string[];
   scopes_supported?: string[];
+  /** Enterprise-Managed Authorization (XAA): `urn:ietf:params:oauth:grant-profile:id-jag` means it accepts ID-JAGs. */
+  authorization_grant_profiles_supported?: string[];
 }
+
+export const ID_JAG_GRANT_PROFILE = 'urn:ietf:params:oauth:grant-profile:id-jag';
+
+/** True when the authorization server says it accepts ID-JAGs (enterprise-managed authorization, S8). */
+export const supportsIdJag = (metadata?: AuthServerMetadata): boolean =>
+  metadata?.authorization_grant_profiles_supported?.includes(ID_JAG_GRANT_PROFILE) === true;
 
 /** Turn the authorization server metadata into what an MCP client needs to decide how to proceed. */
 export const buildVerdict = (metadata: AuthServerMetadata): OAuthFinding[] => {
@@ -158,6 +183,9 @@ export const buildVerdict = (metadata: AuthServerMetadata): OAuthFinding[] => {
       level: 'warn',
       text: 'Neither CIMD nor a registration_endpoint is advertised: a pre-registered client_id would be required.',
     });
+  }
+  if (supportsIdJag(metadata)) {
+    findings.push({ level: 'info', text: 'Enterprise-managed authorization (XAA) supported: it accepts ID-JAGs. Use Discover XAA to sign in through your company identity provider instead of a consent page.' });
   }
   if (metadata.authorization_response_iss_parameter_supported) {
     findings.push({ level: 'info', text: 'RFC 9207 iss parameter on the authorization response supported (clients should verify it).' });
@@ -414,4 +442,9 @@ export const STEP_TITLES: Record<OAuthStep['id'], string> = {
   token: 'Token exchange',
   verify: 'Call the MCP server with the token',
   refresh: 'Refresh the token',
+  'idp-metadata': 'Identity provider metadata',
+  'idp-signin': 'Sign in at the identity provider',
+  'idp-token': 'Identity provider token',
+  'id-jag': 'Token exchange for an ID-JAG',
+  'jwt-bearer': 'JWT bearer grant at the MCP authorization server',
 };

@@ -17,6 +17,14 @@
  *   ?short_ttl=1       – issue access_token with 2s expiry (triggers refresh)
  *   ?fail_refresh=1    – return invalid_grant on /token with grant_type=refresh_token
  *
+ * Enterprise-Managed Authorization / XAA (4348 S8), only when started with MOCK_AS_XAA=1 (otherwise this is a plain OAuth
+ * authorization server: no id-jag profile in its metadata, and the jwt-bearer grant is refused): also accepts the RFC 7523 JWT bearer grant carrying an ID-JAG
+ * (typ oauth-id-jag+jwt) issued by the mock IdP (mock-idp.mjs, MOCK_TRUSTED_IDP, default http://127.0.0.1:9100), and
+ * advertises authorization_grant_profiles_supported. The ID-JAG is validated the way the draft says an authorization
+ * server must (typ, signature, issuer, aud, exp, client_id binding, jti replay) and rejected with invalid_grant plus a
+ * description naming the failed check. The client authenticates with client_id `insomnia-xaa` and client_secret
+ * `insomnia-xaa-as-secret` (deliberately different from the IdP secret: the two registrations are independent).
+ *
  * Consent page (4348): with MOCK_AUTH_CONSENT=1 (or the `consent` flag via /admin/flags), /authorize shows a silly
  * Absolutely / No Way page instead of auto-granting, so the browser leg of the flow is visible. Off by default so the
  * e2e specs, which rely on the auto-grant redirect, are unaffected.
@@ -106,6 +114,49 @@ function verifyPkce(verifier, challenge) {
 
 const issuer = `http://${host}:${port}`;
 
+/** XAA support is opt-in, so one mock can be a plain OAuth server (:9000) and another an XAA-capable one (:9001). */
+const xaaEnabled = process.env.MOCK_AS_XAA === "1";
+const JWT_BEARER = "urn:ietf:params:oauth:grant-type:jwt-bearer";
+const ID_JAG_PROFILE = "urn:ietf:params:oauth:grant-profile:id-jag";
+const trustedIdp = process.env.MOCK_TRUSTED_IDP ?? "http://127.0.0.1:9100";
+/** The one client registered for the XAA grant at this authorization server. */
+const XAA_CLIENT = { id: "insomnia-xaa", secret: "insomnia-xaa-as-secret" };
+/** jti values already redeemed (an ID-JAG is single use). */
+const usedJtis = new Set();
+
+/** Validate an ID-JAG; returns { claims } or { error } where error is the invalid_grant description. */
+async function validateIdJag(assertion) {
+  const parts = String(assertion).split(".");
+  if (parts.length !== 3) return { error: "assertion is not a JWT" };
+  let header;
+  let claims;
+  try {
+    header = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8"));
+    claims = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+  } catch {
+    return { error: "assertion is not valid base64url JSON" };
+  }
+  if (header.typ !== "oauth-id-jag+jwt") return { error: `JWT header typ must be oauth-id-jag+jwt, got ${header.typ ?? "(none)"}` };
+  if (claims.iss !== trustedIdp) return { error: `untrusted issuer ${claims.iss}; this server trusts ${trustedIdp}` };
+  let jwks;
+  try {
+    jwks = await (await fetch(`${trustedIdp}/.well-known/jwks.json`)).json();
+  } catch (err) {
+    return { error: `could not fetch the IdP's JWKS: ${err.message}` };
+  }
+  const jwk = jwks.keys?.find((k) => k.kid === header.kid);
+  if (!jwk) return { error: `no key with kid ${header.kid} in the IdP's JWKS` };
+  const signatureOk = crypto.verify("RSA-SHA256", Buffer.from(`${parts[0]}.${parts[1]}`), crypto.createPublicKey({ key: jwk, format: "jwk" }), Buffer.from(parts[2], "base64url"));
+  if (!signatureOk) return { error: "signature verification failed" };
+  if (claims.aud !== issuer) return { error: `aud must be this authorization server (${issuer}), got ${claims.aud}` };
+  if (typeof claims.exp !== "number" || claims.exp <= Math.floor(Date.now() / 1000)) return { error: "the ID-JAG has expired" };
+  for (const claim of ["sub", "client_id", "jti", "iat"]) {
+    if (claims[claim] === undefined) return { error: `required claim ${claim} is missing` };
+  }
+  if (usedJtis.has(claims.jti)) return { error: `jti ${claims.jti} was already used (an ID-JAG can be redeemed once)` };
+  return { claims };
+}
+
 function auhorizationServerMetadata() {
   return {
     issuer,
@@ -113,7 +164,9 @@ function auhorizationServerMetadata() {
     token_endpoint: `${issuer}/token`,
     registration_endpoint: `${issuer}/register`,
     response_types_supported: ["code"],
-    grant_types_supported: ["authorization_code", "refresh_token"],
+    grant_types_supported: xaaEnabled ? ["authorization_code", "refresh_token", JWT_BEARER] : ["authorization_code", "refresh_token"],
+    // Enterprise-Managed Authorization (XAA): this server accepts ID-JAGs (draft-ietf-oauth-identity-assertion-authz-grant).
+    ...(xaaEnabled ? { authorization_grant_profiles_supported: [ID_JAG_PROFILE] } : {}),
     code_challenge_methods_supported: ["S256"],
     authorization_response_iss_parameter_supported: true,
     client_id_metadata_document_supported: true,
@@ -471,6 +524,38 @@ async function handleToken(req, res) {
     return;
   }
 
+  if (grantType === JWT_BEARER && xaaEnabled) {
+    // Client authentication (client_secret_post or Basic).
+    let clientId = body.client_id;
+    let secret = body.client_secret;
+    const basic = /^Basic (.+)$/i.exec(req.headers.authorization ?? "");
+    if (basic) {
+      const [user, pass] = Buffer.from(basic[1], "base64").toString("utf8").split(":");
+      clientId = decodeURIComponent(user);
+      secret = decodeURIComponent(pass ?? "");
+    }
+    if (clientId !== XAA_CLIENT.id || secret !== XAA_CLIENT.secret) {
+      return writeError(res, 401, "invalid_client", "Client authentication failed (unknown client_id or wrong client_secret for this authorization server).");
+    }
+    if (!body.assertion) {
+      return writeError(res, 400, "invalid_request", "assertion is required");
+    }
+    const checked = await validateIdJag(body.assertion);
+    if (checked.error) {
+      return writeError(res, 400, "invalid_grant", checked.error);
+    }
+    const { claims } = checked;
+    if (claims.client_id !== clientId) {
+      return writeError(res, 400, "invalid_grant", `the ID-JAG client_id (${claims.client_id}) does not match the authenticated client (${clientId})`);
+    }
+    usedJtis.add(claims.jti);
+    const accessToken = randomToken(32);
+    const expiresIn = flags.shortTtl ? SHORT_TTL_SECONDS : 3600;
+    // Audience-restricted to the MCP server named by the ID-JAG's resource claim, and no refresh token (the draft says SHOULD NOT).
+    accessTokens.set(accessToken, { clientId, resource: claims.resource, expiresAt: Date.now() + expiresIn * 1000, scope: claims.scope });
+    return writeJson(res, 200, { access_token: accessToken, token_type: "Bearer", expires_in: expiresIn, ...(claims.scope ? { scope: claims.scope } : {}) });
+  }
+
   writeError(res, 400, "unsupported_grant_type", `Unknown grant_type: ${grantType}`);
 }
 
@@ -503,6 +588,7 @@ async function handleAdmin(req, res) {
     accessTokens.clear();
     refreshTokens.clear();
     registeredClients.clear();
+    usedJtis.clear();
     flags.omitDiscovery = false;
     flags.tamperIss = false;
     flags.fail = false;
