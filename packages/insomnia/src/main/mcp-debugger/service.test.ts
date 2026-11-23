@@ -454,4 +454,26 @@ describe('mcp-debugger relay (MCP Apps)', () => {
     await service.disconnect({ requestId });
     expect((await service.relay({ requestId, invocation: { method: 'ping' } })).error?.message).toBe('Not connected');
   });
+
+  it('continues a W3C trace when the request carries _meta.traceparent (mock behavior used by the metadata view)', async () => {
+    const requestId = 'req_traceparent';
+    await service.connect({ requestId, url: `${base}/stateless`, headers: [], protocolVersion: 'auto' });
+    const traceparent = '00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01';
+    const call = await service.relay({
+      requestId,
+      invocation: { method: 'tools/call', params: { name: 'echo', arguments: { message: 'traced' }, _meta: { traceparent } } },
+    });
+    const meta = (call.result as { _meta?: { traceparent?: string; tracestate?: string } })._meta;
+    expect(meta?.traceparent).toMatch(/^00-4bf92f3577b34da6a3ce929d0e0e4736-[0-9a-f]{16}-01$/);
+    expect(meta?.traceparent).not.toBe(traceparent);
+    expect(meta?.tracestate).toBe('mock=continued');
+    // A plain call gets no _meta back.
+    const plain = await service.relay({ requestId, invocation: { method: 'tools/call', params: { name: 'echo', arguments: { message: 'plain' } } } });
+    expect((plain.result as { _meta?: unknown })._meta).toBeUndefined();
+    // The discover row in the trace shows the params as sent, including our client capabilities.
+    const discover = service.getTrace({ requestId }).find(e => e.direction === 'client-to-server' && (e.payload as { method?: string })?.method === 'server/discover');
+    const sent = (discover?.payload as { params?: { _meta?: Record<string, unknown> } }).params?._meta;
+    expect(JSON.stringify(sent?.['io.modelcontextprotocol/clientCapabilities'])).toContain('io.modelcontextprotocol/ui');
+    await service.disconnect({ requestId });
+  });
 });

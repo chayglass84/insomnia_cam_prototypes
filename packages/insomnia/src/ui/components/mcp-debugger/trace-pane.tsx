@@ -16,6 +16,8 @@ import { Dropdown, DropdownItem, DropdownSection, ItemContent } from '~/ui/compo
 import { buildCurl } from './curl-command';
 import { JsonView } from './json-view';
 import { diffJson, type DiffLine, hasChanges } from './line-diff';
+import { MetaSection, NegotiationSection } from './meta-section';
+import { handshakeCapabilities, metaOf } from './meta-view';
 import { InputRequiredResponder } from './mrtr-form';
 import { fromEditable, type OAuthWireRequest, singleUseNote, toEditable } from './oauth-replay';
 import { SegmentedToggle } from './segmented-toggle';
@@ -471,6 +473,7 @@ const CallDetail: FC<{
       <section>
         <h4 className="mb-1 text-xs font-bold text-(--hl) uppercase">Request</h4>
         <JsonView value={request.payload} />
+        <MetaSection meta={metaOf(request.payload)} />
         {request.requestHeaders && (
           <details className="mt-1">
             <summary className="cursor-pointer text-xs text-(--hl)">
@@ -480,6 +483,11 @@ const CallDetail: FC<{
           </details>
         )}
       </section>
+      {(() => {
+        // A handshake call (server/discover or initialize) also shows what each side offered and which extensions are in effect.
+        const caps = terminal?.terminalStatus === 'success' ? handshakeCapabilities(request.payload, terminal.payload) : null;
+        return caps ? <NegotiationSection clientCaps={caps.clientCaps} serverCaps={caps.serverCaps} /> : null;
+      })()}
       {replies.length === 0 && <p className="text-(--hl)">Waiting for a response…</p>}
       {replies.map(reply => (
         <section key={reply.id}>
@@ -488,6 +496,7 @@ const CallDetail: FC<{
             {reply.terminalStatus && ` · ${reply.terminalStatus}`}
           </h4>
           <JsonView value={reply.payload} />
+          <MetaSection meta={metaOf(reply.payload)} />
           {reply.responseHeaders && (
             <details className="mt-1">
               <summary className="cursor-pointer text-xs text-(--hl)">

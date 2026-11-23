@@ -319,7 +319,8 @@ export class MCPHTTPProtocol implements Protocol<MCPConnectConfig> {
     onTrace: TraceSink | undefined,
   ): Promise<MCPConnection> {
     onTrace?.(
-      this.trace.request(DISCOVER_CORRELATION_ID, "server/discover", {}, getRequestHeaders()),
+      // 4348 S7b: trace the params as actually sent (the per-request `_meta` with our client capabilities), not `{}`.
+      this.trace.request(DISCOVER_CORRELATION_ID, "server/discover", withStatelessMeta(STATELESS_VERSION), getRequestHeaders()),
     );
     const conn = newConnection(this.id, url, getRequestHeaders, abort, routing);
     try {

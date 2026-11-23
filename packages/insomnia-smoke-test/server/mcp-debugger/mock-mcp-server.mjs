@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import http from "node:http";
 
 import { APP_HTML, HOSTILE_HTML, PINNED_HTML } from "./app-views.mjs";
@@ -286,13 +287,22 @@ function writeToolList(res, id) {
   });
 }
 
-function echoResult(res, id, message) {
+// 4348 S7b: a tracing-aware server continues the caller's W3C trace (same trace id, a new span id) in the result's `_meta`.
+// Only when the request carries `_meta.traceparent` (add one with Edit & replay), so plain calls are unchanged.
+function tracedMeta(requestMeta) {
+  const match = /^00-([0-9a-f]{32})-[0-9a-f]{16}-([0-9a-f]{2})$/.exec(String(requestMeta?.traceparent ?? ""));
+  if (!match) return undefined;
+  return { traceparent: `00-${match[1]}-${crypto.randomBytes(8).toString("hex")}-${match[2]}`, tracestate: "mock=continued" };
+}
+
+function echoResult(res, id, message, meta) {
   writeJson(res, 200, {
     jsonrpc: "2.0",
     id,
     result: {
       content: [{ type: "text", text: `echo: ${message}` }],
       isError: false,
+      ...(meta ? { _meta: meta } : {}),
     },
   });
 }
@@ -450,7 +460,7 @@ async function handleLegacy(req, res) {
     }
     // ui-chart / ui-hostile / ui-task / ui-pinned / ui-pinned-bad fall through to
     // the plain echo, same as every other tool this era doesn't special-case.
-    echoResult(res, payload.id, payload.params?.arguments?.message ?? "");
+    echoResult(res, payload.id, payload.params?.arguments?.message ?? "", tracedMeta(payload.params?._meta));
     return;
   }
 
@@ -625,7 +635,7 @@ async function handleStateless(req, res) {
       return;
     }
     // ui-chart / ui-hostile / ui-pinned / ui-pinned-bad fall through to the plain echo.
-    echoResult(res, payload.id, payload.params?.arguments?.message ?? "");
+    echoResult(res, payload.id, payload.params?.arguments?.message ?? "", tracedMeta(payload.params?._meta));
     return;
   }
 
