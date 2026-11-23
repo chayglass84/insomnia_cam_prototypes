@@ -56,6 +56,8 @@ export type UiVisibility = "model" | "app";
 export interface CapabilityUi {
   resourceUri?: string;
   visibility: UiVisibility[];
+  /** 4348 S7c: the link came from the deprecated flat `_meta["ui/resourceUri"]` key, not `_meta.ui.resourceUri`. */
+  deprecatedKey?: true;
 }
 
 /** `_meta.ui.csp` on the resource. Field names are camelCase per spec. */

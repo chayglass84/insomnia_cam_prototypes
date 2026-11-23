@@ -14,6 +14,7 @@ const MetaRow: FC<{ entry: MetaEntry }> = ({ entry }) => (
     <summary className="flex cursor-pointer items-baseline gap-2">
       <span className={CHIP}>{GROUP_CHIP[entry.group]}</span>
       <span className="font-semibold">{entry.title}</span>
+      {entry.deprecated && <span className="shrink-0 rounded-xs border border-solid border-amber-500/60 px-1 py-px text-[10px] leading-none text-amber-500 uppercase">Deprecated</span>}
       <span className="min-w-0 truncate text-(--hl)">{entry.summary}</span>
     </summary>
     <div className="mt-1 flex flex-col gap-1 pl-1">

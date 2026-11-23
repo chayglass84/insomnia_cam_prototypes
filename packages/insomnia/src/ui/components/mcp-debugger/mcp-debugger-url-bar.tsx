@@ -3,6 +3,7 @@ import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { Button } from 'react-aria-components';
 import { useLatest } from 'react-use';
 
+import { versionPickerNote } from '~/common/mcp-debugger/deprecations';
 import {
   DEFAULT_VERSION_CHOICE,
   isVersionChoice,
@@ -132,7 +133,7 @@ export const McpDebuggerUrlBar = ({
             {(['auto', ...SUPPORTED_VERSIONS] as McpVersionChoice[]).map(v => (
               <DropdownItem key={v}>
                 <ItemContent
-                  label={v === 'auto' ? 'Auto (detect from server)' : v}
+                  label={v === 'auto' ? 'Auto (detect from server)' : `${v} · ${versionPickerNote(v)}`}
                   isSelected={v === choice}
                   onClick={() => selectVersion(v)}
                 />
@@ -140,7 +141,7 @@ export const McpDebuggerUrlBar = ({
             ))}
           </DropdownSection>
         </Dropdown>
-        <ConformanceButton onOpen={onOpenConformance} isDisabled={!request.url || isConnecting} />
+        <ConformanceButton onOpen={onOpenConformance} isDisabled={!request.url || isConnecting} connectedVersion={isConnected ? state.protocolVersion : undefined} />
       </div>
       <form
         className="flex min-w-0 flex-1"

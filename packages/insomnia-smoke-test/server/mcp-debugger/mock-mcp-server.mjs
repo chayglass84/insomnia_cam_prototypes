@@ -221,6 +221,13 @@ const uiTools = [
     _meta: { ui: { resourceUri: "ui://mock/app", visibility: ["app"] } },
   },
   {
+    // 4348 S7c: links its app with the deprecated flat key, to show the deprecation notes in the UI.
+    name: "ui-legacy-key",
+    description: "App view linked with the deprecated flat _meta key.",
+    inputSchema: { type: "object", properties: {} },
+    _meta: { "ui/resourceUri": "ui://mock/app" },
+  },
+  {
     name: "ui-hostile",
     description: "Echo with a hostile app view (escape-attempt fixture).",
     inputSchema: { type: "object", properties: {} },

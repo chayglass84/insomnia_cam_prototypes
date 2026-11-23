@@ -1,7 +1,9 @@
 import { fuzzyMatchAll } from 'insomnia-data/common';
 import React, { type FC, useMemo, useState } from 'react';
-import { Input, SearchField } from 'react-aria-components';
+import { Focusable, Input, SearchField, Tooltip, TooltipTrigger } from 'react-aria-components';
 
+import { NEWEST_VERSION } from '~/common/mcp-debugger/conformance';
+import { isLegacyOnlyTab } from '~/common/mcp-debugger/deprecations';
 import { getProfile, type McpDebuggerTabId } from '~/common/mcp-debugger/profiles';
 import { capabilityKey } from '~/common/mcp-debugger/protocol/mcp/capabilities/methods';
 import type { Capability, CapabilityType } from '~/common/mcp-debugger/protocol/Protocol';
@@ -117,6 +119,22 @@ export const CapabilitySidebar: FC<{
           })}
         {isConnected && sessionTabs.length > 0 && (
           <section className="mt-3 border-t border-solid border-(--hl-md) pt-1" data-testid="mcp-session-tabs">
+            {sessionTabs.some(tab => isLegacyOnlyTab(tab.id as McpDebuggerTabId)) && (
+              <TooltipTrigger delay={200}>
+                <Focusable>
+                  <p className="px-2 py-1 text-[0.65rem] font-semibold tracking-wide text-amber-500 uppercase" data-testid="mcp-legacy-tabs-note">
+                    Session-era panels · not in {NEWEST_VERSION}
+                  </p>
+                </Focusable>
+                <Tooltip
+                  offset={8}
+                  className="max-w-xs rounded-md border border-solid border-(--hl-sm) bg-(--color-bg) px-3 py-2 text-xs text-(--color-font) shadow-lg select-none"
+                >
+                  Panels marked Sess exist only in session-era protocol versions ({protocolVersion}). The newest version,{' '}
+                  {NEWEST_VERSION}, has no such panel in Insomnia. Tasks and Subscriptions, marked Ext, are newer.
+                </Tooltip>
+              </TooltipTrigger>
+            )}
             {sessionTabs.map(tab => (
               <button
                 key={tab.id}

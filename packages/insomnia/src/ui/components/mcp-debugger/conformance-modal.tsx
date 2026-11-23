@@ -10,6 +10,8 @@ import type {
   VerdictLevel,
   VersionOutcome,
 } from '~/common/mcp-debugger/conformance';
+import { versionBadge } from '~/common/mcp-debugger/deprecations';
+import { isSupportedVersion } from '~/common/mcp-debugger/versions';
 import { Icon } from '~/ui/components/icon';
 
 import { buildMcpConnectParams } from './build-connect-params';
@@ -23,23 +25,37 @@ const smallButton = 'rounded-xs border border-solid border-(--hl-md) px-2 py-0.5
 const tooltipClass =
   'max-w-xs rounded-md border border-solid border-(--hl-sm) bg-(--color-bg) px-3 py-2 text-xs text-(--color-font) shadow-lg select-none';
 
-/** The URL bar button that opens the report. */
-export const ConformanceButton: FC<{ onOpen: () => void; isDisabled?: boolean }> = ({ onOpen, isDisabled }) => (
-  <TooltipTrigger delay={200}>
-    <Button
-      className="shrink-0 rounded-xs border border-solid border-(--hl-md) px-(--padding-sm) py-0.5 text-xs hover:bg-(--hl-sm) disabled:opacity-50"
-      onPress={onOpen}
-      isDisabled={isDisabled}
-      data-testid="mcp-conformance-open"
-    >
-      Validate Server
-    </Button>
-    <Tooltip offset={8} className={tooltipClass}>
-      Check how current and spec-compliant this server is: which MCP versions it accepts, where it falls short of the
-      newest spec, and where it only looks current. Read-only: no tools are called.
-    </Tooltip>
-  </TooltipTrigger>
-);
+/**
+ * The URL bar button that opens the report. When the connected server speaks an older protocol version the whole button
+ * turns amber with a warning icon (S7c), since the report is exactly what explains what that server is missing.
+ */
+export const ConformanceButton: FC<{ onOpen: () => void; isDisabled?: boolean; connectedVersion?: string }> = ({ onOpen, isDisabled, connectedVersion }) => {
+  const badge = isSupportedVersion(connectedVersion) ? versionBadge(connectedVersion) : null;
+  const old = badge !== null && badge.tone !== 'newest';
+  return (
+    <TooltipTrigger delay={200}>
+      <Button
+        className={`flex shrink-0 items-center gap-1.5 rounded-xs border border-solid px-(--padding-sm) py-0.5 text-xs disabled:opacity-50 ${
+          old
+            ? 'border-amber-500/70 bg-amber-500/15 text-amber-500 hover:bg-amber-500/25'
+            : 'border-(--hl-md) hover:bg-(--hl-sm)'
+        }`}
+        onPress={onOpen}
+        isDisabled={isDisabled}
+        data-testid="mcp-conformance-open"
+        data-old={old}
+      >
+        {old && <i className="fa fa-triangle-exclamation" />}
+        Validate Server
+      </Button>
+      <Tooltip offset={8} className={tooltipClass}>
+        {old
+          ? `${badge.tooltip} Click to run the report.`
+          : 'Check how current and spec-compliant this server is: which MCP versions it accepts, where it falls short of the newest spec, and where it only looks current. Read-only: no tools are called.'}
+      </Tooltip>
+    </TooltipTrigger>
+  );
+};
 
 const VERDICT_STYLE: Record<VerdictLevel, { box: string; icon: string }> = {
   current: { box: 'border-green-500/50 bg-green-500/10', icon: 'text-green-500' },

@@ -61,6 +61,13 @@ describe('describeMeta', () => {
     expect(byKey['io.modelcontextprotocol/clientInfo'].summary).toBe('Insomnia 1');
   });
 
+  it('flags the deprecated flat app-link key', () => {
+    const [entry] = describeMeta({ 'ui/resourceUri': 'ui://x' });
+    expect(entry).toMatchObject({ group: 'ui', deprecated: true });
+    expect(entry.summary).toMatch(/Deprecated flat key/);
+    expect(describeMeta({ ui: { resourceUri: 'ui://x' } })[0].deprecated).toBeUndefined();
+  });
+
   it('flags an invalid traceparent instead of hiding it', () => {
     expect(describeMeta({ traceparent: 'garbage' })[0].summary).toMatch(/Not a valid W3C traceparent/);
     expect(describeMeta()).toEqual([]);

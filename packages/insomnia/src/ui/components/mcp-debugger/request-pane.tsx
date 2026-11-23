@@ -161,6 +161,12 @@ export const McpDebuggerRequestPane: FC<{
                 <span>
                   This tool comes with an app. It is best used from the App tab, where it runs with these Params and shows
                   the result as the server intended.
+                  {capability?.ui?.deprecatedKey && (
+                    <span className="mt-1 block text-amber-500" data-testid="mcp-app-deprecated-key">
+                      Deprecated: this server links the app with the flat <code>_meta[&quot;ui/resourceUri&quot;]</code> key. The
+                      current form is <code>_meta.ui.resourceUri</code>.
+                    </span>
+                  )}
                 </span>
                 <Button
                   className="ml-auto shrink-0 rounded-sm bg-(--color-surprise) px-(--padding-md) py-0.5 text-(--color-font-surprise) hover:brightness-75"

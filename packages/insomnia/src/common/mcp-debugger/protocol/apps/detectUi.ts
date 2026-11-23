@@ -31,7 +31,11 @@ export function detectUi(meta: unknown): CapabilityUi | undefined {
     resourceUri = (nested as Record<string, unknown>).resourceUri;
     rawVisibility = (nested as Record<string, unknown>).visibility;
   }
-  if (typeof resourceUri !== "string") resourceUri = record["ui/resourceUri"];
+  let usedFlatKey = false;
+  if (typeof resourceUri !== "string") {
+    resourceUri = record["ui/resourceUri"];
+    usedFlatKey = typeof resourceUri === "string";
+  }
   const validResourceUri =
     typeof resourceUri === "string" && resourceUri.startsWith("ui://") ? resourceUri : undefined;
   if (validResourceUri === undefined && rawVisibility === undefined) return undefined;
@@ -50,7 +54,8 @@ export function detectUi(meta: unknown): CapabilityUi | undefined {
             (v): v is UiVisibility => typeof v === "string" && VALID_VISIBILITY.has(v),
           )
         : [];
-  return { resourceUri: validResourceUri, visibility };
+  // 4348 S7c: remember that the deprecated flat key was used, so the UI can say so.
+  return { resourceUri: validResourceUri, visibility, ...(usedFlatKey && validResourceUri ? { deprecatedKey: true as const } : {}) };
 }
 
 /** Render a mimeType for an error message: quoted if it's a string, stringified otherwise. */

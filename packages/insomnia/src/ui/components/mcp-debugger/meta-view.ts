@@ -12,6 +12,8 @@ export interface MetaEntry {
   /** One readable line (decoded for traceparent, a count for tracestate, ...). */
   summary: string;
   value: unknown;
+  /** Still read by Insomnia, but replaced by a newer form. */
+  deprecated?: boolean;
 }
 
 export interface Traceparent {
@@ -82,6 +84,16 @@ export const describeMeta = (meta?: unknown): MetaEntry[] => {
           title: 'MCP App view',
           summary: [typeof ui.resourceUri === 'string' ? ui.resourceUri : undefined, Array.isArray(ui.visibility) ? `visible to ${ui.visibility.join(' and ')}` : undefined].filter(Boolean).join(', ') || 'App view settings',
           value,
+        };
+      }
+      case 'ui/resourceUri': {
+        return {
+          key,
+          group: 'ui',
+          title: 'MCP App view link',
+          summary: `${String(value)}. Deprecated flat key; use _meta.ui.resourceUri`,
+          value,
+          deprecated: true,
         };
       }
       case 'io.modelcontextprotocol/protocolVersion': {

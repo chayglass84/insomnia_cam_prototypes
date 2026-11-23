@@ -437,6 +437,9 @@ describe('mcp-debugger relay (MCP Apps)', () => {
     const state = await service.connect({ requestId, url: `${base}/stateless`, headers: [], protocolVersion: 'auto' });
     const chart = state.capabilities.find(c => c.metadata.name === 'ui-chart');
     expect(chart?.ui?.resourceUri).toBe('ui://mock/app');
+    // The deprecated flat `_meta["ui/resourceUri"]` key still works and is flagged.
+    expect(state.capabilities.find(c => c.metadata.name === 'ui-legacy-key')?.ui).toMatchObject({ resourceUri: 'ui://mock/app', deprecatedKey: true });
+    expect(chart?.ui?.deprecatedKey).toBeUndefined();
 
     const read = await service.relay({ requestId, invocation: { method: 'resources/read', params: { uri: 'ui://mock/app' } } });
     expect(read.error).toBeUndefined();
