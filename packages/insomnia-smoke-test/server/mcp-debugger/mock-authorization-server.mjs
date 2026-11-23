@@ -35,6 +35,8 @@ import http from "node:http";
 import https from "node:https";
 import { URL } from "node:url";
 
+import { acceptedAudiences, CLIENT_ASSERTION_TYPE, verifyClientAssertion } from "./mock-client-assertion.mjs";
+
 const port = Number(process.env.MOCK_AUTHORIZATION_SERVER_PORT ?? "9000");
 const host = "127.0.0.1";
 
@@ -54,6 +56,10 @@ const flags = {
   shortTtl: false,
   failRefresh: false,
   consent: process.env.MOCK_AUTH_CONSENT === "1",
+  // 4348 S9a (XAA grant only): refuse client_secret / accept an assertion aud of only the issuer or only the token endpoint.
+  requireAssertion: false,
+  assertionAudIssuer: false,
+  assertionAudToken: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -123,6 +129,9 @@ const trustedIdp = process.env.MOCK_TRUSTED_IDP ?? "http://127.0.0.1:9100";
 const XAA_CLIENT = { id: "insomnia-xaa", secret: "insomnia-xaa-as-secret" };
 /** jti values already redeemed (an ID-JAG is single use). */
 const usedJtis = new Set();
+/** 4348 S9a: public keys registered for the XAA client (POST /admin/clients), for signed client assertions. */
+const xaaClientKeys = [];
+const usedAssertionJtis = new Set();
 
 /** Validate an ID-JAG; returns { claims } or { error } where error is the invalid_grant description. */
 async function validateIdJag(assertion) {
@@ -534,7 +543,24 @@ async function handleToken(req, res) {
       clientId = decodeURIComponent(user);
       secret = decodeURIComponent(pass ?? "");
     }
-    if (clientId !== XAA_CLIENT.id || secret !== XAA_CLIENT.secret) {
+    if (body.client_assertion) {
+      if (body.client_assertion_type !== CLIENT_ASSERTION_TYPE) {
+        return writeError(res, 401, "invalid_client", `client_assertion_type must be ${CLIENT_ASSERTION_TYPE}`);
+      }
+      const checkedClient = verifyClientAssertion({
+        assertion: body.client_assertion,
+        clientId: body.client_id,
+        keysFor: (id) => (id === XAA_CLIENT.id ? xaaClientKeys : undefined),
+        audiences: acceptedAudiences(flags, issuer, `${issuer}/token`),
+        usedJtis: usedAssertionJtis,
+      });
+      if (checkedClient.error) {
+        return writeError(res, 401, "invalid_client", `Client assertion rejected: ${checkedClient.error}.`);
+      }
+      clientId = checkedClient.clientId;
+    } else if (flags.requireAssertion) {
+      return writeError(res, 401, "invalid_client", "This authorization server requires a signed client assertion (private_key_jwt); client_secret authentication is turned off.");
+    } else if (clientId !== XAA_CLIENT.id || secret !== XAA_CLIENT.secret) {
       return writeError(res, 401, "invalid_client", "Client authentication failed (unknown client_id or wrong client_secret for this authorization server).");
     }
     if (!body.assertion) {
@@ -589,6 +615,11 @@ async function handleAdmin(req, res) {
     refreshTokens.clear();
     registeredClients.clear();
     usedJtis.clear();
+    usedAssertionJtis.clear();
+    xaaClientKeys.length = 0;
+    flags.requireAssertion = false;
+    flags.assertionAudIssuer = false;
+    flags.assertionAudToken = false;
     flags.omitDiscovery = false;
     flags.tamperIss = false;
     flags.fail = false;
@@ -613,6 +644,21 @@ async function handleAdmin(req, res) {
       Object.assign(flags, updates);
       return writeJson(res, 200, { ...flags });
     }
+  }
+
+  if (url.pathname === "/admin/clients") {
+    if (req.method === "POST") {
+      let body;
+      try {
+        body = JSON.parse((await readBody(req)) || "{}");
+      } catch {
+        return writeError(res, 400, "invalid_request", "body must be JSON");
+      }
+      if (body.clientId !== XAA_CLIENT.id) return writeError(res, 404, "invalid_client", `Unknown client ${body.clientId}`);
+      xaaClientKeys.push(...(body.jwks?.keys ?? (body.jwk ? [body.jwk] : [])));
+      return writeJson(res, 200, { ok: true, clientId: body.clientId, keys: xaaClientKeys.length });
+    }
+    return writeJson(res, 200, { [XAA_CLIENT.id]: { keys: xaaClientKeys.map((k) => k.kid ?? "(no kid)") } });
   }
 
   res.writeHead(404, { "Content-Type": "text/plain" });

@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { decodeJwt } from '~/common/mcp-debugger/jwt';
 
+import { clearKey, generateKey, signAssertion } from './client-assertion';
 import { discoverOAuth, supportsIdJag } from './oauth-discovery';
 import { canRefresh, currentAccessToken } from './oauth-token';
 import * as service from './service';
@@ -65,11 +66,13 @@ const signInAs = (user: string) => async (url: string) => {
   void fetch(decide.headers.get('location')!);
 };
 
-const run = async (requestId: string, user = 'alex') => {
-  await fetch(`${IDP}/admin/reset`, { method: 'POST' });
+const run = async (requestId: string, user = 'alex', idp: Parameters<typeof xaaSignIn>[0]['idp'] = idpClient, resetIdp = true) => {
+  if (resetIdp) {
+    await fetch(`${IDP}/admin/reset`, { method: 'POST' });
+  }
   const discovery = await discoverOAuth({ url: `${MCP}/xaa-protected`, trace: service.oauthTraceFor(requestId) });
   const context = discovery.context!;
-  const signIn = await xaaSignIn({ requestId, idp: idpClient, openUrl: signInAs(user), timeoutMs: 5000, trace: service.oauthTraceFor(requestId) });
+  const signIn = await xaaSignIn({ requestId, idp, openUrl: signInAs(user), timeoutMs: 5000, trace: service.oauthTraceFor(requestId) });
   return { context, signIn };
 };
 
@@ -233,5 +236,121 @@ describe('supportsIdJag', () => {
     expect(supportsIdJag({ authorization_grant_profiles_supported: ['other'] })).toBe(false);
     expect(supportsIdJag({})).toBe(false);
     expect(supportsIdJag()).toBe(false);
+  });
+});
+
+describe('signed client assertions (private_key_jwt)', () => {
+  const assertionIdp: Parameters<typeof xaaSignIn>[0]['idp'] = { issuer: IDP, clientId: 'insomnia-xaa', clientAuth: 'assertion' };
+  const assertionAs: Parameters<typeof xaaRedeem>[0]['asClient'] = { clientId: 'insomnia-xaa', clientAuth: 'assertion' };
+  const post = (url: string, body: object) => fetch(url, { method: 'POST', body: JSON.stringify(body) });
+  const reset = () => Promise.all([`${IDP}/admin/reset`, `${AS}/admin/reset`].map(url => fetch(url, { method: 'POST' })));
+  /** Generates this request's key and registers its public half at both mock servers, like pasting a JWKS into a console. */
+  const registerKey = async (requestId: string, alg: 'RS256' | 'ES256' = 'RS256') => {
+    clearKey({ requestId });
+    const info = generateKey({ requestId, alg });
+    await post(`${IDP}/admin/clients`, { clientId: 'insomnia-xaa', jwks: info.jwks });
+    await post(`${AS}/admin/clients`, { clientId: 'insomnia-xaa', jwks: info.jwks });
+    return info;
+  };
+  const allSteps = async (requestId: string, idp = assertionIdp, as = assertionAs) => {
+    // Not resetting the IdP here: the tests register keys and set flags first.
+    const { context, signIn } = await run(requestId, 'alex', idp, false);
+    const exchanged = signIn.every(step => step.status !== 'error') ? await xaaExchange({ requestId, context, trace: service.oauthTraceFor(requestId) }) : [];
+    const redeemed = exchanged.length > 0 ? await xaaRedeem({ requestId, context, asClient: as, trace: service.oauthTraceFor(requestId) }) : [];
+    return { signIn, exchanged, redeemed };
+  };
+
+  it.each(['RS256', 'ES256'] as const)('works end to end with a %s key at both servers, and never sends a client_secret', async alg => {
+    const requestId = `ca-${alg}`;
+    await reset();
+    await registerKey(requestId, alg);
+    const { signIn, exchanged, redeemed } = await allSteps(requestId);
+    expect(signIn.map(s => s.status)).toEqual(['ok', 'ok', 'ok']);
+    expect(exchanged[0].status).toBe('ok');
+    expect(redeemed.map(s => [s.id, s.status])).toEqual([['jwt-bearer', 'ok'], ['verify', 'ok']]);
+    // The assertion is shown decoded at each hop: claims name the client and the right endpoint.
+    const assertion = (steps: { jwts?: { label: string; token: string }[] }[]) => decodeJwt(steps.flatMap(s => s.jwts ?? []).find(j => j.label === 'Client assertion')!.token)!;
+    expect(assertion(signIn).payload).toMatchObject({ iss: 'insomnia-xaa', sub: 'insomnia-xaa', aud: `${IDP}/token` });
+    expect(assertion(exchanged).header).toMatchObject({ alg, typ: 'JWT' });
+    expect(assertion(redeemed).payload.aud).toBe(`${AS}/token`);
+    const sent = service
+      .getTrace({ requestId })
+      .filter(e => e.flow === 'oauth' && e.direction === 'client-to-server')
+      .map(e => String((e.payload as { body?: unknown }).body ?? ''));
+    expect(sent.some(body => body.includes('client_assertion='))).toBe(true);
+    expect(sent.some(body => body.includes('client_secret='))).toBe(false);
+  });
+
+  it('is refused when no key was registered at the server, saying so', async () => {
+    const requestId = 'ca-unregistered';
+    await reset();
+    generateKey({ requestId });
+    const { signIn } = await allSteps(requestId);
+    expect(signIn[2].status).toBe('error');
+    expect(signIn[2].findings[0].text).toContain('no public key is registered for client insomnia-xaa');
+  });
+
+  it('is refused when the key signing does not match the registered one', async () => {
+    const requestId = 'ca-wrong-key';
+    await reset();
+    const registered = generateKey({ requestId: 'ca-someone-else' });
+    await post(`${IDP}/admin/clients`, { clientId: 'insomnia-xaa', jwks: registered.jwks });
+    generateKey({ requestId });
+    const { signIn } = await allSteps(requestId);
+    expect(signIn[2].findings[0].text).toMatch(/no registered key has kid|signature verification failed/);
+    clearKey({ requestId: 'ca-someone-else' });
+  });
+
+  it('shows the audience mismatch that strict servers cause, and the fix', async () => {
+    const requestId = 'ca-aud';
+    await reset();
+    await registerKey(requestId);
+    await post(`${IDP}/admin/flags`, { assertionAudIssuer: true });
+    const wrong = await allSteps(requestId);
+    expect(wrong.signIn[2].findings[0].text).toContain(`aud must be "${IDP}"`);
+    // The same server is happy once the assertion names the issuer instead of the token endpoint.
+    const fixed = await allSteps(requestId, { ...assertionIdp, audience: 'issuer' });
+    expect(fixed.signIn.map(s => s.status)).toEqual(['ok', 'ok', 'ok']);
+    await reset();
+  });
+
+  it('turns client_secret away when the server only takes assertions, and the same at the authorization server', async () => {
+    const requestId = 'ca-required';
+    await reset();
+    await registerKey(requestId);
+    await post(`${IDP}/admin/flags`, { requireAssertion: true });
+    const secretAtIdp = await allSteps(requestId, { ...idpClient, clientAuth: 'secret' } as never);
+    expect(secretAtIdp.signIn[2].findings[0].text).toContain('requires a signed client assertion');
+    await reset();
+    await registerKey(requestId);
+    await post(`${AS}/admin/flags`, { requireAssertion: true });
+    const secretAtAs = await allSteps(requestId, assertionIdp, { ...asClient, clientAuth: 'secret' } as never);
+    expect(secretAtAs.redeemed[0].findings[0].text).toContain('requires a signed client assertion');
+    // ... and signing at the authorization server works.
+    const ok = await allSteps(requestId);
+    expect(ok.redeemed.map(s => s.status)).toEqual(['ok', 'ok']);
+    await reset();
+  });
+
+  it('says what is missing when there is no key yet, without calling the server', async () => {
+    const requestId = 'ca-no-key';
+    await reset();
+    clearKey({ requestId });
+    const { signIn } = await allSteps(requestId);
+    expect(signIn.at(-1)).toMatchObject({ status: 'error', summary: 'Cannot authenticate' });
+    expect(signIn.at(-1)!.findings[0].text).toContain('No signing key yet');
+  });
+
+  it('rejects an assertion that is used twice', async () => {
+    await reset();
+    const info = generateKey({ requestId: 'ca-replay' });
+    await post(`${IDP}/admin/clients`, { clientId: 'insomnia-xaa', jwks: info.jwks });
+    const signed = signAssertion({ requestId: 'ca-replay', clientId: 'insomnia-xaa', audience: `${IDP}/token` })!;
+    const body = new URLSearchParams({ grant_type: 'authorization_code', client_assertion_type: 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer', client_assertion: signed.token });
+    const first = await fetch(`${IDP}/token`, { method: 'POST', body });
+    expect((await first.json()).error_description).not.toMatch(/jti/); // fails later for other reasons: no code
+    const second = await (await fetch(`${IDP}/token`, { method: 'POST', body })).json();
+    expect(second.error_description).toMatch(/jti .* was already used/);
+    await reset();
   });
 });

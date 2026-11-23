@@ -1,6 +1,7 @@
 import { shell } from 'electron';
 
 import { ipcMainHandle } from '../ipc/electron';
+import { clearKey, generateKey, getKey, importKey } from './client-assertion';
 import { runConformance } from './conformance';
 import { findLocalMcpConfigs, type LocalMcpConfig } from './local-configs';
 import { discoverOAuth } from './oauth-discovery';
@@ -20,6 +21,11 @@ export interface McpDebuggerBridgeAPI {
   oauthDiscover: (options: Omit<Parameters<typeof discoverOAuth>[0], 'trace'> & { requestId: string }) => ReturnType<typeof discoverOAuth>;
   oauthAuthorize: (options: OAuthAuthorizeIpcOptions) => ReturnType<typeof runAuthorization>;
   oauthCancel: typeof cancelAuthorization;
+  /** S9a: the signing key for client assertions (private half stays in the main process). */
+  xaaGenerateKey: (options: Parameters<typeof generateKey>[0]) => Promise<ReturnType<typeof generateKey>>;
+  xaaImportKey: (options: Parameters<typeof importKey>[0]) => Promise<ReturnType<typeof importKey>>;
+  xaaGetKey: (options: Parameters<typeof getKey>[0]) => Promise<ReturnType<typeof getKey>>;
+  xaaClearKey: (options: Parameters<typeof clearKey>[0]) => Promise<void>;
   xaaSignIn: (options: Omit<Parameters<typeof xaaSignIn>[0], 'openUrl' | 'trace'>) => ReturnType<typeof xaaSignIn>;
   xaaExchange: (options: Omit<Parameters<typeof xaaExchange>[0], 'trace'>) => ReturnType<typeof xaaExchange>;
   xaaRedeem: (options: Omit<Parameters<typeof xaaRedeem>[0], 'trace'>) => ReturnType<typeof xaaRedeem>;
@@ -59,6 +65,10 @@ export const registerMcpDebuggerHandlers = () => {
       trace: service.oauthTraceFor(o.requestId),
     }),
   );
+  ipcMainHandle('mcpDebugger.xaaGenerateKey', (_, o: Parameters<typeof generateKey>[0]) => generateKey(o));
+  ipcMainHandle('mcpDebugger.xaaImportKey', (_, o: Parameters<typeof importKey>[0]) => importKey(o));
+  ipcMainHandle('mcpDebugger.xaaGetKey', (_, o: Parameters<typeof getKey>[0]) => getKey(o));
+  ipcMainHandle('mcpDebugger.xaaClearKey', (_, o: Parameters<typeof clearKey>[0]) => clearKey(o));
   ipcMainHandle('mcpDebugger.xaaSignIn', (_, o: Omit<Parameters<typeof xaaSignIn>[0], 'openUrl' | 'trace'>) =>
     xaaSignIn({ ...o, openUrl: url => shell.openExternal(url), trace: service.oauthTraceFor(o.requestId) }),
   );

@@ -3,6 +3,7 @@ import React, { type FC, useEffect, useState } from 'react';
 import { Button, Dialog, Heading, Modal, ModalOverlay, Tooltip, TooltipTrigger } from 'react-aria-components';
 import { useLocalStorage } from 'react-use';
 
+import type { AssertionAudience, ClientKeyInfo } from '~/main/mcp-debugger/client-assertion';
 import type { AuthServerMetadata, OAuthDiscoveryResult, OAuthStep } from '~/main/mcp-debugger/oauth-discovery';
 import { supportsIdJag } from '~/main/mcp-debugger/oauth-discovery';
 import { Icon } from '~/ui/components/icon';
@@ -11,6 +12,8 @@ import { tryToInterpolateRequestAndCollectSensitiveValues } from '~/ui/utils/try
 
 import { purpleButton, smallButton, StepView, summarizeSteps, tooltipClass, WizardStep } from './oauth-discovery-panel';
 import { PrototypeMock } from './prototype-mock';
+import { SegmentedToggle } from './segmented-toggle';
+import { SigningKeyPanel } from './xaa-signing-key';
 
 // Task 4348 S8: the enterprise-managed authorization (XAA) debugger, in a modal opened by "Discover XAA" next to
 // "Discover OAuth". Four steps, each showing its sub-steps with the raw exchange behind them:
@@ -25,8 +28,17 @@ interface Remembered {
   idpIssuer: string;
   idpClientId: string;
   asClientId: string;
+  /** How the client authenticates at each server (S9a); absent means a secret. The key itself is never remembered. */
+  idpAuth?: 'secret' | 'assertion';
+  asAuth?: 'secret' | 'assertion';
+  audience?: AssertionAudience;
 }
 const EMPTY: Remembered = { idpIssuer: '', idpClientId: '', asClientId: '' };
+
+const AUTH_OPTIONS = [
+  { id: 'secret' as const, label: 'Client secret' },
+  { id: 'assertion' as const, label: 'Signed assertion' },
+];
 
 const MOCK_IDP = { issuer: 'http://127.0.0.1:9100', clientId: 'insomnia-xaa', clientSecret: 'insomnia-xaa-secret', asClientId: 'insomnia-xaa', asClientSecret: 'insomnia-xaa-as-secret' };
 
@@ -58,6 +70,10 @@ export const XaaWizardModal: FC<{
   const [remembered = EMPTY, setRemembered] = useLocalStorage<Remembered>(`mcp-xaa:${request._id}`, EMPTY);
   const [idpSecret, setIdpSecret] = useState('');
   const [asSecret, setAsSecret] = useState('');
+  const [keyInfo, setKeyInfo] = useState<ClientKeyInfo | null>(null);
+  const idpAuth = remembered.idpAuth ?? 'secret';
+  const asAuth = remembered.asAuth ?? 'secret';
+  const audience = remembered.audience ?? 'token-endpoint';
   const [result, setResult] = useState<OAuthDiscoveryResult | null>(null);
   const [running, setRunning] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
@@ -69,10 +85,10 @@ export const XaaWizardModal: FC<{
   const [redeeming, setRedeeming] = useState(false);
 
   const context = result?.context;
-  const idpFilled = remembered.idpIssuer.trim() !== '' && remembered.idpClientId.trim() !== '' && idpSecret !== '';
-  const asFilled = remembered.asClientId.trim() !== '' && asSecret !== '';
+  const idpFilled = remembered.idpIssuer.trim() !== '' && remembered.idpClientId.trim() !== '' && (idpAuth === 'assertion' ? keyInfo !== null : idpSecret !== '');
+  const asFilled = remembered.asClientId.trim() !== '' && (asAuth === 'assertion' ? keyInfo !== null : asSecret !== '');
   const signedIn = signInSteps.some(step => step.id === 'idp-token' && step.status !== 'error');
-  const jagReady = jagSteps.some(step => step.id === 'id-jag' && (step.jwts?.length ?? 0) > 0);
+  const jagReady = jagSteps.some(step => step.id === 'id-jag' && step.jwts?.some(jwt => jwt.label === 'ID-JAG'));
   const hasToken = tokenSteps.some(step => step.id === 'jwt-bearer' && step.status !== 'error');
   const xaaSupported = supportsIdJag(context?.authorizationServer as AuthServerMetadata | undefined);
 
@@ -119,7 +135,13 @@ export const XaaWizardModal: FC<{
       setSignInSteps(
         await window.main.mcpDebugger.xaaSignIn({
           requestId: request._id,
-          idp: { issuer: remembered.idpIssuer.trim(), clientId: remembered.idpClientId.trim(), clientSecret: idpSecret },
+          idp: {
+            issuer: remembered.idpIssuer.trim(),
+            clientId: remembered.idpClientId.trim(),
+            clientAuth: idpAuth,
+            clientSecret: idpAuth === 'secret' ? idpSecret : undefined,
+            audience,
+          },
         }),
       );
     });
@@ -143,7 +165,12 @@ export const XaaWizardModal: FC<{
       const steps = await window.main.mcpDebugger.xaaRedeem({
         requestId: request._id,
         context,
-        asClient: { clientId: remembered.asClientId.trim(), clientSecret: asSecret },
+        asClient: {
+          clientId: remembered.asClientId.trim(),
+          clientAuth: asAuth,
+          clientSecret: asAuth === 'secret' ? asSecret : undefined,
+          audience,
+        },
       });
       setTokenSteps(steps);
       // Reflect it in the Auth tab, as the OAuth wizard does: a Bearer token is what Connect then sends.
@@ -153,10 +180,11 @@ export const XaaWizardModal: FC<{
       }
     });
 
-  // Every time the wizard opens it starts again with discovery.
+  // Every time the wizard opens it starts again with discovery (and picks up the signing key held in the main process, if any).
   useEffect(() => {
     if (isOpen) {
       void discover();
+      void window.main.mcpDebugger.xaaGetKey({ requestId: request._id }).then(setKeyInfo);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run on open only
   }, [isOpen]);
@@ -169,7 +197,7 @@ export const XaaWizardModal: FC<{
   };
 
   const useMockIdp = () => {
-    setRemembered({ idpIssuer: MOCK_IDP.issuer, idpClientId: MOCK_IDP.clientId, asClientId: MOCK_IDP.asClientId });
+    setRemembered({ ...remembered, idpIssuer: MOCK_IDP.issuer, idpClientId: MOCK_IDP.clientId, asClientId: MOCK_IDP.asClientId });
     setIdpSecret(MOCK_IDP.clientSecret);
     setAsSecret(MOCK_IDP.asClientSecret);
   };
@@ -269,7 +297,7 @@ export const XaaWizardModal: FC<{
                 >
                   <div className="flex flex-col gap-2 px-3 py-2">
                     <div className="flex flex-col gap-2 rounded-xs border border-dashed border-amber-500/60 p-2">
-                      <PrototypeMock inline reason="Client secret only (no signed client assertion yet) and OIDC only (no SAML). Secrets are kept in memory and shown as sent in the trace." />
+                      <PrototypeMock inline reason="OIDC only (no SAML), and one signing key is used at both servers. Secrets and the key are kept in memory only; secrets are shown as sent in the trace." />
                       <div>
                         <Button className={smallButton} onPress={useMockIdp} data-testid="mcp-xaa-use-mock">
                           Fill in the mock IdP
@@ -279,8 +307,36 @@ export const XaaWizardModal: FC<{
                     <Field label="Identity provider issuer URL" value={remembered.idpIssuer} onChange={idpIssuer => setRemembered({ ...remembered, idpIssuer })} placeholder="https://your-company.okta.com" testId="mcp-xaa-idp-issuer" />
                     <div className="grid grid-cols-2 gap-2">
                       <Field label="Client ID at the identity provider" value={remembered.idpClientId} onChange={idpClientId => setRemembered({ ...remembered, idpClientId })} testId="mcp-xaa-idp-client-id" />
-                      <Field label="Client secret (not remembered)" value={idpSecret} onChange={setIdpSecret} type="password" testId="mcp-xaa-idp-secret" />
+                      {idpAuth === 'secret' ? (
+                        <Field label="Client secret (not remembered)" value={idpSecret} onChange={setIdpSecret} type="password" testId="mcp-xaa-idp-secret" />
+                      ) : (
+                        <div className="flex flex-col justify-end text-xs text-(--hl)">Authenticates with the signed assertion below.</div>
+                      )}
                     </div>
+                    <div className="flex items-center gap-2 text-xs">
+                      <span className="text-(--hl)">Client authentication</span>
+                      <SegmentedToggle
+                        label="Client authentication at the identity provider"
+                        testIdPrefix="mcp-xaa-idp-auth"
+                        value={idpAuth}
+                        onChange={next => setRemembered({ ...remembered, idpAuth: next })}
+                        options={AUTH_OPTIONS}
+                      />
+                    </div>
+                    {(idpAuth === 'assertion' || asAuth === 'assertion') && (
+                      <SigningKeyPanel
+                        requestId={request._id}
+                        keyInfo={keyInfo}
+                        onKeyChange={setKeyInfo}
+                        audience={audience}
+                        onAudienceChange={next => setRemembered({ ...remembered, audience: next })}
+                        mockTargets={
+                          /^http:\/\/(127\.0\.0\.1|localhost)[:/]/.test(remembered.idpIssuer)
+                            ? { idpIssuer: remembered.idpIssuer.trim(), idpClientId: remembered.idpClientId.trim(), asIssuer: context?.authorizationServer.issuer, asClientId: remembered.asClientId.trim() }
+                            : undefined
+                        }
+                      />
+                    )}
                   </div>
                   {signInSteps.length > 0 && (
                     <ol className="flex flex-col" data-testid="mcp-xaa-signin-steps">
@@ -336,7 +392,22 @@ export const XaaWizardModal: FC<{
                 >
                   <div className="grid grid-cols-2 gap-2 px-3 py-2">
                     <Field label="Client ID at the MCP authorization server" value={remembered.asClientId} onChange={asClientId => setRemembered({ ...remembered, asClientId })} testId="mcp-xaa-as-client-id" />
-                    <Field label="Client secret there (not remembered)" value={asSecret} onChange={setAsSecret} type="password" testId="mcp-xaa-as-secret" />
+                    {asAuth === 'secret' ? (
+                      <Field label="Client secret there (not remembered)" value={asSecret} onChange={setAsSecret} type="password" testId="mcp-xaa-as-secret" />
+                    ) : (
+                      <div className="flex flex-col justify-end text-xs text-(--hl)">Signs with the key from Step 2.</div>
+                    )}
+                    <div className="col-span-2 flex items-center gap-2 text-xs">
+                      <span className="text-(--hl)">Client authentication</span>
+                      <SegmentedToggle
+                        label="Client authentication at the MCP authorization server"
+                        testIdPrefix="mcp-xaa-as-auth"
+                        value={asAuth}
+                        onChange={next => setRemembered({ ...remembered, asAuth: next })}
+                        options={AUTH_OPTIONS}
+                      />
+                      {asAuth === 'assertion' && keyInfo === null && <span className="text-amber-500">Generate or paste a key in Step 2 first.</span>}
+                    </div>
                   </div>
                   {tokenSteps.length > 0 && (
                     <ol className="flex flex-col" data-testid="mcp-xaa-token-steps">

@@ -13,6 +13,10 @@
  *
  * Registered client: client_id `insomnia-xaa`, client_secret `insomnia-xaa-secret` (client_secret_post or Basic).
  *
+ * Client authentication: client_secret (post or Basic) or a signed client assertion (private_key_jwt, RS256 or ES256). Register the
+ * client's public key with POST /admin/clients {"clientId":"insomnia-xaa","jwk":{...}} (or {"jwks":{"keys":[...]}}), like pasting
+ * a JWKS into an IdP console; GET /admin/clients shows how many keys each client has.
+ *
  * Break-it flags (POST /admin/flags with JSON, GET /admin/flags to read, POST /admin/reset to clear):
  *   denyAll        refuse every token exchange with access_denied (a policy that forbids the app)
  *   wrongTyp       ID-JAG header typ is "JWT" instead of "oauth-id-jag+jwt"
@@ -21,6 +25,8 @@
  *   wrongClient    ID-JAG client_id claim names a different client
  *   badSignature   ID-JAG is signed with a key that is not in the JWKS
  *   omitResource   ID-JAG has no resource claim
+ *   requireAssertion   refuse client_secret: only signed client assertions are accepted
+ *   assertionAudIssuer / assertionAudToken   accept an assertion aud of only the issuer / only the token endpoint URL (default: either)
  *
  * PROTOTYPE-MOCK: not a real IdP. No sessions, no MFA, one hard-coded client, two hard-coded users.
  */
@@ -28,6 +34,8 @@
 import crypto from "node:crypto";
 import http from "node:http";
 import { URL } from "node:url";
+
+import { acceptedAudiences, CLIENT_ASSERTION_TYPE, verifyClientAssertion } from "./mock-client-assertion.mjs";
 
 const port = Number(process.env.MOCK_IDP_PORT ?? "9100");
 const host = "127.0.0.1";
@@ -37,7 +45,9 @@ const TOKEN_EXCHANGE = "urn:ietf:params:oauth:grant-type:token-exchange";
 const ID_JAG_TYPE = "urn:ietf:params:oauth:token-type:id-jag";
 const ID_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:id_token";
 
-const CLIENTS = { "insomnia-xaa": { secret: "insomnia-xaa-secret" } };
+const CLIENTS = { "insomnia-xaa": { secret: "insomnia-xaa-secret", keys: [] } };
+/** jti values of client assertions already used. */
+const usedAssertionJtis = new Set();
 const USERS = {
   alex: { sub: "00u-alex", email: "alex@acme.test", name: "Alex Allowed", allowed: true },
   bo: { sub: "00u-bo", email: "bo@acme.test", name: "Bo Blocked", allowed: false },
@@ -51,6 +61,9 @@ const flags = {
   wrongClient: false,
   badSignature: false,
   omitResource: false,
+  requireAssertion: false,
+  assertionAudIssuer: false,
+  assertionAudToken: false,
 };
 
 const { privateKey, publicKey } = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
@@ -97,6 +110,28 @@ const writeError = (res, status, error, description) => writeJson(res, status, {
 
 /** client_secret_post or client_secret_basic. Returns the client id, or null after answering 401. */
 function authenticateClient(req, body, res) {
+  if (body.client_assertion) {
+    if (body.client_assertion_type !== CLIENT_ASSERTION_TYPE) {
+      writeError(res, 401, "invalid_client", `client_assertion_type must be ${CLIENT_ASSERTION_TYPE}`);
+      return null;
+    }
+    const checked = verifyClientAssertion({
+      assertion: body.client_assertion,
+      clientId: body.client_id,
+      keysFor: (clientId) => CLIENTS[clientId]?.keys,
+      audiences: acceptedAudiences(flags, issuer, `${issuer}/token`),
+      usedJtis: usedAssertionJtis,
+    });
+    if (checked.error) {
+      writeError(res, 401, "invalid_client", `Client assertion rejected: ${checked.error}.`);
+      return null;
+    }
+    return checked.clientId;
+  }
+  if (flags.requireAssertion) {
+    writeError(res, 401, "invalid_client", "This identity provider requires a signed client assertion (private_key_jwt); client_secret authentication is turned off.");
+    return null;
+  }
   let id = body.client_id;
   let secret = body.client_secret;
   const basic = /^Basic (.+)$/i.exec(req.headers.authorization ?? "");
@@ -231,12 +266,25 @@ async function handleAdmin(req, res, url) {
   if (url.pathname === "/admin/reset") {
     for (const key of Object.keys(flags)) flags[key] = false;
     codes.clear();
+    usedAssertionJtis.clear();
+    for (const client of Object.values(CLIENTS)) client.keys = [];
     return writeJson(res, 200, { ok: true, flags });
   }
   if (url.pathname === "/admin/flags" && req.method === "POST") {
     const body = JSON.parse((await readBody(req)) || "{}");
     for (const key of Object.keys(flags)) if (key in body) flags[key] = Boolean(body[key]);
     return writeJson(res, 200, { ok: true, flags });
+  }
+  if (url.pathname === "/admin/clients") {
+    if (req.method === "POST") {
+      const body = JSON.parse((await readBody(req)) || "{}");
+      const client = CLIENTS[body.clientId];
+      if (!client) return writeError(res, 404, "invalid_client", `Unknown client ${body.clientId}`);
+      const added = body.jwks?.keys ?? (body.jwk ? [body.jwk] : []);
+      client.keys.push(...added);
+      return writeJson(res, 200, { ok: true, clientId: body.clientId, keys: client.keys.length });
+    }
+    return writeJson(res, 200, Object.fromEntries(Object.entries(CLIENTS).map(([id, c]) => [id, { keys: c.keys.map((k) => k.kid ?? "(no kid)") }])));
   }
   return writeJson(res, 200, { flags });
 }

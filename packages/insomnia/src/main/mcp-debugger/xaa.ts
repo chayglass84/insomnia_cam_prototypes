@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 
 import { decodeJwt } from '~/common/mcp-debugger/jwt';
 
+import { type AssertionAudience, clientAuthParams } from './client-assertion';
 import { exchange, type OAuthContext, type OAuthExchange, type OAuthFinding, type OAuthStep, type OAuthTrace, STEP_TITLES } from './oauth-discovery';
 import { b64url, beginInFlight, endInFlight, listenForCallback, pkcePair } from './oauth-flow';
 import { readTokenResponse, storeToken, verifyToken } from './oauth-token';
@@ -12,7 +13,7 @@ import { readTokenResponse, storeToken, verifyToken } from './oauth-token';
 // MCP authorization server's own login or consent page.
 // Spec: MCP extension "Enterprise-Managed Authorization" (2026-07-28) and draft-ietf-oauth-identity-assertion-authz-grant
 // (-04 when this was written). Every HTTP exchange is its own Call in the Trace, like the rest of the OAuth debugger.
-// PROTOTYPE-MOCK: client secret only (no private_key_jwt client assertion yet), OIDC ID tokens only (no SAML), the ID
+// PROTOTYPE-MOCK: client secret or a signed client assertion (S9a, one key used at both servers), OIDC ID tokens only (no SAML), the ID
 // token's signature is not verified (it is decoded for display, the IdP is the party that checks it), the client secret
 // is kept in memory for the wizard session and shown as sent in the trace bodies, and nothing is persisted.
 
@@ -23,10 +24,16 @@ export const ID_TOKEN_TYPE = 'urn:ietf:params:oauth:token-type:id_token';
 export const ID_JAG_PROFILE = 'urn:ietf:params:oauth:grant-profile:id-jag';
 export const ID_JAG_JWT_TYPE = 'oauth-id-jag+jwt';
 
-export interface XaaIdp {
-  issuer: string;
+/** How the client authenticates at a token endpoint (S9a): a secret (the default) or a signed assertion from this request's key. */
+export interface XaaClientAuth {
   clientId: string;
-  clientSecret: string;
+  clientSecret?: string;
+  clientAuth?: 'secret' | 'assertion';
+  audience?: AssertionAudience;
+}
+
+export interface XaaIdp extends XaaClientAuth {
+  issuer: string;
 }
 
 interface IdpMetadata {
@@ -256,6 +263,12 @@ export const xaaSignIn = async ({ requestId, idp, openUrl, timeoutMs = 5 * 60 * 
     }
 
     // 1c. code -> ID token at the IdP
+    const auth = clientAuthParams({ requestId, auth: idp, tokenEndpoint: metadata.token_endpoint, issuer: metadata.issuer ?? idp.issuer });
+    if ('error' in auth) {
+      steps.push(step('idp-token', 'error', 'Cannot authenticate', [{ level: 'error', text: auth.error }]));
+      return steps;
+    }
+    const assertionJwts = auth.assertion ? [{ label: 'Client assertion', token: auth.assertion }] : [];
     const ex = await exchange(
       'POST',
       metadata.token_endpoint,
@@ -265,14 +278,13 @@ export const xaaSignIn = async ({ requestId, idp, openUrl, timeoutMs = 5 * 60 * 
         code: callback.code,
         redirect_uri: listener.redirectUri,
         code_verifier: verifier,
-        client_id: idp.clientId,
-        client_secret: idp.clientSecret,
+        ...auth.params,
       }),
       { trace, label: STEP_TITLES['idp-token'] },
     );
     const body = ex.response?.body as { id_token?: string } | undefined;
     if (ex.error || !ex.response || ex.response.status >= 300 || !body?.id_token) {
-      steps.push(step('idp-token', 'error', 'No ID token', [{ level: 'error', text: `The IdP did not return an ID token (${ex.response && !body?.id_token && ex.response.status < 300 ? 'no id_token in the response' : errorDetail(ex)}).` }], [ex]));
+      steps.push(step('idp-token', 'error', 'No ID token', [{ level: 'error', text: `The IdP did not return an ID token (${ex.response && !body?.id_token && ex.response.status < 300 ? 'no id_token in the response' : errorDetail(ex)}).` }], [ex], assertionJwts));
       return steps;
     }
     const decoded = decodeJwt(body.id_token);
@@ -297,7 +309,7 @@ export const xaaSignIn = async ({ requestId, idp, openUrl, timeoutMs = 5 * 60 * 
       tokenFindings.push({ level: 'info', text: `Signed in as ${String(claims.email ?? claims.sub)}. The signature is not checked here; the IdP checks it when you exchange this token.` });
     }
     const tokenStatus = statusOf(tokenFindings);
-    steps.push(step('idp-token', tokenStatus, tokenStatus === 'error' ? 'Rejected' : 'ID token received', tokenFindings, [ex], [{ label: 'ID token', token: body.id_token }]));
+    steps.push(step('idp-token', tokenStatus, tokenStatus === 'error' ? 'Rejected' : 'ID token received', tokenFindings, [ex], [{ label: 'ID token', token: body.id_token }, ...assertionJwts]));
     if (tokenStatus !== 'error') {
       sessions.set(requestId, { idp, metadata, idToken: body.id_token });
     }
@@ -319,6 +331,11 @@ export const xaaExchange = async ({ requestId, context, trace }: { requestId: st
   if (!audience) {
     return [step('id-jag', 'error', 'No audience', [{ level: 'error', text: "The MCP authorization server's metadata has no issuer, so there is no audience to ask the IdP for." }])];
   }
+  const auth = clientAuthParams({ requestId, auth: session.idp, tokenEndpoint: session.metadata.token_endpoint!, issuer: session.metadata.issuer ?? session.idp.issuer });
+  if ('error' in auth) {
+    return [step('id-jag', 'error', 'Cannot authenticate', [{ level: 'error', text: auth.error }])];
+  }
+  const assertionJwts = auth.assertion ? [{ label: 'Client assertion', token: auth.assertion }] : [];
   const ex = await exchange(
     'POST',
     session.metadata.token_endpoint!,
@@ -331,8 +348,7 @@ export const xaaExchange = async ({ requestId, context, trace }: { requestId: st
       audience,
       resource: context.resource,
       scope: context.scope,
-      client_id: session.idp.clientId,
-      client_secret: session.idp.clientSecret,
+      ...auth.params,
     }),
     { trace, label: STEP_TITLES['id-jag'] },
   );
@@ -351,6 +367,7 @@ export const xaaExchange = async ({ requestId, context, trace }: { requestId: st
             : []),
         ],
         [ex],
+        assertionJwts,
       ),
     ];
   }
@@ -366,7 +383,7 @@ export const xaaExchange = async ({ requestId, context, trace }: { requestId: st
   // Kept even when the checks above found problems: the authorization server is the authority, and a developer debugging
   // it wants to send a flawed ID-JAG on and see exactly how it reacts (step 3).
   session.idJag = body.access_token;
-  return [step('id-jag', status, status === 'error' ? 'ID-JAG has problems' : 'ID-JAG issued', findings, [ex], [{ label: 'ID-JAG', token: body.access_token }])];
+  return [step('id-jag', status, status === 'error' ? 'ID-JAG has problems' : 'ID-JAG issued', findings, [ex], [{ label: 'ID-JAG', token: body.access_token }, ...assertionJwts])];
 };
 
 // ---------- step 3: redeem the ID-JAG at the MCP authorization server ----------
@@ -380,7 +397,7 @@ export const xaaRedeem = async ({
   requestId: string;
   context: OAuthContext;
   /** The client's own registration at the MCP authorization server (a different registration from the IdP's). */
-  asClient: { clientId: string; clientSecret: string };
+  asClient: XaaClientAuth;
   trace?: OAuthTrace;
 }): Promise<OAuthStep[]> => {
   const session = sessions.get(requestId);
@@ -391,13 +408,18 @@ export const xaaRedeem = async ({
   if (!endpoint) {
     return [step('jwt-bearer', 'error', 'No token_endpoint', [{ level: 'error', text: "The MCP authorization server's metadata has no token_endpoint." }])];
   }
+  const auth = clientAuthParams({ requestId, auth: asClient, tokenEndpoint: endpoint, issuer: context.authorizationServer.issuer });
+  if ('error' in auth) {
+    return [step('jwt-bearer', 'error', 'Cannot authenticate', [{ level: 'error', text: auth.error }])];
+  }
+  const assertionJwts = auth.assertion ? [{ label: 'Client assertion', token: auth.assertion }] : [];
   const idJag = session.idJag;
   session.idJag = undefined; // single use: the next run has to ask the IdP again
   const ex = await exchange(
     'POST',
     endpoint,
     FORM_HEADERS,
-    form({ grant_type: JWT_BEARER_GRANT, assertion: idJag, client_id: asClient.clientId, client_secret: asClient.clientSecret }),
+    form({ grant_type: JWT_BEARER_GRANT, assertion: idJag, ...auth.params }),
     { trace, label: STEP_TITLES['jwt-bearer'] },
   );
   const { tokenSet, findings } = readTokenResponse(ex, {});
@@ -409,9 +431,9 @@ export const xaaRedeem = async ({
   );
   if (!tokenSet) {
     const detail = errorDetail(ex);
-    return [step('jwt-bearer', 'error', 'Refused', [{ level: 'error', text: `The MCP authorization server refused the ID-JAG (${detail}).` }, ...adjusted.filter(f => f.level === 'error' && !f.text.startsWith('The token endpoint refused'))], [ex])];
+    return [step('jwt-bearer', 'error', 'Refused', [{ level: 'error', text: `The MCP authorization server refused the ID-JAG (${detail}).` }, ...adjusted.filter(f => f.level === 'error' && !f.text.startsWith('The token endpoint refused'))], [ex], assertionJwts)];
   }
-  const tokenStep = step('jwt-bearer', statusOf(adjusted), 'Access token issued', adjusted, [ex]);
+  const tokenStep = step('jwt-bearer', statusOf(adjusted), 'Access token issued', adjusted, [ex], assertionJwts.length > 0 ? assertionJwts : undefined);
   tokenStep.tokens = tokenSet;
   storeToken(requestId, tokenSet, asClient.clientId, context);
   return [tokenStep, await verifyToken(tokenSet.accessToken, context.serverUrl, trace)];
