@@ -40,6 +40,7 @@ import { PreviewModeDropdown } from '../dropdowns/preview-mode-dropdown';
 import { ResponseHistoryDropdown } from '../dropdowns/response-history-dropdown';
 import { MockResponseExtractor } from '../editors/mock-response-extractor';
 import { ErrorBoundary } from '../error-boundary';
+import { Icon } from '../icon';
 import { KongLogo } from '../kong-logo';
 import { showError } from '../modals';
 import { RequestTransformerModal } from '../modals/request-transformer-modal';
@@ -661,10 +662,19 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
             data-testid="plugin-summaries"
             aria-label="Konnect plugins"
           >
-            <h3 className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold tracking-wide text-(--hl) uppercase">
-              <KongLogo width={14} height={13} />
-              Konnect plugins on this route
-            </h3>
+            <div className="mb-1.5 flex items-center justify-between">
+              <h3 className="flex items-center gap-1.5 text-xs font-semibold tracking-wide text-(--hl) uppercase">
+                <KongLogo width={14} height={13} />
+                Konnect plugins on this route
+              </h3>
+              <Button
+                aria-label="Hide Plugins"
+                className="flex size-6 items-center justify-center rounded-sm text-(--hl) hover:bg-(--hl-sm) hover:text-(--color-font)"
+                onPress={() => setPluginsPaneOpen(false)}
+              >
+                <Icon icon="xmark" />
+              </Button>
+            </div>
             <ul className="space-y-1.5">
               {pluginSummaries.map(g => (
                 <li
