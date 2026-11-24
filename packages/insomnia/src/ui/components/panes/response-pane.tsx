@@ -4,6 +4,7 @@ import { PREVIEW_MODE_SOURCE } from 'insomnia-data/common';
 import { type FC, useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Tab, TabList, TabPanel, Tabs, Toolbar } from 'react-aria-components';
 import { useFetcher, useParams } from 'react-router';
+import * as reactUse from 'react-use';
 
 import { extractChatCompletion, supportsStreaming } from '~/common/chat-completion';
 import { parseChatRequestBody, serializeChatRequestBody } from '~/common/chat-request';
@@ -46,7 +47,6 @@ import { ResponseTimer } from '../response-timer';
 import { SizeTag } from '../tags/size-tag';
 import { StatusTag } from '../tags/status-tag';
 import { TimeTag } from '../tags/time-tag';
-import { Tooltip } from '../tooltip';
 import { ResponseCookiesViewer } from '../viewers/response-cookies-viewer';
 import { ResponseHeadersViewer } from '../viewers/response-headers-viewer';
 import { ResponseTimelineViewer } from '../viewers/response-timeline-viewer';
@@ -66,6 +66,9 @@ interface Props {
 const renderHint = (hint: string | null) =>
   hint?.split(/\*\*(.+?)\*\*/).map((part, i) => (i % 2 === 1 ? <strong key={part}>{part}</strong> : part));
 
+const pluginActionButtonClassName =
+  'rounded-sm border border-solid border-(--hl-md) px-2 py-0.5 text-xs text-(--color-font) hover:bg-(--hl-sm)';
+
 export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
   const { activeRequest, activeRequestMeta, activeResponse, responses, requestVersions } =
     useRequestLoaderData() as RequestLoaderData;
@@ -76,6 +79,11 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
   const { settings } = useRootLoaderData()!;
   const [streamingTeaserDismissed, setStreamingTeaserDismissed] = useState(false);
   const [configModalPlugin, setConfigModalPlugin] = useState<KonnectPlugin | null>(null);
+  // Last show/hide choice, remembered across requests and restarts (null = never chosen, so default to shown).
+  const [pluginsPaneOpenPref, setPluginsPaneOpen] = reactUse.useLocalStorage<boolean | null>(
+    'konnect-plugins-pane-open',
+    null,
+  );
   useEffect(() => {
     setStreamingTeaserDismissed(false);
   }, [activeRequest._id]);
@@ -151,9 +159,7 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
                     ? 'Body already had "stream": true'
                     : 'Body was not valid JSON — could not add "stream": true'}
               </li>
-              <li>
-                {headersPatched ? 'Added an Accept: text/event-stream header' : 'Accept header was already set'}
-              </li>
+              <li>{headersPatched ? 'Added an Accept: text/event-stream header' : 'Accept header was already set'}</li>
               <li>Connecting…</li>
             </ul>
             <Button
@@ -289,6 +295,8 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
         configPlugin: p,
       })),
   ];
+
+  const showPluginsPane = pluginSummaries.length > 0 && (pluginsPaneOpenPref ?? true);
 
   // Prototype (3593AI): duplicate this request as an OPTIONS preflight, right after it in the sidebar. Not opened.
   const handleCreatePreflight = async () => {
@@ -434,6 +442,15 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
             <StatusTag statusCode={activeResponse.statusCode} statusMessage={activeResponse.statusMessage} />
             <TimeTag milliseconds={activeResponse.elapsedTime} steps={steps} />
             <SizeTag bytesRead={activeResponse.bytesRead} bytesContent={activeResponse.bytesContent} />
+            {pluginSummaries.length > 0 && (
+              <Button
+                className="ml-2 inline-flex items-center gap-1.5 rounded-sm border border-solid border-(--hl-md) px-2 py-0.5 align-middle text-(--color-font) hover:bg-(--hl-sm)"
+                onPress={() => setPluginsPaneOpen(!showPluginsPane)}
+              >
+                <KongLogo width={14} height={13} />
+                {showPluginsPane ? 'Hide Plugins' : 'Show Plugins'}
+              </Button>
+            )}
           </div>
           <ResponseHistoryDropdown
             activeResponse={activeResponse}
@@ -457,67 +474,6 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
           }
         }}
       >
-        {pluginSummaries.length > 0 && (
-          <div
-            className="flex shrink-0 items-center gap-3 border-b border-solid border-(--hl-md) bg-(--color-bg) px-3 py-2 text-sm"
-            data-testid="plugin-summaries"
-          >
-            <Tooltip message="Konnect Plugins" position="right" className="shrink-0">
-              <KongLogo width={24} height={22} />
-            </Tooltip>
-            {/* Fixed-width name column so the plugins scan as a list; details take the rest and wrap. */}
-            <ul className="min-w-0 flex-1 space-y-1">
-              {pluginSummaries.map(g => (
-                <li key={g.id} className="grid grid-cols-[10rem_1fr] gap-x-3 text-(--color-font)">
-                  <span className="font-semibold">{g.label}</span>
-                  <div className="min-w-0 break-words">
-                    {g.hint && g.hintFirst && <div className="text-(--color-warning)">{renderHint(g.hint)}</div>}
-                    {g.summary && (
-                      <div>
-                        {/* One line per "Lead: details"; the lead keeps the normal colour, the details are muted. */}
-                        {g.summary.split('\n').map((line, i, lines) => (
-                          <div key={line}>
-                            {line.includes(': ') && line.slice(0, line.indexOf(': ') + 2)}
-                            <span className="text-(--hl)">
-                              {line.includes(': ') ? line.slice(line.indexOf(': ') + 2) : line}
-                            </span>
-                            {i === lines.length - 1 && 'configPlugin' in g && (
-                              <>
-                                {' - '}
-                                <Button
-                                  className="text-(--color-font) underline"
-                                  onPress={() => setConfigModalPlugin(g.configPlugin)}
-                                >
-                                  See Details
-                                </Button>
-                              </>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {g.hint && !g.hintFirst && <div className="text-(--color-warning)">{renderHint(g.hint)}</div>}
-                    {g.id === 'cors' && activeRequest?.method !== 'OPTIONS' && (
-                      <Button
-                        className="text-(--hl) underline hover:text-(--color-font)"
-                        onPress={handleCreatePreflight}
-                      >
-                        Create OPTIONS request
-                      </Button>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
-            {configModalPlugin && (
-              <RequestTransformerModal
-                plugin={configModalPlugin}
-                request={toPreviewRequest(activeRequest)}
-                onHide={() => setConfigModalPlugin(null)}
-              />
-            )}
-          </div>
-        )}
         <TabList
           className="flex h-(--line-height-sm) w-full shrink-0 items-center overflow-x-auto border-b border-solid border-b-(--hl-md) bg-(--color-bg)"
           aria-label="Request pane tabs"
@@ -699,6 +655,69 @@ export const ResponsePane: FC<Props> = ({ activeRequestId }) => {
             <ResponseTimelineViewer key={activeResponse._id} timeline={timeline} />
           </ErrorBoundary>
         </TabPanel>
+        {showPluginsPane && (
+          <section
+            className="max-h-[45%] shrink-0 overflow-y-auto border-t border-solid border-(--hl-md) bg-(--color-bg) px-2 py-1.5 text-sm"
+            data-testid="plugin-summaries"
+            aria-label="Konnect plugins"
+          >
+            <h3 className="mb-1.5 flex items-center gap-1.5 text-xs font-semibold tracking-wide text-(--hl) uppercase">
+              <KongLogo width={14} height={13} />
+              Konnect plugins on this route
+            </h3>
+            <ul className="space-y-1.5">
+              {pluginSummaries.map(g => (
+                <li
+                  key={g.id}
+                  className="grid grid-cols-[10rem_1fr] gap-x-2 rounded-sm border border-solid border-(--hl-md) bg-(--hl-xs) px-1.5 py-1.5 text-(--color-font)"
+                >
+                  <span className="font-semibold">{g.label}</span>
+                  <div className="min-w-0 space-y-[3px] break-words">
+                    {g.hint && g.hintFirst && <div className="text-(--color-warning)">{renderHint(g.hint)}</div>}
+                    {g.summary && (
+                      <div className="space-y-px">
+                        {/* One line per "Lead: details"; the lead is bold, the whole line is muted. */}
+                        {g.summary.split('\n').map(line => (
+                          <div key={line} className="text-(--hl)">
+                            {line.includes(': ') && (
+                              <strong className="font-semibold">{line.slice(0, line.indexOf(': ') + 2)}</strong>
+                            )}
+                            {line.includes(': ') ? line.slice(line.indexOf(': ') + 2) : line}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {g.hint && !g.hintFirst && <div className="text-(--color-warning)">{renderHint(g.hint)}</div>}
+                    {('configPlugin' in g || (g.id === 'cors' && activeRequest?.method !== 'OPTIONS')) && (
+                      <div className="flex flex-wrap gap-1 pt-0.5">
+                        {'configPlugin' in g && (
+                          <Button
+                            className={pluginActionButtonClassName}
+                            onPress={() => setConfigModalPlugin(g.configPlugin)}
+                          >
+                            See details
+                          </Button>
+                        )}
+                        {g.id === 'cors' && activeRequest?.method !== 'OPTIONS' && (
+                          <Button className={pluginActionButtonClassName} onPress={handleCreatePreflight}>
+                            Create OPTIONS request
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+        {configModalPlugin && (
+          <RequestTransformerModal
+            plugin={configModalPlugin}
+            request={toPreviewRequest(activeRequest)}
+            onHide={() => setConfigModalPlugin(null)}
+          />
+        )}
       </Tabs>
       <ErrorBoundary errorClassName="font-error pad text-center">
         {(isExecuting || isRequestSending) && (
